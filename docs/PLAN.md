@@ -174,6 +174,25 @@ What the routing pilot found, and what it changes:
 - **Known defects to fix in Wave 2:** routes can pass within a few metres of jetties and run close to beaches (water must be shrunk by a safety clearance, plus a distance-to-hazard cost); entry-prohibited areas are not yet honoured; the mesh has a small number of topology flaws.
 - **NOAA stores depths truncated to 0.1 m**, so thresholds must be converted the same way or whole depth bands vanish.
 
+## 5b. Wave 2 progress
+
+| Piece | Status |
+|---|---|
+| `Persistence` | built; 44 tests pass on Linux and macOS |
+| CI | Linux Swift tests, Python tool tests, iOS build and macOS tests for every Swift package; all green |
+| Chart build job (`pipeline/charts`, [operator guide](chart-build.md)) | built; 59 tests pass; a small demonstration area was built for real and an incremental update proved |
+| Routing pack format and builder | in progress |
+| `RoutingKit` | not started (waits for the pack format) |
+
+Chart build job, what is proven and what is open:
+
+- **Proven:** resumable baseline builds, incremental updates that re-request only the affected areas (44 requests for one changed cell), packages that pass ChartKit's integrity checks and manifest validation, tiles 12% smaller than NOAA's on the same addresses, and optional retina output.
+- **Full-Gulf estimate (not run):** about 22,000 requests and 6–7 hours at one request per second for standard tiles, about 2.0 GB of packages. Retina is about 84,000 requests, 23 hours and 4.8 GB.
+- **Open, blocking the first full build:** the display settings need a tuning pass. Our renders are current but show fewer depth soundings at the highest zoom and a plainer mid-zoom view than NOAA's 2024 packages. Any change to these settings means a new baseline, so tuning comes first.
+- **Open:** the GitHub workflow and the Releases upload have never run. The workflow is manual-trigger only; the weekly schedule stays disabled until NOAA has been contacted (draft message in the operator guide).
+- **Open:** the manifest has no tile-size field yet, so the app cannot tell retina packages from standard ones.
+- **Found on first macOS run and fixed:** ChartKit now keeps a superseded package file on disk until the app releases it, because Apple's SQLite fails once its database file is deleted.
+
 ## 6. What the owner has to do
 
 Nothing is needed for Waves 1 and 2. Before Wave 3:

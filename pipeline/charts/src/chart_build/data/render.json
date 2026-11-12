@@ -1,0 +1,277 @@
+{
+ "_note": "Everything here changes the rendered pixels. It is hashed into config_hash; a package built with a different hash cannot be updated incrementally (a new baseline is needed). display_params are the service's own defaults as returned by .../MaritimeChartService/MapServer/parameters on 2026-11-12, pinned so a change of NOAA's defaults does not silently change our tiles.",
+ "service": "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export",
+ "layers": "show:0,1,2,3,4,5,6,7",
+ "format": "png32",
+ "transparent": true,
+ "base_dpi": 96,
+ "tile_px": 256,
+ "metatile": 8,
+ "gutter_px": 256,
+ "bbox_decimals": 6,
+ "display_params": {
+  "ECDISParameters": {
+   "version": "10.9.1",
+   "DynamicParameters": {
+    "Parameter": [
+     {
+      "name": "AreaSymbolizationType",
+      "value": 2
+     },
+     {
+      "name": "AttDesc",
+      "value": 2
+     },
+     {
+      "name": "ColorScheme",
+      "value": 0
+     },
+     {
+      "name": "CompassRose",
+      "value": 1
+     },
+     {
+      "name": "DateDependencyRange",
+      "value": ""
+     },
+     {
+      "name": "DateDependencySymbols",
+      "value": 1
+     },
+     {
+      "name": "DeepContour",
+      "value": 5.4
+     },
+     {
+      "name": "DisplayAIOFeatures",
+      "value": "1,2,3,4,5,6,7"
+     },
+     {
+      "name": "DisplayBathymetricIENC",
+      "value": 1
+     },
+     {
+      "name": "DisplayCategory",
+      "value": "1,2,4"
+     },
+     {
+      "name": "DisplayDepthUnits",
+      "value": 2
+     },
+     {
+      "name": "DisplayFrames",
+      "value": 2
+     },
+     {
+      "name": "DisplayFrameText",
+      "value": 0
+     },
+     {
+      "name": "DisplayFrameTextPlacement",
+      "value": 1
+     },
+     {
+      "name": "DisplayLightSectors",
+      "value": 2
+     },
+     {
+      "name": "DisplayNOBJNM",
+      "value": 1
+     },
+     {
+      "name": "DisplaySafeSoundings",
+      "value": 2
+     },
+     {
+      "name": "HonorScamin",
+      "value": 2
+     },
+     {
+      "name": "IntendedUsage",
+      "value": "0"
+     },
+     {
+      "name": "IsolatedDangers",
+      "value": 1
+     },
+     {
+      "name": "IsolatedDangersOff",
+      "value": 2
+     },
+     {
+      "name": "LabelContours",
+      "value": 1
+     },
+     {
+      "name": "LabelSafetyContours",
+      "value": 2
+     },
+     {
+      "name": "MovingCentroid",
+      "value": 1
+     },
+     {
+      "name": "OptionalDeepSoundings",
+      "value": 1
+     },
+     {
+      "name": "PointSymbolizationType",
+      "value": 2
+     },
+     {
+      "name": "RemoveDuplicateText",
+      "value": 2
+     },
+     {
+      "name": "SafetyContour",
+      "value": 3.6
+     },
+     {
+      "name": "SafetyDepth",
+      "value": 30.0
+     },
+     {
+      "name": "ShallowContour",
+      "value": 1.8
+     },
+     {
+      "name": "TextHalo",
+      "value": 2
+     },
+     {
+      "name": "TwoDepthShades",
+      "value": 1
+     }
+    ],
+    "ParameterGroup": [
+     {
+      "name": "AreaSymbolSize",
+      "Parameter": [
+       {
+        "name": "scaleFactor",
+        "value": 1.0
+       },
+       {
+        "name": "minZoom",
+        "value": 0.05
+       },
+       {
+        "name": "maxZoom",
+        "value": 1.2
+       }
+      ]
+     },
+     {
+      "name": "DatasetDisplayRange",
+      "Parameter": [
+       {
+        "name": "minZoom",
+        "value": 0.1
+       },
+       {
+        "name": "maxZoom",
+        "value": 1.2
+       }
+      ]
+     },
+     {
+      "name": "LineSymbolSize",
+      "Parameter": [
+       {
+        "name": "scaleFactor",
+        "value": 1.0
+       },
+       {
+        "name": "minZoom",
+        "value": 0.75
+       },
+       {
+        "name": "maxZoom",
+        "value": 1.0
+       }
+      ]
+     },
+     {
+      "name": "PointSymbolSize",
+      "Parameter": [
+       {
+        "name": "scaleFactor",
+        "value": 1.0
+       },
+       {
+        "name": "minZoom",
+        "value": 0.75
+       },
+       {
+        "name": "maxZoom",
+        "value": 1.0
+       }
+      ]
+     },
+     {
+      "name": "TextGroups",
+      "Parameter": [
+       {
+        "name": "11",
+        "value": 2
+       },
+       {
+        "name": "21",
+        "value": 2
+       },
+       {
+        "name": "23",
+        "value": 1
+       },
+       {
+        "name": "24",
+        "value": 2
+       },
+       {
+        "name": "25",
+        "value": 2
+       },
+       {
+        "name": "26",
+        "value": 2
+       },
+       {
+        "name": "27",
+        "value": 2
+       },
+       {
+        "name": "28",
+        "value": 2
+       },
+       {
+        "name": "29",
+        "value": 2
+       },
+       {
+        "name": "30",
+        "value": 2
+       }
+      ]
+     },
+     {
+      "name": "TextSize",
+      "Parameter": [
+       {
+        "name": "scaleFactor",
+        "value": 1.0
+       },
+       {
+        "name": "minZoom",
+        "value": 0.75
+       },
+       {
+        "name": "maxZoom",
+        "value": 1.0
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}
