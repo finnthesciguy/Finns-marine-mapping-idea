@@ -26,8 +26,6 @@ import pandas as pd
 import shapely
 from shapely.geometry import box
 
-from .config import PILOT_BBOX, WORK_CRS, work
-from .extract import LAYERS, load
 
 SLIVER_M = 5.0  # pieces thinner than 2*SLIVER_M/2 are slivers
 
@@ -114,64 +112,58 @@ def same_dim(geom, dim: int):
         shapely.MultiPoint(parts) if dim == 0 and len(parts) > 1 else parts[0])
 
 
-def run_merge() -> dict:
-    meta = json.loads(work("extract", "cells_meta.json").read_text())
-    mcovr = load("M_COVR").to_crs(WORK_CRS)
-    pilot = gpd.GeoSeries([box(*PILOT_BBOX)], crs="EPSG:4326").to_crs(WORK_CRS).iloc[0]
+def merge_region(region, per_layer: dict, metas: list) -> tuple[dict, dict]:
+    """Best-available merge of the extracted cells over region.bbox, in the
+    region's metric CRS. Returns ({layer: GeoDataFrame}, stats). Layer
+    "REGIONS" holds each cell's exclusive region."""
+    crs = region.crs
+    mc = per_layer.get("M_COVR", [])
+    mcovr = gpd.GeoDataFrame(pd.concat(mc, ignore_index=True), crs="EPSG:4326").to_crs(crs)
+    area_box = gpd.GeoSeries([box(*region.bbox)], crs="EPSG:4326").to_crs(crs).iloc[0]
 
-    order = sorted(meta, key=lambda m: priority_key(m["name"][2], m["cscale"], m["isdt"]))
+    order = sorted(metas, key=lambda m: priority_key(m["name"][2], m["cscale"], m["isdt"]))
     covers = []
     for m in order:
         cv = mcovr[(mcovr.cell == m["name"]) & (mcovr.CATCOV == 1)]
-        g = shapely.union_all(cv.geometry.values).intersection(pilot)
+        if cv.empty:
+            continue
+        g = shapely.union_all(shapely.make_valid(cv.geometry.values)).intersection(area_box)
         if not g.is_empty:
             covers.append((m["name"], g))
     excl, stats = exclusive_regions(covers)
-
-    # where does each band win?
     band_area = {}
     for name, g in excl.items():
         band_area[name[2]] = band_area.get(name[2], 0) + g.area
     union_all = shapely.union_all(list(excl.values()))
-    stats["pilot_area_km2"] = pilot.area / 1e6
-    stats["uncovered_km2"] = pilot.difference(union_all).area / 1e6
+    stats["area_km2"] = area_box.area / 1e6
+    stats["uncovered_km2"] = area_box.difference(union_all).area / 1e6
     stats["band_area_km2"] = {k: round(v / 1e6, 1) for k, v in sorted(band_area.items())}
-    stats["cells_with_area"] = sum(1 for g in excl.values() if g.area > 1)
-    stats["cells_fully_superseded"] = [n for n, g in excl.items() if g.area <= 1]
-
-    regions = gpd.GeoDataFrame(
-        {"cell": list(excl), "band": [int(n[2]) for n in excl]},
-        geometry=list(excl.values()), crs=WORK_CRS,
-    )
-    dest = work("merge", "merged.gpkg")
-    if dest.exists():
-        dest.unlink()
-    regions.to_file(dest, layer="REGIONS", engine="pyogrio")
-
+    stats["cells_with_area"] = [n for n, g in excl.items() if g.area > 1]
+    out = {"REGIONS": gpd.GeoDataFrame({"cell": list(excl), "band": [int(n[2]) for n in excl]},
+                                       geometry=list(excl.values()), crs=crs)}
     counts = {}
-    for layer in LAYERS:
+    for layer, frames in per_layer.items():
         if layer == "M_COVR":
             continue
-        src = load(layer)
+        src = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
+        src = src[src.cell.isin(list(excl))]
         if src.empty:
             continue
-        src = src.to_crs(WORK_CRS)
+        src = src.to_crs(crs)
         src = src.set_geometry(shapely.make_valid(src.geometry.values))
         parts = []
         for name, reg in excl.items():
             sub = src[src.cell == name]
             if len(sub):
                 parts.append(clip_to_region(sub, reg))
+        parts = [p for p in parts if len(p)]
         if not parts:
             continue
-        m = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=WORK_CRS)
+        m = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=crs)
         counts[layer] = {"extracted": int(len(src)), "kept": int(len(m))}
-        m.to_file(dest, layer=layer, engine="pyogrio")
-
+        out[layer] = m.reset_index(drop=True)
     stats["features"] = counts
-    stats["skin_of_earth"] = skin_check(excl, dest)
-    work("reports", "merge.json").write_text(json.dumps(stats, indent=1))
-    return stats
+    return out, stats
 
 
 def skin_check(excl: dict, merged_path) -> dict:

@@ -1,107 +1,38 @@
-"""PNG figures: routes over the merged depth areas."""
+"""PNG figures: reference routes (legs coloured by grade) over the merged
+depth areas, and mesh details around bridges and jetties."""
 from __future__ import annotations
 
+import glob
 import json
+from pathlib import Path
 
-import geopandas as gpd
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import shapely  # noqa: E402
+from matplotlib.collections import LineCollection, PolyCollection  # noqa: E402
 from matplotlib.colors import BoundaryNorm, ListedColormap  # noqa: E402
-from shapely.geometry import box  # noqa: E402
+from pyproj import Transformer  # noqa: E402
 
-from .config import GEO_CRS, WORK_CRS, work  # noqa: E402
+from . import packfmt as P  # noqa: E402
+from .config import GEO_CRS  # noqa: E402
 
-# depth bins (m, chart values) and colours: drying, 0-3 ft, 3-6, 6-12, 12-18, 18-30, >30
 BINS = [-50, 0, 0.9, 1.8, 3.6, 5.4, 9.1, 1e4]
 COLS = ["#c9d8b6", "#a7d3ee", "#c6e3f4", "#e4f2fb", "#f3f9fd", "#fbfdff", "#ffffff"]
 LABELS = ["drying", "0-3 ft", "3-6 ft", "6-12 ft", "12-18 ft", "18-30 ft", "30+ ft"]
 LAND = "#e8d9b0"
-ROUTE_COL = {"strict": "#d62728", "relaxed": "#6a00a8"}
-
-
-def _load():
-    m = work("merge", "merged.gpkg")
-    dep = gpd.read_file(m, layer="DEPARE", engine="pyogrio")
-    drg = gpd.read_file(m, layer="DRGARE", engine="pyogrio")
-    land = gpd.read_file(work("polygons", "safe_water.gpkg"), layer="obstacles", engine="pyogrio")
-    rts = gpd.read_file(work("routes", "routes.gpkg"), layer="routes", engine="pyogrio")
-    over = gpd.read_file(work("polygons", "overhead.gpkg"), layer="overhead", engine="pyogrio")
-    return dep, drg, land, rts, over
-
-
-def _base(ax, dep, drg, land, bb):
-    cmap = ListedColormap(COLS)
-    norm = BoundaryNorm(BINS, cmap.N)
-    clipbox = gpd.GeoSeries([bb], crs=GEO_CRS).to_crs(WORK_CRS).iloc[0]
-    d = dep[dep.intersects(clipbox)]
-    d = d[d.geom_type.str.contains("Polygon")]
-    d.plot(ax=ax, column="DRVAL1", cmap=cmap, norm=norm, linewidth=0, rasterized=True)
-    g = drg[drg.intersects(clipbox)]
-    g.plot(ax=ax, color="#9ecae1", edgecolor="#3182bd", linewidth=0.3, rasterized=True)
-    land.clip(clipbox).plot(ax=ax, color=LAND, linewidth=0, rasterized=True)
-    x0, y0, x1, y1 = clipbox.bounds
-    ax.set_xlim(x0, x1)
-    ax.set_ylim(y0, y1)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.set_aspect("equal")
-
-
-def _legend(ax, fig=None):
-    from matplotlib.patches import Patch
-
-    h = [Patch(color=c, label=l) for c, l in zip(COLS, LABELS)]
-    h += [Patch(color="#9ecae1", label="dredged area (DRGARE)"), Patch(color=LAND, label="land / structures")]
-    h += [plt.Line2D([], [], color=ROUTE_COL["strict"], lw=2, label="route, charted depth only"),
-          plt.Line2D([], [], color=ROUTE_COL["relaxed"], lw=2, ls="--",
-                     label="route, relaxed (USACE project depth,\nunknown overhead clearance allowed)"),
-          plt.Line2D([], [], marker="s", color="orange", lw=0, label="opening bridge"),
-          plt.Line2D([], [], marker="x", color="k", lw=0, label="ICW break at 6 ft")]
-    if fig is not None:
-        fig.legend(handles=h, loc="lower center", ncol=6, fontsize=8, framealpha=0.9)
-    else:
-        ax.legend(handles=h, loc="lower left", fontsize=7, framealpha=0.9)
-
-
-def _routes(ax, rts, key):
-    for mode, col in ROUTE_COL.items():
-        r = rts[(rts.route == key) & (rts["mode"] == mode)]
-        if len(r):
-            r.plot(ax=ax, color=col, linewidth=1.6 if mode == "strict" else 1.4,
-                   linestyle="-" if mode == "strict" else "--", zorder=5)
-
-
-def _breaks(ax, t="6"):
-    rep = json.loads(work("reports", "polygons.json").read_text())
-    br = rep["thresholds"][t]["icw_breaks"]
-    if br:
-        pts = gpd.GeoSeries(gpd.points_from_xy([b["lon"] for b in br], [b["lat"] for b in br]),
-                            crs=GEO_CRS).to_crs(WORK_CRS)
-        ax.scatter(pts.x, pts.y, marker="x", color="k", s=40, zorder=6)
-
-
-def _openings(ax, over, bb):
-    clipbox = gpd.GeoSeries([bb], crs=GEO_CRS).to_crs(WORK_CRS).iloc[0]
-    o = over[(over.cls == "BRIDGE") & over.opens & over.intersects(clipbox)]
-    c = o.geometry.representative_point()
-    ax.scatter(c.x, c.y, marker="s", color="orange", s=12, zorder=6)
+GRADE = {"green": "#1a9641", "yellow": "#e6a800"}
 
 
 def save_small(fig, path, max_kb=380):
-    """Save as a palette PNG under max_kb (shrinks DPI until it fits)."""
     from io import BytesIO
 
     from PIL import Image
 
-    for a in fig.axes:  # geopandas re-adds CRS axis labels on every plot call
-        a.set_xlabel("")
-        a.set_ylabel("")
-    for dpi in (130, 110, 95, 80, 70):
+    for dpi in (130, 110, 95, 80, 70, 60):
         buf = BytesIO()
         fig.savefig(buf, dpi=dpi, bbox_inches="tight", format="png")
         im = Image.open(buf).convert("RGB").quantize(colors=96, method=Image.Quantize.MEDIANCUT)
@@ -109,78 +40,154 @@ def save_small(fig, path, max_kb=380):
         im.save(out, format="PNG", optimize=True)
         if out.tell() <= max_kb * 1024:
             break
-    path.write_bytes(out.getvalue())
+    Path(path).write_bytes(out.getvalue())
     return out.tell()
 
 
-def run_render() -> dict:
-    dep, drg, land, rts, over = _load()
-    out = {}
-    # figure 1: whole pilot area with the three routes
-    bb = box(-82.95, 26.55, -81.95, 27.85)
+class Base:
+    def __init__(self, region):
+        merged, _ = pd.read_pickle(sorted(glob.glob(str(region.dir("merged.*.pkl"))))[-1])
+        self.tr = Transformer.from_crs(region.crs, GEO_CRS, always_xy=True)
+        self.dep = merged["DEPARE"]
+        self.dep = self.dep[self.dep.geom_type.isin(["Polygon", "MultiPolygon"])]
+        self.drg = merged["DRGARE"]
+        self.land = shapely.from_wkb(region.dir("obstacles.wkb").read_bytes())
+        self.fend = shapely.from_wkb(region.dir("fenders.wkb").read_bytes())
+        self.inv = Transformer.from_crs(GEO_CRS, region.crs, always_xy=True)
+
+    def ll(self, g):
+        return shapely.transform(g, lambda xy: np.column_stack(self.tr.transform(xy[:, 0], xy[:, 1])))
+
+    def draw(self, ax, bb):
+        clip = shapely.box(*bb)
+        cmap = ListedColormap(COLS)
+        norm = BoundaryNorm(BINS, cmap.N)
+        x0, y0 = self.inv.transform(bb[0], bb[1])
+        x1, y1 = self.inv.transform(bb[2], bb[3])
+        mb = shapely.box(x0 - 200, y0 - 200, x1 + 200, y1 + 200)
+        d = self.dep[self.dep.intersects(mb)]
+        polys, vals = [], []
+        for g, v in zip(self.ll(d.geometry.values), d.DRVAL1.astype(float).values):
+            for p in shapely.get_parts(g.intersection(clip)):
+                if p.geom_type == "Polygon":
+                    polys.append(np.asarray(p.exterior.coords))
+                    vals.append(v)
+        pc = PolyCollection(polys, array=np.array(vals), cmap=cmap, norm=norm, linewidths=0, rasterized=True)
+        ax.add_collection(pc)
+        g = self.drg[self.drg.intersects(mb)]
+        dp = [np.asarray(p.exterior.coords) for gg in self.ll(g.geometry.values)
+              for p in shapely.get_parts(gg.intersection(clip)) if p.geom_type == "Polygon"]
+        ax.add_collection(PolyCollection(dp, facecolors="#9ecae1", edgecolors="#3182bd", linewidths=0.3, rasterized=True))
+        land = self.ll(self.land.intersection(mb))
+        lp = [np.asarray(p.exterior.coords) for p in shapely.get_parts(land) if p.geom_type == "Polygon"]
+        ax.add_collection(PolyCollection(lp, facecolors=LAND, edgecolors="#9c8a5a", linewidths=0.2, rasterized=True))
+        ln = [np.asarray(p.coords) for p in shapely.get_parts(land) if p.geom_type == "LineString"]
+        ln += [np.asarray(p.coords) for p in shapely.get_parts(self.ll(self.fend.intersection(mb)))
+               if p.geom_type == "LineString"]
+        ax.add_collection(LineCollection(ln, colors="#7a5c00", linewidths=0.8))
+        ax.set_xlim(bb[0], bb[2])
+        ax.set_ylim(bb[1], bb[3])
+        ax.set_aspect(1 / np.cos(np.radians((bb[1] + bb[3]) / 2)))
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+
+def draw_route(ax, res, lw=1.6, label=None):
+    segs = [[l["from"], l["to"]] for l in res["legs"]]
+    cols = [GRADE[l["grade"]] for l in res["legs"]]
+    ax.add_collection(LineCollection(segs, colors=cols, linewidths=lw, zorder=5))
+    for o in res["summary"]["openings"]:
+        ax.scatter([o["lon"]], [o["lat"]], marker="s", color="#d95f02", s=14, zorder=6)
+    if label:
+        s = res["waypoints"][0]
+        ax.annotate(label, s, fontsize=6, zorder=7)
+
+
+def draw_failure(ax, row):
+    for b in row.get("blocked", [])[:3]:
+        ax.scatter([b["lon"]], [b["lat"]], marker="x", color="#d7191c", s=40, zorder=7)
+
+
+def legend(fig):
+    from matplotlib.patches import Patch
+
+    h = [Patch(color=c, label=l) for c, l in zip(COLS, LABELS)]
+    h += [Patch(color="#9ecae1", label="dredged area"), Patch(color=LAND, label="land/structures/blocking hazards")]
+    h += [plt.Line2D([], [], color=GRADE["green"], lw=2, label="green leg"),
+          plt.Line2D([], [], color=GRADE["yellow"], lw=2, label="yellow leg"),
+          plt.Line2D([], [], marker="s", color="#d95f02", lw=0, label="bridge opening needed"),
+          plt.Line2D([], [], marker="x", color="#d7191c", lw=0, label="no route: first blocked place")]
+    fig.legend(handles=h, loc="lower center", ncol=6, fontsize=7, framealpha=0.9)
+
+
+def mesh_panel(ax, pack, bb, req_dm, res_list):
+    b = [int(v * 1e7) for v in bb]
+    c = pack.vertices[pack.tris].astype(np.int64).mean(1)
+    sel = (c[:, 0] > b[0]) & (c[:, 0] < b[2]) & (c[:, 1] > b[1]) & (c[:, 1] < b[3])
+    polys = pack.vertices[pack.tris[sel]] / 1e7
+    a = pack.attrs
+    blocked = (a["depth_dm"][sel] < req_dm) | (a["clearance_dm"][sel] < 61) & ((a["flags"][sel] & P.F_OPENING) == 0)
+    col = np.where(blocked, "#d62728", "#2ca02c")
+    ax.add_collection(PolyCollection(polys, facecolors="none", edgecolors=col, linewidths=0.25, alpha=0.7, zorder=4))
+    for r in res_list:
+        draw_route(ax, r, lw=2.0)
+
+
+def run_render(region, out_dir=None):
+    from .cli import _pack_path
+
+    out_dir = Path(out_dir) if out_dir else region.dir("render")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = json.loads(region.dir("routes.json").read_text())
+    byid = {r["id"]: r for r in rows}
+    base = Base(region)
+    pack = P.read_pack(_pack_path(region))
+    sizes = {}
+    # 1: overview of all successful reference routes
     fig, ax = plt.subplots(figsize=(8, 10))
-    _base(ax, dep, drg, land, bb)
-    for k in rts.route.unique():
-        _routes(ax, rts, k)
-    _breaks(ax)
-    _openings(ax, over, bb)
-    _legend(ax)
-    ax.set_title("Pilot area: merged best-available depth areas, three test routes\n"
-                 "(boat: 4.5 ft draft + 1.5 ft margin, 20 ft air draft)", fontsize=9)
-    out["overview"] = save_small(fig, work("render", "routing-overview.png"))
+    bb = (-82.95, 26.40, -81.90, 27.98)
+    base.draw(ax, bb)
+    for r in rows:
+        if r["ok"]:
+            draw_route(ax, r["result"], lw=1.0)
+        else:
+            draw_failure(ax, r)
+    ax.set_title("Wave 2 reference routes on the pilot pack (legs green / yellow by grade)", fontsize=9)
+    legend(fig)
+    sizes["routing-overview.png"] = save_small(fig, out_dir / "routing-overview.png")
     plt.close(fig)
-    # figure 2: the three routes, one panel each
-    panels = {
-        "a_stpete_to_sarasota": ("(a) St. Petersburg - Sarasota", box(-82.78, 27.30, -82.50, 27.80)),
-        "b_venice_inlet_to_punta_gorda": ("(b) Venice Inlet - Punta Gorda", box(-82.50, 26.70, -82.02, 27.14)),
-        "c_anna_maria_to_boca_grande_inside": ("(c) Bradenton Beach - Boca Grande, inside",
-                                               box(-82.72, 26.72, -82.22, 27.49)),
-    }
+    # 2: panels of the three spike routes (strict and relaxed)
+    panels = [("a_strict", "a_relaxed", "(a) St. Petersburg - Marina Jack", (-82.78, 27.30, -82.50, 27.80)),
+              ("b_strict", "b_relaxed_inside", "(b) Venice Inlet - Punta Gorda", (-82.50, 26.68, -82.02, 27.14)),
+              ("c_relaxed", "c_strict", "(c) Bradenton Beach - Boca Grande inside", (-82.72, 26.72, -82.22, 27.49))]
     fig, axs = plt.subplots(1, 3, figsize=(15, 8))
-    for ax, (k, (title, b)) in zip(axs, panels.items()):
-        _base(ax, dep, drg, land, b)
-        _routes(ax, rts, k)
-        _breaks(ax)
-        _openings(ax, over, b)
-        ax.set_title(title, fontsize=10)
-    _legend(axs[0], fig)
-    fig.subplots_adjust(bottom=0.14)
-    out["routes"] = save_small(fig, work("render", "routing-routes.png"))
+    for ax, (k1, k2, title, b) in zip(axs, panels):
+        base.draw(ax, b)
+        for k, lw in ((k1, 1.8), (k2, 1.0)):
+            r = byid.get(k)
+            if r and r["ok"]:
+                draw_route(ax, r["result"], lw=lw)
+            elif r:
+                draw_failure(ax, r)
+        ax.set_title(f"{title}\nthick: {k1}, thin: {k2}", fontsize=9)
+    legend(fig)
+    fig.subplots_adjust(bottom=0.12)
+    sizes["routing-routes.png"] = save_small(fig, out_dir / "routing-routes.png")
     plt.close(fig)
-    # figure 3: detail of a chart gap on the ICW with the mesh
-    out["detail"] = render_detail(dep, drg, land, rts, over)
-    print(out)
-    return out
-
-
-def render_detail(dep, drg, land, rts, over, bb=box(-82.556, 27.250, -82.526, 27.285)):
-    import shapely
-
-    from .route import Mesh
-
-    mesh = Mesh.load()
-    clipbox = gpd.GeoSeries([bb], crs=GEO_CRS).to_crs(WORK_CRS).iloc[0]
-    cen = mesh.centroids
-    x0, y0, x1, y1 = clipbox.bounds
-    sel = (cen[:, 0] > x0) & (cen[:, 0] < x1) & (cen[:, 1] > y0) & (cen[:, 1] < y1)
-    fig, ax = plt.subplots(figsize=(7, 8))
-    _base(ax, dep, drg, land, bb)
-    from matplotlib.collections import PolyCollection
-
-    polys = mesh.coords[mesh.tris[sel]]
-    need = 1.8
-    col = np.where(np.nan_to_num(mesh.depth_m[sel], nan=-1) >= need, "#2ca02c", "#d62728")
-    ax.add_collection(PolyCollection(polys, facecolors="none", edgecolors=col, linewidths=0.25, alpha=0.6))
-    from .channels import ncf_query
-    ncf = ncf_query(2).to_crs(WORK_CRS)
-    ncf[ncf.intersects(clipbox)].boundary.plot(ax=ax, color="#ff7f0e", linewidth=0.8, linestyle=":")
-    for k in rts.route.unique():
-        _routes(ax, rts, k)
-    _breaks(ax)
-    _openings(ax, over, bb)
-    ax.set_title("Detail: ICW in Roberts Bay, Sarasota. Mesh triangles green = charted >= 6 ft,\n"
-                 "red = shallower; orange dotted = USACE NCF channel reach (9 ft maintained).\n"
-                 "x = ICW breaks: the chart has no dredged area here (0-3 ft band).", fontsize=9)
-    n = save_small(fig, work("render", "routing-detail.png"))
+    # 3: mesh details: Cortez bridge span, Venice south jetty, Roberts Bay gap, Blackburn Point
+    det = [("Cortez Bridge bascule span (a, c)", (-82.6975, 27.4655, -82.6875, 27.4725), ["a_strict", "c_relaxed"]),
+           ("Venice Inlet jetties (b)", (-82.4700, 27.1070, -82.4560, 27.1170), ["b_strict", "b_relaxed"]),
+           ("Roberts Bay ICW gap (c relaxed)", (-82.556, 27.250, -82.526, 27.285), ["c_relaxed"]),
+           ("Venice: south ICW gap (b, c relaxed)", (-82.442, 27.035, -82.422, 27.052), ["b_relaxed_inside", "c_relaxed"])]
+    fig, axs = plt.subplots(2, 2, figsize=(11, 11))
+    for ax, (title, b, ids) in zip(axs.ravel(), det):
+        base.draw(ax, b)
+        res = [byid[i]["result"] for i in ids if i in byid and byid[i]["ok"]]
+        mesh_panel(ax, pack, b, 18, res)
+        ax.set_title(title + "\nmesh: green = passable at 6 ft / 20 ft air, red = not", fontsize=8)
+    legend(fig)
+    fig.subplots_adjust(bottom=0.08)
+    sizes["routing-detail.png"] = save_small(fig, out_dir / "routing-detail.png")
     plt.close(fig)
-    return n
+    print(sizes)
+    return sizes

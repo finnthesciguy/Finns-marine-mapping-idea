@@ -1,0 +1,1101 @@
+{
+ "schema": "routing-vectors/1",
+ "pack": "synthetic.pack",
+ "pack_sha256": "ee5034db6a880ba15ad9e8b607d9a6967f410f7f5a131c404c6a1b3190f50fe0",
+ "tolerances": {
+  "waypoints_units": 0,
+  "distance_m": 1e-06,
+  "snap_m": 0.001,
+  "note": "integer fields and sequences must match exactly; floats within tolerance"
+ },
+ "queries": [
+  {
+   "id": "s1_shoal_blocks",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "channel shoaled to 9 dm at col 3; detour north blocked by the unknown-clearance cable: NO_ROUTE, hint use_maintained",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "NO_ROUTE",
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.0015,
+     "x": -819925000,
+     "y": 270015000,
+     "triangle": 58,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "reason": "DEPTH",
+    "blocked": [
+     {
+      "corridor_index": 5,
+      "triangle": 24,
+      "reason": "DEPTH",
+      "lon": -81.9966667,
+      "lat": 27.0016666,
+      "depth_dm": 9,
+      "maint_dm": 27,
+      "clearance_dm": 65535,
+      "overhead": "",
+      "area": ""
+     }
+    ],
+    "hints": {
+     "use_maintained": true,
+     "accept_unknown_clearance": true
+    },
+    "data_date": 20261101
+   }
+  },
+  {
+   "id": "s2_maintained",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20,
+    "use_maintained": true
+   },
+   "note": "straight along the channel: maintained depth + bridge opening (closed 18 dm < 61 dm)",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.0015,
+     "x": -819925000,
+     "y": 270015000,
+     "triangle": 58,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     4,
+     5,
+     6,
+     18,
+     25,
+     24,
+     28,
+     33,
+     32,
+     41,
+     38,
+     39,
+     40,
+     58
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270015000
+     ],
+     [
+      -819925000,
+      270015000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0015
+     ],
+     [
+      -81.9925,
+      27.0015
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0015
+      ],
+      "to": [
+       -81.9925,
+       27.0015
+      ],
+      "triangles": [
+       0,
+       13
+      ],
+      "length_m": 693.519542161611,
+      "grade": "yellow",
+      "reasons": [
+       "MAINTAINED_DEPTH",
+       "BRIDGE_OPENING"
+      ],
+      "min_depth_dm": 9,
+      "min_spare_dm": 21,
+      "crossings": [
+       {
+        "record": 0,
+        "clearance_dm": 18,
+        "opening": true,
+        "needs_opening": true
+       }
+      ]
+     }
+    ],
+    "summary": {
+     "distance_m": 693.519542161611,
+     "distance_nm": 0.37447059511966035,
+     "legs": 1,
+     "green_legs": 0,
+     "yellow_legs": 1,
+     "shallowest": {
+      "depth_dm": 9,
+      "triangle": 24,
+      "lon": -81.9966667,
+      "lat": 27.0016666,
+      "maintained": true
+     },
+     "lowest_clearance": {
+      "clearance_dm": 18,
+      "overhead": 0,
+      "name": "Test Opening Bridge",
+      "opening": true
+     },
+     "openings": [
+      {
+       "corridor_index": 9,
+       "overhead": 0,
+       "clearance_dm": 18,
+       "name": "Test Opening Bridge",
+       "lon": -81.9946667,
+       "lat": 27.0016666
+      }
+     ],
+     "unknown_clearances": [],
+     "maintained_triangles": 2,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 693.519542161611
+   }
+  },
+  {
+   "id": "s3_unknown_detour",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 8,
+    "accept_unknown_clearance": true
+   },
+   "note": "under the cable, around the shoal, under the 30 dm fixed bridge (air 24 dm), through the restricted square",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 15,
+    "air_dm": 24,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.0015,
+     "x": -819925000,
+     "y": 270015000,
+     "triangle": 58,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     4,
+     5,
+     6,
+     18,
+     17,
+     21,
+     26,
+     50,
+     44,
+     43,
+     42,
+     45,
+     46,
+     39,
+     40,
+     58
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270015000
+     ],
+     [
+      -819970000,
+      270020000
+     ],
+     [
+      -819940000,
+      270020000
+     ],
+     [
+      -819925000,
+      270015000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0015
+     ],
+     [
+      -81.997,
+      27.002
+     ],
+     [
+      -81.994,
+      27.002
+     ],
+     [
+      -81.9925,
+      27.0015
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0015
+      ],
+      "to": [
+       -81.997,
+       27.002
+      ],
+      "triangles": [
+       0,
+       5
+      ],
+      "length_m": 253.84827304608797,
+      "grade": "yellow",
+      "reasons": [
+       "UNKNOWN_CLEARANCE"
+      ],
+      "min_depth_dm": 21,
+      "min_spare_dm": 6,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.997,
+       27.002
+      ],
+      "to": [
+       -81.994,
+       27.002
+      ],
+      "triangles": [
+       6,
+       12
+      ],
+      "length_m": 297.2213392447422,
+      "grade": "yellow",
+      "reasons": [
+       "RESTRICTED_AREA",
+       "HAZARD_PROXIMITY"
+      ],
+      "min_depth_dm": 15,
+      "min_spare_dm": 0,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.994,
+       27.002
+      ],
+      "to": [
+       -81.9925,
+       27.0015
+      ],
+      "triangles": [
+       13,
+       15
+      ],
+      "length_m": 158.67046291285382,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 36,
+      "min_spare_dm": 21,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 709.740075203684,
+     "distance_nm": 0.38322898229140606,
+     "legs": 3,
+     "green_legs": 1,
+     "yellow_legs": 2,
+     "shallowest": {
+      "depth_dm": 15,
+      "triangle": 50,
+      "lon": -81.9956667,
+      "lat": 27.0026666,
+      "maintained": false
+     },
+     "lowest_clearance": {
+      "clearance_dm": 30,
+      "overhead": 1,
+      "name": "Test Fixed Bridge",
+      "opening": false
+     },
+     "openings": [],
+     "unknown_clearances": [
+      {
+       "corridor_index": 4,
+       "overhead": 2,
+       "clearance_dm": 65534,
+       "name": "Test Cable",
+       "lon": -81.9973334,
+       "lat": 27.0023333
+      }
+     ],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 709.740075203684
+   }
+  },
+  {
+   "id": "s4_too_deep",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 12,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "13 ft needs 39 dm: only row 3 (60 dm) is deep enough",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "NO_ROUTE",
+    "req_dm": 39,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.003,
+     "x": -819995000,
+     "y": 270030000,
+     "triangle": 10,
+     "snap_m": 166.793,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.003,
+     "x": -819925000,
+     "y": 270030000,
+     "triangle": 55,
+     "snap_m": 166.793,
+     "in_mesh": true
+    },
+    "reason": "UNKNOWN_CLEARANCE",
+    "blocked": [
+     {
+      "corridor_index": 3,
+      "triangle": 20,
+      "reason": "UNKNOWN_CLEARANCE",
+      "lon": -81.9976667,
+      "lat": 27.0036666,
+      "depth_dm": 60,
+      "maint_dm": -32768,
+      "clearance_dm": 65534,
+      "overhead": "Test Cable",
+      "area": ""
+     }
+    ],
+    "hints": {
+     "use_maintained": false,
+     "accept_unknown_clearance": false
+    },
+    "data_date": 20261101
+   }
+  },
+  {
+   "id": "s5_low_air_north",
+   "start": [
+    -81.9995,
+    27.0035
+   ],
+   "goal": [
+    -81.9935,
+    27.0035
+   ],
+   "profile": {
+    "draft_ft": 5,
+    "margin_ft": 1,
+    "air_draft_ft": 9,
+    "accept_unknown_clearance": true
+   },
+   "note": "row 3 west to east: cable (yellow), fixed bridge 30 dm >= 27 dm, then prohibited col 6 forces a detour south",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 18,
+    "air_dm": 27,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0035,
+     "x": -819995000,
+     "y": 270035000,
+     "triangle": 10,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.994,
+     "lat": 27.0035,
+     "x": -819940000,
+     "y": 270035000,
+     "triangle": 47,
+     "snap_m": 49.536,
+     "in_mesh": true
+    },
+    "corridor": [
+     10,
+     14,
+     13,
+     20,
+     19,
+     23,
+     22,
+     53,
+     51,
+     52,
+     47
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270035000
+     ],
+     [
+      -819940000,
+      270035000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0035
+     ],
+     [
+      -81.994,
+      27.0035
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0035
+      ],
+      "to": [
+       -81.994,
+       27.0035
+      ],
+      "triangles": [
+       0,
+       10
+      ],
+      "length_m": 544.8985191147892,
+      "grade": "yellow",
+      "reasons": [
+       "UNKNOWN_CLEARANCE"
+      ],
+      "min_depth_dm": 60,
+      "min_spare_dm": 42,
+      "crossings": [
+       {
+        "record": 1,
+        "clearance_dm": 30,
+        "opening": false
+       },
+       {
+        "record": 2,
+        "clearance_dm": 65534,
+        "opening": false
+       }
+      ]
+     }
+    ],
+    "summary": {
+     "distance_m": 544.8985191147892,
+     "distance_nm": 0.2942216625889791,
+     "legs": 1,
+     "green_legs": 0,
+     "yellow_legs": 1,
+     "shallowest": {
+      "depth_dm": 60,
+      "triangle": 10,
+      "lon": -81.9993334,
+      "lat": 27.0033333,
+      "maintained": false
+     },
+     "lowest_clearance": {
+      "clearance_dm": 30,
+      "overhead": 1,
+      "name": "Test Fixed Bridge",
+      "opening": false
+     },
+     "openings": [],
+     "unknown_clearances": [
+      {
+       "corridor_index": 3,
+       "overhead": 2,
+       "clearance_dm": 65534,
+       "name": "Test Cable",
+       "lon": -81.9976667,
+       "lat": 27.0036666
+      }
+     ],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 544.8985191147892
+   }
+  },
+  {
+   "id": "s6_outside_pack",
+   "start": [
+    -82.01,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "start west of the pack bbox",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "START_OUTSIDE_PACK",
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "error": "OUTSIDE_PACK"
+    },
+    "data_date": 20261101
+   }
+  },
+  {
+   "id": "s7_island_snap",
+   "start": [
+    -81.9975,
+    27.0005
+   ],
+   "goal": [
+    -81.9985,
+    27.0025
+   ],
+   "profile": {
+    "draft_ft": 1,
+    "margin_ft": 0.5,
+    "air_draft_ft": 5
+   },
+   "max_snap_m": 200,
+   "note": "start inside the missing square (island): snapped to the nearest passable triangle",
+   "expected": {
+    "ok": true,
+    "req_dm": 6,
+    "air_dm": 15,
+    "start": {
+     "lon": -81.998,
+     "lat": 27.0005,
+     "x": -819980000,
+     "y": 270005000,
+     "triangle": 3,
+     "snap_m": 49.538,
+     "in_mesh": false
+    },
+    "goal": {
+     "lon": -81.9985,
+     "lat": 27.0025,
+     "x": -819985000,
+     "y": 270025000,
+     "triangle": 12,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     3,
+     2,
+     6,
+     5,
+     15,
+     12
+    ],
+    "waypoints_units": [
+     [
+      -819980000,
+      270005000
+     ],
+     [
+      -819985000,
+      270025000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.998,
+      27.0005
+     ],
+     [
+      -81.9985,
+      27.0025
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.998,
+       27.0005
+      ],
+      "to": [
+       -81.9985,
+       27.0025
+      ],
+      "triangles": [
+       0,
+       5
+      ],
+      "length_m": 227.84053360885392,
+      "grade": "yellow",
+      "reasons": [
+       "CAUTION_AREA",
+       "LOW_DATA_QUALITY",
+       "THIN_MARGIN"
+      ],
+      "min_depth_dm": 6,
+      "min_spare_dm": 0,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 227.84053360885392,
+     "distance_nm": 0.1230240462250831,
+     "legs": 1,
+     "green_legs": 0,
+     "yellow_legs": 1,
+     "shallowest": {
+      "depth_dm": 6,
+      "triangle": 3,
+      "lon": -81.9983334,
+      "lat": 27.0003333,
+      "maintained": false
+     },
+     "lowest_clearance": null,
+     "openings": [],
+     "unknown_clearances": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 227.84053360885392
+   }
+  },
+  {
+   "id": "s8_shallow_quality",
+   "start": [
+    -81.9995,
+    27.0005
+   ],
+   "goal": [
+    -81.9935,
+    27.0005
+   ],
+   "profile": {
+    "draft_ft": 1,
+    "margin_ft": 0.5,
+    "air_draft_ft": 5
+   },
+   "note": "row 0 (6 dm, CATZOC D, caution square), detours round the island",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 6,
+    "air_dm": 15,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0005,
+     "x": -819995000,
+     "y": 270005000,
+     "triangle": 0,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9935,
+     "lat": 27.0005,
+     "x": -819935000,
+     "y": 270005000,
+     "triangle": 36,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     0,
+     1,
+     4,
+     5,
+     6,
+     18,
+     25,
+     24,
+     28,
+     33,
+     32,
+     41,
+     38,
+     39,
+     40,
+     36
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270005000
+     ],
+     [
+      -820000000,
+      270000000
+     ],
+     [
+      -819990000,
+      270010000
+     ],
+     [
+      -819940000,
+      270010000
+     ],
+     [
+      -819935000,
+      270005000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0005
+     ],
+     [
+      -82.0,
+      27.0
+     ],
+     [
+      -81.999,
+      27.001
+     ],
+     [
+      -81.994,
+      27.001
+     ],
+     [
+      -81.9935,
+      27.0005
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0005
+      ],
+      "to": [
+       -82.0,
+       27.0
+      ],
+      "triangles": [
+       0,
+       0
+      ],
+      "length_m": 74.46520199681596,
+      "grade": "yellow",
+      "reasons": [
+       "LOW_DATA_QUALITY",
+       "THIN_MARGIN"
+      ],
+      "min_depth_dm": 6,
+      "min_spare_dm": 0,
+      "crossings": []
+     },
+     {
+      "from": [
+       -82.0,
+       27.0
+      ],
+      "to": [
+       -81.999,
+       27.001
+      ],
+      "triangles": [
+       1,
+       3
+      ],
+      "length_m": 148.93025746035144,
+      "grade": "yellow",
+      "reasons": [
+       "LOW_DATA_QUALITY",
+       "THIN_MARGIN"
+      ],
+      "min_depth_dm": 6,
+      "min_spare_dm": 0,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.999,
+       27.001
+      ],
+      "to": [
+       -81.994,
+       27.001
+      ],
+      "triangles": [
+       4,
+       14
+      ],
+      "length_m": 495.37330430992535,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 9,
+      "min_spare_dm": 3,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.994,
+       27.001
+      ],
+      "to": [
+       -81.9935,
+       27.0005
+      ],
+      "triangles": [
+       15,
+       15
+      ],
+      "length_m": 74.46505546299888,
+      "grade": "yellow",
+      "reasons": [
+       "LOW_DATA_QUALITY",
+       "THIN_MARGIN"
+      ],
+      "min_depth_dm": 6,
+      "min_spare_dm": 0,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 793.2338192300916,
+     "distance_nm": 0.4283119974244555,
+     "legs": 4,
+     "green_legs": 1,
+     "yellow_legs": 3,
+     "shallowest": {
+      "depth_dm": 6,
+      "triangle": 0,
+      "lon": -81.9993334,
+      "lat": 27.0003333,
+      "maintained": false
+     },
+     "lowest_clearance": {
+      "clearance_dm": 18,
+      "overhead": 0,
+      "name": "Test Opening Bridge",
+      "opening": true
+     },
+     "openings": [],
+     "unknown_clearances": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 793.2338192300916
+   }
+  },
+  {
+   "id": "s9_sounding",
+   "start": [
+    -81.9935,
+    27.0025
+   ],
+   "goal": [
+    -81.9925,
+    27.0025
+   ],
+   "profile": {
+    "draft_ft": 5,
+    "margin_ft": 1,
+    "air_draft_ft": 5
+   },
+   "note": "goal in the sounding-refined square (band 9, refined 21 dm)",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 18,
+    "air_dm": 15,
+    "start": {
+     "lon": -81.9935,
+     "lat": 27.0025,
+     "x": -819935000,
+     "y": 270025000,
+     "triangle": 45,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.0025,
+     "x": -819925000,
+     "y": 270025000,
+     "triangle": 56,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     45,
+     46,
+     56
+    ],
+    "waypoints_units": [
+     [
+      -819935000,
+      270025000
+     ],
+     [
+      -819925000,
+      270025000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9935,
+      27.0025
+     ],
+     [
+      -81.9925,
+      27.0025
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9935,
+       27.0025
+      ],
+      "to": [
+       -81.9925,
+       27.0025
+      ],
+      "triangles": [
+       0,
+       2
+      ],
+      "length_m": 99.07333917907565,
+      "grade": "yellow",
+      "reasons": [
+       "SOUNDING_DEPTH",
+       "RESTRICTED_AREA"
+      ],
+      "min_depth_dm": 21,
+      "min_spare_dm": 3,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 99.07333917907565,
+     "distance_nm": 0.05349532353081839,
+     "legs": 1,
+     "green_legs": 0,
+     "yellow_legs": 1,
+     "shallowest": {
+      "depth_dm": 21,
+      "triangle": 45,
+      "lon": -81.9936667,
+      "lat": 27.0026666,
+      "maintained": false
+     },
+     "lowest_clearance": null,
+     "openings": [],
+     "unknown_clearances": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 99.07333917907565
+   }
+  }
+ ]
+}

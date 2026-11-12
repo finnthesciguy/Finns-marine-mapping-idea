@@ -1,57 +1,74 @@
-# pipeline/routing: ENC to routing layers (spike)
+# pipeline/routing: ENC to routing packs, and the reference router
 
-This is a spike. It turns NOAA ENC (S-57) cells for one pilot area (Tampa Bay to Charlotte Harbor, lon -83.3 to -81.9, lat 26.3 to 28.1) into the layers an auto-router needs. It then builds a triangle navigation mesh and runs A* with path straightening on it. The findings are in [`docs/spikes/routing-data.md`](../../docs/spikes/routing-data.md).
+This package builds the **routing pack** for a chart region from NOAA ENC (S-57) cells and the USACE National Channel Framework. The pack is one binary file per region, which the phone downloads with the chart package. The package also contains the **Python reference router**, which reads only the pack file.
+
+- The format, the routing algorithm and the builder rules are specified in [`docs/routing-pack-format.md`](../../docs/routing-pack-format.md).
+- The Wave 1 findings are in [`docs/spikes/routing-data.md`](../../docs/spikes/routing-data.md), and its "Wave 2 follow-up" section covers the changes.
 
 ## Run
 
 ```sh
 cd pipeline/routing
-python -m enc_routing all              # the whole pipeline, cached (about 5 min cold)
-python -m enc_routing <step> [--force] [--catalog-copy path/to/ENCProdCat.xml]
-python -m pytest -q                    # offline tests, synthetic geometry only
+python -m enc_routing build [--region pilot] [--force]    # catalog → download → extract → merge → mesh → pack
+python -m enc_routing validate [PACK]                      # checksums, topology, index, references; exit 1 on failure
+python -m enc_routing route --start -82.6225,27.768 --goal -82.5465,27.333 --draft 4.5 --margin 1.5 --air 20 \
+        [--maintained] [--unknown] [--inside]               # JSON result (part B.13 of the spec)
+python -m enc_routing reference                            # reference routes, checked against the source data
+python -m enc_routing render [--out DIR]                   # PNG figures
+python -m enc_routing vectors [--out testdata/routing]     # synthetic pack, Sarasota cut, vectors, record dumps
+python -m pytest -q                                        # offline, about 1 s
 ```
 
-The steps run in this order. Each step writes into `$ENC_ROUTING_WORK`, which defaults to the session scratchpad `.../scratchpad/routing-spike`. Nothing is written into the repo.
+Everything that is downloaded or generated goes under `$ENC_ROUTING_WORK`. The default is the session scratchpad `.../scratchpad/routing-spike`. The command `vectors` writes into `testdata/routing/`.
 
-| step | does | output |
+## Build caching (incremental, catalog-driven)
+
+| level | cache | invalidated by |
 |---|---|---|
-| `select` | parses the ENC catalog and picks the active cells whose catalog coverage touches the pilot box | `reports/select.json` |
-| `download` | fetches the cell zips, cached by edition and update | `zips/` |
-| `extract` | reads S-57 with GDAL/pyogrio (`UPDATES=APPLY,SPLIT_MULTIPOINT=ON,ADD_SOUNDG_DEPTH=ON`) and keeps the routing objects and their attributes | `extract/extract.gpkg` |
-| `merge` | builds the multi-scale best-available tiling from M_COVR (see `merge.py`) | `merge/merged.gpkg`, `reports/merge.json` |
-| `polygons` | builds safe-water polygons for 3, 4, 5, 6, 8, 10 and 15 ft, then reports connectivity and ICW breaks | `polygons/safe_water.gpkg`, `reports/polygons.json` |
-| `channels` | measures how densely the ENC represents channels, and pulls the USACE National Channel Framework (NCF) | `ncf/*.geojson`, `reports/channels.json` |
-| `bridges` | lists bridges, overhead cables and overhead pipes over water, with their clearances | `polygons/overhead.gpkg`, `reports/bridges.json` |
-| `graph` | builds a constrained Delaunay mesh of all navigable water with per-triangle attributes | `graph/mesh.npz`, `reports/graph.json` |
-| `route` | runs the three reference routes in two modes, strict and relaxed | `routes/routes.gpkg`, `reports/routes.json` |
-| `render` | draws the PNG figures | `render/*.png` |
+| download | `zips/<cell>.zip` + `zips/state.json` | edition or update number in the catalog |
+| extract | `extract/cells/<cell>.<ed>.<upd>.pkl` | edition or update |
+| merge | `regions/<rid>/merged.<key>.pkl` | the set of cells and editions, builder version, CRS |
+| pack | `regions/<rid>/routing-<rid>-<date>.pack` + `build.json` | merge key, `BuildParams`, builder version |
+
+An unchanged catalog makes `build` a no-op (2.5 s). A changed cell re-extracts only that cell, then re-runs merge (8 s) and mesh (about 3 min for the pilot). The mesh is not tiled yet: a changed cell rebuilds the whole region (see the follow-up in the spike report).
 
 ## Code map
 
-- `catalog.py`: a minimal catalog parser and cell selector. **This duplicates part of `pipeline/catalog`**, so the spike would not depend on another worker's code. Consolidate the two in Wave 2.
-- `extract.py`: S-57 to GeoPackage. List attributes such as CATBRG become comma-joined strings.
-- `merge.py`: assigns each location to its best cell (priority is band, then scale, then issue date), clips features to that cell's exclusive region, and closes sliver gaps.
-- `safewater.py`: holds the depth and hazard rules (`chart_metres`, `depth_ok`, `hazard_blocks`), builds obstacles, the Gulf mask and the safe-water polygons, and finds ICW breaks.
-- `graph.py`: noding, polygonize, GEOS CDT per face, flat-triangle and T-junction repair, adjacency, and the pack-size estimate.
-- `route.py`: the passability and cost model, A* over triangles, the funnel (string-pulling) algorithm and corner nudging. It reads only the mesh arrays, which is what the phone would do.
-- `places.py`: hand-placed route endpoints, probe points and the Tampa Bay mouth line.
-- `render.py`: the figures.
+| module | job |
+|---|---|
+| `config.py` | work directory, regions, `BuildParams` (every number that shapes the mesh) |
+| `catalog.py`, `download.py`, `extract.py` | catalog selection, cached download, S-57 extraction (GDAL, updates applied) |
+| `merge.py` | best-available multi-scale merge (one cell per location) |
+| `layers.py` | routing inputs in metric CRS: depth areas, hazards, obstacles, overhead, NCF channels, regulated areas, quality; unit conversions (`to_dm`, `ft_to_chart_dm`, `req_dm`) |
+| `mesh.py` | domain with safety clearance, sounding refinement, constraint lines, snap-rounded noding, CDT, attribute sampling, side tables, `build_pack` |
+| `topology.py` | exact-integer repairs (flat triangles, T-junctions) and the validation that fails the build |
+| `packfmt.py` | the binary format: writer and reader (numpy + zlib + struct only) |
+| `router.py` | reference router (spec part B): passability, cost, snapping, A*, funnel, grading, leg validation, no-route report |
+| `validate.py` | pack validation from the file alone |
+| `assess.py`, `places.py` | reference routes and their check against the raw source obstacles |
+| `analysis.py` | effect of the sounding refinement |
+| `synth.py`, `vectors.py` | synthetic test pack, cut-down packs, record dumps and expected-result vectors |
+| `render.py`, `build.py`, `cli.py` | figures, cached build, command line |
+
+`catalog.py` still duplicates part of `pipeline/catalog`, which is installed in the same venv. Switching to it is a small follow-up, deliberately not done while that package is owned by another worker.
 
 ## Dependencies and licences
 
-Everything is permissive. There is no GPL, AGPL or non-commercial code. Shewchuk's Triangle is not used; triangulation is GEOS's constrained Delaunay through shapely.
+Everything is permissive. There is no GPL, AGPL or non-commercial code. Triangulation is GEOS's constrained Delaunay through shapely. Shewchuk's Triangle and CGAL are not used.
 
 | package | used for | licence |
 |---|---|---|
-| shapely 2.2 (bundles GEOS 3.14) | geometry, CDT | BSD-3-Clause (GEOS: LGPL-2.1, dynamically linked) |
-| geopandas 1.2 | dataframes of features | BSD-3-Clause |
-| pyogrio 0.13 (bundles GDAL 3.12) | reading S-57 and writing GeoPackage | MIT (GDAL: MIT/X) |
-| pyproj 3.8 (PROJ) | reprojection to UTM 17N | MIT |
+| shapely 2.2 (bundles GEOS 3.14) | geometry, snap-rounding noding, CDT | BSD-3-Clause (GEOS: LGPL-2.1, dynamically linked, server-side only) |
+| geopandas 1.2 | feature tables | BSD-3-Clause |
+| pyogrio 0.13 (bundles GDAL 3.12) | S-57 reading | MIT (GDAL: MIT/X) |
+| pyproj 3.8 (PROJ) | projections | MIT |
 | numpy, pandas | arrays | BSD-3-Clause |
+| scipy 1.18 | Delaunay of soundings | BSD-3-Clause |
 | matplotlib 3.11 | figures | Matplotlib licence (PSF-style, BSD-compatible) |
-| Pillow 13 | palette PNG compression | MIT-CMU (HPND) |
+| Pillow 13 | palette PNG | MIT-CMU (HPND) |
+| zlib (Python stdlib) | pack compression and CRC-32 | zlib licence |
 | pytest 9 (tests only) | tests | MIT |
 
 Data: NOAA ENC and USACE NCF are US Government works.
 
-Note on the phone: GEOS is LGPL. For the iOS app, Wave 2 should ship only the pack reader and the A*/funnel code, written in Swift. Triangulation happens server-side only.
+**On the phone:** a reader needs only zlib (`libz` on iOS, the system zlib on Linux) and plain integer arithmetic. No GEOS or other library is needed.

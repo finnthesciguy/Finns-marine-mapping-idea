@@ -1,15 +1,16 @@
 [project]
 name = "enc-routing"
-version = "0.1.0"
-description = "Spike: NOAA ENC (S-57) cells to routing layers and a prototype navigation mesh"
+version = "0.2.0"
+description = "NOAA ENC (S-57) + USACE NCF to routing packs (navigation mesh), and the reference router"
 requires-python = ">=3.11"
 dependencies = [
-  "shapely>=2.1",     # needs GEOS >= 3.10 for constrained_delaunay_triangles, 3.12 recommended
+  "shapely>=2.1",     # GEOS >= 3.12: constrained_delaunay_triangles, OverlayNG snap-rounding
   "geopandas>=1.0",
   "pyogrio>=0.9",     # bundles GDAL with the S57 driver
   "pyproj>=3.6",
   "numpy>=1.26",
   "pandas>=2.1",
+  "scipy>=1.11",      # Delaunay of soundings (refinement rule C.4)
   "matplotlib>=3.8",
   "pillow>=10",
 ]

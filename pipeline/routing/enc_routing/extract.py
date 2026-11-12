@@ -120,24 +120,34 @@ def read_cell(path: Path, cell_meta: dict) -> dict[str, gpd.GeoDataFrame]:
     return out, meta
 
 
-def extract_all(cells, force: bool = False) -> Path:
-    """Extract every cell (cached per cell as a pickle) and concatenate."""
+def extract_cells(cells, force: bool = False):
+    """Extract every cell, cached per cell edition and update as a pickle.
+    Returns (per_layer {layer: [GeoDataFrame per cell]}, metas, n_extracted)."""
     from .download import unzip_cell
 
-    dest = work("extract", "extract.gpkg")
     metas = []
     per_layer: dict[str, list] = {}
+    n_new = 0
     for c in cells:
-        d = unzip_cell(c.name)
         cache = work("extract", "cells", f"{c.name}.{c.edtn}.{c.updn}.pkl")
         if cache.exists() and not force:
             layers, meta = pd.read_pickle(cache)
         else:
+            d = unzip_cell(c.name)
             layers, meta = read_cell(d / f"{c.name}.000", {"name": c.name, "cscale": c.cscale})
             pd.to_pickle((layers, meta), cache)
+            n_new += 1
+        meta.setdefault("band", int(c.name[2]))
         metas.append(meta)
         for k, v in layers.items():
             per_layer.setdefault(k, []).append(v)
+    return per_layer, metas, n_new
+
+
+def extract_all(cells, force: bool = False) -> Path:
+    """Spike helper: concatenate every cell into one GeoPackage."""
+    dest = work("extract", "extract.gpkg")
+    per_layer, metas, _ = extract_cells(cells, force)
     if dest.exists():
         dest.unlink()
     counts = {}

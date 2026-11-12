@@ -181,8 +181,8 @@ What the routing pilot found, and what it changes:
 | `Persistence` | built; 44 tests pass on Linux and macOS |
 | CI | Linux Swift tests, Python tool tests, iOS build and macOS tests for every Swift package; all green |
 | Chart build job (`pipeline/charts`, [operator guide](chart-build.md)) | built; 59 tests pass; a small demonstration area was built for real and an incremental update proved |
-| Routing pack format and builder | in progress |
-| `RoutingKit` | not started (waits for the pack format) |
+| Routing pack format and builder ([format and algorithm spec](routing-pack-format.md)) | built; 40 tests pass; pilot pack is 4.3 MB |
+| `RoutingKit` | in progress (Swift port from the spec and test vectors in `testdata/routing/`) |
 
 Chart build job, what is proven and what is open:
 
@@ -192,6 +192,14 @@ Chart build job, what is proven and what is open:
 - **Open:** the GitHub workflow and the Releases upload have never run. The workflow is manual-trigger only; the weekly schedule stays disabled until NOAA has been contacted (draft message in the operator guide).
 - **Open:** the manifest has no tile-size field yet, so the app cannot tell retina packages from standard ones.
 - **Found on first macOS run and fixed:** ChartKit now keeps a superseded package file on disk until the app releases it, because Apple's SQLite fails once its database file is deleted.
+
+Routing pack builder, what is proven and what is open:
+
+- **Proven on the pilot (Tampa Bay to Charlotte Harbor):** 19 reference routes run against a 4.3 MB pack. Checked against the raw chart data, no route touches land, a structure or a blocking hazard, and none passes under a fixed object lower than the boat's air draft. Where no safe route exists the router says so and names the blocking place.
+- **Fixed since the spike:** jetty touching, entry-prohibited areas, mesh topology flaws (now a build-time check), and depth truncation.
+- **Sounding refinement** opens 14.5 km² of the 314 km² of 3–6 ft water to a 4 ft requirement; legs relying on it are yellow. It does not close the two Intracoastal Waterway gaps, which stay maintained-channel (yellow) legs.
+- **Decision taken, open to review:** the 12 m safety clearance from land and structures drops to 4 m within 60 m of a bridge (3 m from bridge fenders), because bascule and swing openings are only 25–40 m wide and would otherwise be closed to all routes.
+- **Open:** route preferences need tuning with real skippers (one route goes outside where a local would stay inside; a tall boat is sent through six bridge openings rather than told there is no good route); routes can still run about 0.4 nm off a beach; a changed chart cell rebuilds the whole region (about 3.5 minutes for the pilot).
 
 ## 6. What the owner has to do
 

@@ -279,3 +279,67 @@ Each entry lists the expected property; the length tolerance is ±10%.
 ## Hosts
 
 All hosts used were allowed: www.charts.noaa.gov for the cell zips (the catalog itself came from the provided local copy of today's file) and services7.arcgis.com for the NCF. No host was refused.
+
+## Wave 2 follow-up (2026-11-12)
+
+The spike is now the routing-pack builder and reference router. The format, the algorithm and the builder rules are specified in [`docs/routing-pack-format.md`](../routing-pack-format.md). The test vectors are in [`testdata/routing`](../../testdata/routing). The figures above have been regenerated from the Wave 2 pack: legs are green or yellow by grade, and an × marks the first blocked place of a failed route.
+
+**Pilot pack.**
+
+- **Size and contents.** `routing-pilot-20261023.pack` is 4.30 MB, holding 548,089 vertices and 860,420 triangles. The data date of 2026-10-23 is the newest ENC issue date used.
+- **Sections:**
+  - vertices 2.00 MB;
+  - triangles 1.45 MB;
+  - attributes 0.53 MB;
+  - point index 0.20 MB;
+  - side tables 0.10 MB;
+  - adjacency not stored: it is derived on load, and storing it would add 1.7 MB.
+- **Build time.** A full mesh build takes 206 s on 4 cores. The no-op rebuild is 2.5 s.
+- **Speed.** The Python reference takes 0.9 s to load and 0.2–0.8 s per route, or about 3 s when it has to produce a no-route report.
+
+**Defects from section 7, and their status.**
+
+| defect | Wave 2 |
+|---|---|
+| 2 m simplification is not conservative; jetty within 1–3 m | **Fixed.** Water is shrunk by 12 m from land, structures and blocking hazards (Douglas–Peucker on a 14 m buffer). Two exceptions: 4 m within 60 m of bridges, and 3 m from fenders, because the bascule and swing openings at Cortez, Blackburn Point and Manatee River are 25–40 m wide and close at 12 m. Measured on the raw source data, the 13 successful pilot routes come no closer to land, structures or blocking hazards than 13.3 m outside bridge zones, 5.7 m inside them and 4.1 m to fenders. A regression test asserts this on the Sarasota cut. |
+| beach and jetty hugging | **Partly fixed.** Cost factors for within 50 m and 50–150 m of shore, near hazards, and less than 0.3 m or 1 m of spare depth. The legs keep at least 50 m from shore whenever the corridor allows. Route (b) strict still runs a median of 0.38 nm off the Gulf beaches: in 6–12 ft water that is legitimate by the chart, but it is not a wide offing. |
+| RESARE entry-prohibited not honoured | **Fixed.** Prohibited is impassable; restricted and caution are flagged with a cost factor and grade yellow. |
+| non-manifold edges and T-junctions | **Fixed.** Snap-rounding on the 1e-7° grid before the CDT, then exact integer repairs. The pilot mesh has 0 flat triangles, 0 T-junctions, 0 duplicate directed edges, and the triangles' area equals the faces' area exactly. Validation fails the build otherwise. |
+| coarse depth bands | **Sounding refinement added** (spec C.4). Of 314 km² in the 3–6 ft band, 14.5 km² becomes usable at a 4 ft requirement and 5.4 km² at 5 ft (+1.0 km² at 6 ft); such legs grade yellow (SOUNDING_DEPTH). **The ICW gaps remain**, at 4 ft and 5 ft, with and without refinement: Roberts Bay and south of Venice are in the 0–3 ft band, and the raise is capped at the band's DRVAL2. |
+| truncated metric depths | **Fixed everywhere.** One rule (`req_dm`) covers depths, clearances and USACE feet. The requirement is rounded up to whole feet. |
+
+**Reference routes** (boat 4.5 ft draft + 1.5 ft margin, 20 ft air draft unless stated; "relaxed" = maintained channels and unknown clearance accepted):
+
+| route | result | nm | legs green / yellow | verdict |
+|---|---|---|---|---|
+| a strict, St. Pete → Marina Jack | ok | 33.4 | 123 / 18 | Good. Harbour channel, across Tampa Bay, under the Skyway, Anna Maria Sound, Sarasota Bay. Anna Maria (73 dm) and Cortez (67 dm) bascules pass closed. Yellow only for caution and restricted areas. |
+| a relaxed | ok | 33.1 | 123 / 12 | Good. Nearly the same, with a few maintained-depth legs. |
+| b strict, Venice Inlet → Punta Gorda | ok | 47.2 | 92 / 22 | Correct by the chart: out the inlet (13.4 m off the jetty), Gulf, Boca Grande Pass. Median 0.38 nm off the beach. |
+| b relaxed | ok | 47.4 | 87 / 24 | Still chooses the outside: it is cheaper than the inside with its maintained-depth factor and the Placida cable penalty. Acceptable, but not the local choice. |
+| b relaxed, inside only | ok | 45.4 | 175 / 10 | The ICW run: south-Venice gap on maintained depth, Placida cable of unknown clearance, no openings needed. Matches the spike. |
+| c strict, Bradenton Beach → Boca Grande inside | no route | – | – | Correct. Blocked at Roberts Bay (27.276 N), then south of Venice (27.046 N), then the Placida cable. Neither option alone would help. |
+| c relaxed | ok | 52.2 | 293 / 40 | Good. Openings flagged at Stickney Point (27.254), Blackburn Point (27.180) and Albee Road (27.124), exactly as in the spike. Unknown cable at Placida. |
+| ref 4: c relaxed, 9 ft air | ok | 52.2 | 297 / 36 | Correct. No openings needed; Blackburn Point closed 27 dm = 9 ft, at the limit. |
+| ref 5: Clearwater → Boca Ciega inside | ok | 18.5 | 122 / 0 | Good. Treasure Island bascule (64 dm) passes closed; the 4–5 ft fixed parts are never crossed. |
+| ref 6: Boca Ciega → Tampa Bay, 70 ft air | ok | 54.7 | 178 / 13 | Safe but long. Never under the 65 ft Bayway. It goes north through 6 bascule openings and out Clearwater Pass, rather than failing. |
+| ref 7: Fort Myers Beach → Pine Island Sound, 30 ft air | ok | 23.3 | 69 / 49 | Good. Sanibel Causeway span at 213 dm (70 ft); never the 9 ft span. Many THIN_MARGIN legs (CATZOC C, 0 spare). |
+| ref 8: Harbour Island → Egmont, 15 ft | no route | – | – | Honest. The berth is charted 6 ft; the hint says maintained channels would help. |
+| ref 8b: same, maintained | ok | 32.6 | 55 / 12 | Good. Ship channel and the Skyway main span (548 dm). |
+| ref 9: Port Manatee → Bradenton | ok | 18.9 | 62 / 9 | Good. Skyway, Green fixed bridge (124 dm), then the Manatee River bascule (15 dm closed) flagged as needing an opening. |
+| ref 10a: start 3 km inland | error | – | – | Correct: START_NO_WATER_NEARBY. |
+| ref 10b: Gulfport marina basin | ok | 2.2 | 7 / 2 | Correct: snapped 231 m. |
+| ref 10c: Sarasota Bay at 15 ft | error | – | – | Correct: no 16.5 ft water within 750 m. |
+| ref 10d: Ringling at 66 ft air, inside | no route | – | – | Correct: blocked at Ringling Causeway A (198 dm = 65 ft). |
+| ref 11: Egmont → Boca Grande Pass offshore | ok | 61.4 | 87 / 20 | Good. At least 149 m and a median of 1.2 km from shore. |
+
+No route passed under a fixed object lower than the air draft, and leg validation found no violations.
+
+**Still open.**
+
+- **Tiling.** The mesh is not tiled, so a changed cell rebuilds the whole region in about 3 min.
+- **Beach offing.** The offing from beaches is short (route b).
+- **Inside versus outside.** Relaxed (b) prefers the outside, and the 70 ft case takes six openings rather than failing. The relative cost of openings, unknown clearances and an outside passage needs tuning with skippers.
+- **NCF offset.** NCF reaches are grown by 15 m to meet the ENC channel. The documented offset is 1–30 m.
+- **Vertex coding.** Vertex coding is only about 3.7 B per vertex. A better scheme, such as quantised deltas inside tiles, could save about 1 MB.
+- **Gulf mask.** The open-Gulf mask is hand-seeded per region.
+- **Catalog code.** It still duplicates `pipeline/catalog`.
