@@ -182,7 +182,7 @@ What the routing pilot found, and what it changes:
 | CI | Linux Swift tests, Python tool tests, iOS build and macOS tests for every Swift package; all green |
 | Chart build job (`pipeline/charts`, [operator guide](chart-build.md)) | built; 59 tests pass; a small demonstration area was built for real and an incremental update proved |
 | Routing pack format and builder ([format and algorithm spec](routing-pack-format.md)) | built; 40 tests pass; pilot pack is 4.3 MB |
-| `RoutingKit` | in progress (Swift port from the spec and test vectors in `testdata/routing/`) |
+| `RoutingKit` | built; 37 tests pass on Linux; reproduces every test vector and all 19 pilot reference routes exactly |
 
 Chart build job, what is proven and what is open:
 
@@ -200,6 +200,17 @@ Routing pack builder, what is proven and what is open:
 - **Sounding refinement** opens 14.5 km² of the 314 km² of 3–6 ft water to a 4 ft requirement; legs relying on it are yellow. It does not close the two Intracoastal Waterway gaps, which stay maintained-channel (yellow) legs.
 - **Decision taken, open to review:** the 12 m safety clearance from land and structures drops to 4 m within 60 m of a bridge (3 m from bridge fenders), because bascule and swing openings are only 25–40 m wide and would otherwise be closed to all routes.
 - **Open:** route preferences need tuning with real skippers (one route goes outside where a local would stay inside; a tall boat is sent through six bridge openings rather than told there is no good route); routes can still run about 0.4 nm off a beach; a changed chart cell rebuilds the whole region (about 3.5 minutes for the pilot).
+
+RoutingKit (the on-device engine), what is proven and what is open:
+
+- **Proven:** written from the specification, it reproduces the Python reference exactly on all 17 test-vector queries and all 19 pilot reference routes. Corrupt and truncated pack files give typed errors, never a crash.
+- **Performance on the full pilot pack (Linux, release build):** loads in about 0.3 s, uses about 80 MB of memory, and computes a 30–60 nm route in 18–28 ms. A "no route" answer with its explanation takes about 0.3 s. One region is loaded at a time.
+- **Specification issues found by the port, to fix in the format document, builder and both routers together:**
+  1. Rounding a snapped start or end point can leave it about 1 cm outside its triangle, so a leg can graze an impassable triangle.
+  2. A leg running exactly along the edge of a bridge or cable footprint is rejected, and only in one direction of travel.
+  3. A hazard point within 1 m of a leg can be missed by the bounding-box prefilter.
+  4. Several result fields and reader checks are under-specified; the section table has no checksum.
+- **Open:** the check that no route touches land in the raw chart data exists only in the Python tests, not yet in Swift.
 
 ## 6. What the owner has to do
 
