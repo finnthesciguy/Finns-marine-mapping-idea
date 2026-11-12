@@ -1,6 +1,9 @@
 .build/
+.swiftpm/
 *.mbtiles
 __pycache__/
+.pytest_cache/
+*.egg-info/
 .venv/
-data/
+/data/
 .DS_Store

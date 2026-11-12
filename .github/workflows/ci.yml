@@ -1,0 +1,200 @@
+# Continuous integration for everything testable without signing keys:
+#   - every Swift package under Packages/ built and tested on Linux (official Swift container),
+#   - every Python tool under pipeline/ installed from scratch and its offline tests run,
+#   - every Swift package built for iOS and tested on macOS.
+# Packages and tools are discovered at run time, so new ones are picked up without editing this file.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  discover:
+    name: Discover packages and tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      swift-packages: ${{ steps.find.outputs.swift-packages }}
+      python-tools: ${{ steps.find.outputs.python-tools }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: find
+        name: Find Swift packages and Python tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Swift package is any Packages/<name>/Package.swift.
+          swift=$(find Packages -mindepth 2 -maxdepth 2 -name Package.swift -printf '%h\n' 2>/dev/null \
+                  | xargs -r -n1 basename | sort | jq -R . | jq -cs .)
+          # A Python tool is any pipeline/<name>/ with a pyproject.toml and a tests/ directory.
+          python=$(for d in pipeline/*/; do
+                     d=${d%/}
+                     if [ -f "$d/pyproject.toml" ] && [ -d "$d/tests" ]; then basename "$d"; fi
+                   done | sort | jq -R . | jq -cs .)
+          echo "swift-packages=$swift" >> "$GITHUB_OUTPUT"
+          echo "python-tools=$python" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Discovered"
+            echo "- Swift packages: \`$swift\`"
+            echo "- Python tools: \`$python\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  swift-linux:
+    name: Swift ${{ matrix.package }} (Linux)
+    needs: discover
+    if: needs.discover.outputs.swift-packages != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      # Official Swift image, pinned; bump together with the toolchain used locally (docs/PLAN.md section 8).
+      image: swift:6.4.2-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.discover.outputs.swift-packages) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: Packages/${{ matrix.package }}
+    steps:
+      - name: Install system libraries
+        working-directory: /
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libsqlite3-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: swift --version
+      - name: swift build
+        run: swift build
+      - name: swift test
+        run: swift test
+
+  python-tools:
+    name: Python ${{ matrix.tool }}
+    needs: discover
+    if: needs.discover.outputs.python-tools != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: ${{ fromJSON(needs.discover.outputs.python-tools) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pipeline/*/pyproject.toml
+      - name: Install ${{ matrix.tool }} with test extras
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool="$GITHUB_WORKSPACE/pipeline/${{ matrix.tool }}"
+          python -m venv "$RUNNER_TEMP/venv"
+          . "$RUNNER_TEMP/venv/bin/activate"
+          python -m pip install --upgrade pip
+          # Sibling pipeline projects named as dependencies (e.g. charts -> gulf-enc-catalog) are not on PyPI:
+          # install them from the checkout, dependencies first.
+          python - "$tool" > "$RUNNER_TEMP/local-deps.txt" <<'PY'
+          import pathlib, re, sys, tomllib
+
+          def norm(n): return re.sub(r"[-_.]+", "-", n).lower()
+          tool = pathlib.Path(sys.argv[1]).resolve()
+          projects = {}
+          for p in sorted(tool.parent.glob("*/pyproject.toml")):
+              meta = tomllib.loads(p.read_text()).get("project", {})
+              if "name" in meta:
+                  projects[norm(meta["name"])] = (p.parent, meta.get("dependencies", []))
+          out = []
+          def visit(deps):
+              for d in deps:
+                  name = norm(re.split(r"[\s\[<>=!~;(@]", d.strip(), maxsplit=1)[0])
+                  if name in projects and projects[name][0] != tool and projects[name][0] not in out:
+                      visit(projects[name][1])
+                      out.append(projects[name][0])
+          visit(tomllib.loads((tool / "pyproject.toml").read_text()).get("project", {}).get("dependencies", []))
+          print("\n".join(str(p) for p in out))
+          PY
+          args=()
+          while IFS= read -r dep; do [ -n "$dep" ] && args+=(-e "$dep"); done < "$RUNNER_TEMP/local-deps.txt"
+          echo "Local dependencies: ${args[*]:-none}"
+          # GDAL comes from the pyogrio wheel (it bundles GDAL with the S-57 driver); no system GDAL is needed.
+          python -m pip install "${args[@]}" -e "${tool}[test]"
+          python -m pip list
+      - name: pytest (offline; live tests are opt-in via env vars and stay skipped)
+        shell: bash
+        working-directory: pipeline/${{ matrix.tool }}
+        run: |
+          . "$RUNNER_TEMP/venv/bin/activate"
+          python -m pytest -q -p no:cacheprovider
+
+  apple:
+    name: Swift ${{ matrix.package }} (iOS build, macOS test)
+    needs: discover
+    if: needs.discover.outputs.swift-packages != '[]'
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.discover.outputs.swift-packages) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: Packages/${{ matrix.package }}
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun --sdk iphoneos --show-sdk-version
+          {
+            echo "Xcode: $(xcodebuild -version | head -1) ($(xcode-select -p))"
+            echo "Swift: $(swift --version 2>&1 | head -1)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - id: ios
+        name: Build for iOS (generic/platform=iOS)
+        run: |
+          set -euo pipefail
+          # SwiftPM packages without an Xcode project: xcodebuild opens Package.swift directly. A package with
+          # several products gets an aggregate "<name>-Package" scheme; otherwise the scheme is the product name.
+          schemes=$(xcodebuild -list -json | jq -r '(.workspace // .project).schemes[]')
+          echo "Schemes: $schemes"
+          scheme="${{ matrix.package }}"
+          if grep -qx "${{ matrix.package }}-Package" <<<"$schemes"; then scheme="${{ matrix.package }}-Package"; fi
+          xcodebuild build \
+            -scheme "$scheme" \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+      - id: macos-test
+        name: swift test (macOS)
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: swift test
+      - name: Report
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### ${{ matrix.package }}"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| iOS build (generic/platform=iOS) | ${{ steps.ios.outcome }} |"
+            echo "| swift test (macOS) | ${{ steps.macos-test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
