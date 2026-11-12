@@ -2,7 +2,8 @@
 #   - every Swift package under Packages/ built and tested on Linux (official Swift container),
 #   - every Python tool under pipeline/ installed from scratch and its offline tests run,
 #   - every Swift package built for iOS and tested on macOS,
-#   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing.
+#   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing, and its UI and
+#     unit tests run on a booted simulator (job ios-app-tests).
 # Packages and tools are discovered at run time, so new ones are picked up without editing this file.
 name: CI
 
@@ -264,4 +265,185 @@ jobs:
             echo "| Check | Result |"
             echo "|---|---|"
             echo "| Simulator build (generic/platform=iOS Simulator) | ${{ steps.build.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios-app-tests:
+    # Runtime checks of the app: XCUITest UI tests (GulfNavUITests) and hosted unit tests (GulfNavTests) on a
+    # booted iPhone simulator chosen from what the runner image has. Independent of the build job above, so
+    # a compile error and a runtime failure are reported separately. No test uses the network: the UI tests
+    # launch the app with an isolated data directory, simulated GPS and an offline 16 KB test chart.
+    name: iOS app (Simulator UI tests)
+    runs-on: macos-26
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: App
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes available
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+      - id: sim
+        name: Pick and boot an iPhone simulator
+        run: |
+          set -euo pipefail
+          # Newest iOS runtime first; within it prefer a plain "iPhone NN", then any iPhone. Never a fixed
+          # device name, which may not exist on the runner image.
+          pick() {
+            xcrun simctl list devices available -j | jq -r '
+              [ .devices | to_entries[]
+                | select(.key | test("SimRuntime\\.iOS-[0-9]+-[0-9]+"))
+                | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)")) as $v
+                | .value[]
+                | select((.isAvailable != false) and (.name | startswith("iPhone")))
+                | { udid, name, maj: ($v.maj | tonumber), min: ($v.min | tonumber),
+                    plain: (if (.name | test("^iPhone [0-9]+$")) then 1 else 0 end) } ]
+              | sort_by(.maj, .min, .plain) | reverse | first | (.udid // empty)'
+          }
+          udid=$(pick)
+          if [ -z "$udid" ]; then
+            echo "No available iPhone simulator; creating one."
+            runtime=$(xcrun simctl list runtimes available -j | jq -r '[.runtimes[] | select(.platform == "iOS" and (.isAvailable != false))] | sort_by(.version | split(".") | map(tonumber)) | last | .identifier // empty')
+            devtype=$(xcrun simctl list devicetypes -j | jq -r '[.devicetypes[] | select(.name | startswith("iPhone"))] | last | .identifier // empty')
+            if [ -z "$runtime" ] || [ -z "$devtype" ]; then
+              echo "::error::No iOS simulator runtime or iPhone device type on this runner"
+              xcrun simctl list
+              exit 1
+            fi
+            udid=$(xcrun simctl create "CI iPhone" "$devtype" "$runtime")
+          fi
+          name=$(xcrun simctl list devices -j | jq -r --arg u "$udid" '.devices[][] | select(.udid == $u) | .name')
+          echo "Using simulator: $name ($udid)"
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          echo "Simulator: $name ($udid)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Resolve packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies -project GulfNav.xcodeproj -scheme GulfNav \
+            -derivedDataPath "$RUNNER_TEMP/TestDerivedData" 2>&1 | tee "$RUNNER_TEMP/test-resolve.log"
+      - id: build
+        name: Build for testing
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set +e
+          set -o pipefail
+          build() {
+            xcodebuild build-for-testing -project GulfNav.xcodeproj -scheme GulfNav \
+              -destination "id=$UDID" \
+              -derivedDataPath "$RUNNER_TEMP/TestDerivedData" \
+              -skipMacroValidation -skipPackagePluginValidation \
+              "$@" > "$RUNNER_TEMP/test-build.log" 2>&1
+          }
+          # Ad hoc ("Sign to Run Locally") signing first, which simulator test runners expect; if that fails
+          # because of signing, retry with signing off.
+          signing="CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="
+          build CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+          status=$?
+          if [ $status -ne 0 ] && grep -qiE 'code ?sign|signing|provisioning' "$RUNNER_TEMP/test-build.log"; then
+            echo "Ad hoc signing build failed with a signing error; retrying with CODE_SIGNING_ALLOWED=NO"
+            cp "$RUNNER_TEMP/test-build.log" "$RUNNER_TEMP/test-build-adhoc.log"
+            signing="CODE_SIGNING_ALLOWED=NO"
+            build CODE_SIGNING_ALLOWED=NO
+            status=$?
+          fi
+          echo "signing=$signing" >> "$GITHUB_OUTPUT"
+          echo "xcodebuild build-for-testing exit status: $status (signing: $signing)"
+          echo "----- last 40 log lines -----"
+          tail -n 40 "$RUNNER_TEMP/test-build.log"
+          echo "----- lines containing 'error:' (3 lines of context) -----"
+          grep -n -B 3 -A 3 'error:' "$RUNNER_TEMP/test-build.log" | head -n 400 || echo "(none)"
+          echo "----- error count: $(grep -c 'error:' "$RUNNER_TEMP/test-build.log" || true) -----"
+          exit $status
+      - id: test
+        name: Run UI and unit tests
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          SIGNING: ${{ steps.build.outputs.signing }}
+        run: |
+          set +e
+          set -o pipefail
+          read -r -a signing <<<"$SIGNING"
+          rm -rf "$RUNNER_TEMP/GulfNavTests.xcresult"
+          xcodebuild test-without-building -project GulfNav.xcodeproj -scheme GulfNav \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/TestDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/GulfNavTests.xcresult" \
+            -parallel-testing-enabled NO \
+            "${signing[@]}" > "$RUNNER_TEMP/test-run.log" 2>&1
+          status=$?
+          echo "xcodebuild test-without-building exit status: $status"
+          echo "----- test cases -----"
+          grep -E "^Test Case '.*' (passed|failed|skipped)" "$RUNNER_TEMP/test-run.log" || echo "(no test case lines)"
+          echo "----- failures and errors (3 lines of context) -----"
+          grep -n -B 3 -A 3 -E 'error:|: failed|XCTAssert|Timed out|crash|Crash|Failed to|failed to' "$RUNNER_TEMP/test-run.log" | head -n 400 || echo "(none)"
+          echo "----- last 40 log lines -----"
+          tail -n 40 "$RUNNER_TEMP/test-run.log"
+          echo "----- result bundle summary -----"
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/GulfNavTests.xcresult" --compact 2>&1 | head -c 20000 || true
+          echo
+          exit $status
+      - name: Collect screenshots and simulator logs
+        if: ${{ always() && steps.sim.outputs.udid != '' }}
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/screenshots" "$RUNNER_TEMP/sim-logs"
+          if [ -d "$RUNNER_TEMP/GulfNavTests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/GulfNavTests.xcresult" \
+              --output-path "$RUNNER_TEMP/screenshots" || echo "attachment export failed"
+            ls -la "$RUNNER_TEMP/screenshots" || true
+          fi
+          xcrun simctl spawn "$UDID" log show --last 60m --style compact \
+            --predicate 'process == "GulfNav" OR process == "GulfNavUITests-Runner"' \
+            > "$RUNNER_TEMP/sim-logs/simulator.log" 2>&1 || echo "log show failed"
+          tail -n 60 "$RUNNER_TEMP/sim-logs/simulator.log" || true
+          find "$HOME/Library/Logs/DiagnosticReports" -name '*GulfNav*' -exec cp {} "$RUNNER_TEMP/sim-logs/" \; 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/sim-logs"
+      - name: Upload test logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-app-test-logs
+          path: |
+            ${{ runner.temp }}/test-resolve.log
+            ${{ runner.temp }}/test-build.log
+            ${{ runner.temp }}/test-build-adhoc.log
+            ${{ runner.temp }}/test-run.log
+            ${{ runner.temp }}/sim-logs
+          if-no-files-found: ignore
+      - name: Upload result bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-app-test-results
+          path: ${{ runner.temp }}/GulfNavTests.xcresult
+          if-no-files-found: ignore
+      - name: Upload screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-app-test-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+      - name: Report
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          {
+            echo "### iOS app tests"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Build for testing (${{ steps.build.outputs.signing }}) | ${{ steps.build.outcome }} |"
+            echo "| UI + unit tests on ${{ steps.sim.outputs.udid }} | ${{ steps.test.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

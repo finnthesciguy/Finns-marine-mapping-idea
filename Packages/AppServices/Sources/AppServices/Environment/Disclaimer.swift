@@ -35,19 +35,21 @@ public struct DisclaimerRecord: Sendable, Equatable, Codable {
     }
 }
 
-/// Where the disclaimer acceptance is stored.
-///
-/// The intended implementation is Persistence's `SettingKey.disclaimerAcknowledgement`
-/// (`PersistenceAcknowledgementStore`, compiled when Package.swift's `includePersistence` is on). Until
-/// ChartKit and Persistence can be linked into one app (both declare a target named `CSQLite`; see
-/// App/README.md), the app uses `UserDefaultsAcknowledgementStore`.
+/// Where the disclaimer acceptance is stored. The app uses `PersistenceAcknowledgementStore`; builds before
+/// Persistence was linked used `UserDefaultsAcknowledgementStore`, which is now only read once to migrate
+/// (`AcknowledgementMigration`).
 public protocol AcknowledgementStore: Sendable {
     func disclaimerAcknowledgement() async throws -> DisclaimerRecord?
     func acknowledgeDisclaimer(_ record: DisclaimerRecord) async throws
 }
 
+/// A store an acceptance can be removed from (the legacy store, after migration).
+public protocol RemovableAcknowledgementStore: AcknowledgementStore {
+    func removeDisclaimerAcknowledgement() async throws
+}
+
 /// In memory, for previews and tests.
-public actor InMemoryAcknowledgementStore: AcknowledgementStore {
+public actor InMemoryAcknowledgementStore: RemovableAcknowledgementStore {
     private var record: DisclaimerRecord?
 
     public init(record: DisclaimerRecord? = nil) {
@@ -59,10 +61,15 @@ public actor InMemoryAcknowledgementStore: AcknowledgementStore {
     public func acknowledgeDisclaimer(_ record: DisclaimerRecord) async throws {
         self.record = record
     }
+
+    public func removeDisclaimerAcknowledgement() async throws {
+        record = nil
+    }
 }
 
-/// `UserDefaults`, JSON-encoded under one key. Interim store (see `AcknowledgementStore`).
-public final class UserDefaultsAcknowledgementStore: AcknowledgementStore {
+/// `UserDefaults`, JSON-encoded under one key. Used by builds before Persistence was linked; now only read
+/// by `AcknowledgementMigration`.
+public final class UserDefaultsAcknowledgementStore: RemovableAcknowledgementStore {
     public static let defaultKey = "legal.disclaimerAcknowledgement"
 
     private let suiteName: String?
@@ -87,5 +94,9 @@ public final class UserDefaultsAcknowledgementStore: AcknowledgementStore {
     public func acknowledgeDisclaimer(_ record: DisclaimerRecord) async throws {
         let data: Data = try JSONEncoder().encode(record)
         defaults().set(data, forKey: key)
+    }
+
+    public func removeDisclaimerAcknowledgement() async throws {
+        defaults().removeObject(forKey: key)
     }
 }

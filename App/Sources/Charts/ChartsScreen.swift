@@ -37,6 +37,7 @@ struct ChartsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .accessibilityIdentifier("charts.done")
                 }
             }
             .refreshable {
@@ -92,6 +93,7 @@ struct RegionRowView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(row.title)
                     .font(.headline)
+                    .accessibilityIdentifier("region.title.\(row.id)")
                 Spacer()
                 primaryButton
             }
@@ -103,7 +105,12 @@ struct RegionRowView: View {
             }
             HStack(spacing: 12) {
                 Label(ByteFormat.string(row.downloadBytes), systemImage: "arrow.down.circle")
-                Label("Data \(DataDateFormat.string(row.dataDate))", systemImage: "calendar")
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .accessibilityHidden(true)
+                    Text("Data \(DataDateFormat.string(row.dataDate))")
+                        .accessibilityIdentifier("region.dataDate.\(row.id)")
+                }
                 if let age = row.age, age.level != .current {
                     Label("\(age.days) days old", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(age.level == .critical ? Color.red : Color.orange)
@@ -119,6 +126,7 @@ struct RegionRowView: View {
                 Text(row.statusText)
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
+                    .accessibilityIdentifier("region.status.\(row.id)")
                 Spacer()
                 if row.canDelete {
                     Button(role: .destructive, action: onDelete) {

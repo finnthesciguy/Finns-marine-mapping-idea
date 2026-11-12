@@ -14,6 +14,7 @@ struct DisclaimerView: View {
                         .foregroundStyle(Color.orange)
                     Text(Disclaimer.title)
                         .font(.title.bold())
+                        .accessibilityIdentifier("disclaimer.title")
                     ForEach(Array(Disclaimer.points.enumerated()), id: \.offset) { item in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "circle.fill")
@@ -35,6 +36,7 @@ struct DisclaimerView: View {
                     .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("disclaimer.accept")
             .padding(20)
             .frame(maxWidth: 640)
         }

@@ -14,8 +14,8 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .starting
-    /// Shown as a banner when the app had to fall back to temporary storage.
-    private(set) var startupWarning: String?
+    /// Shown as banners on the map screen (storage fallback, recovered data, interrupted recordings).
+    private(set) var notices: [StartupNotice] = []
 
     let environment: AppEnvironment
     let charts: ChartsModel
@@ -25,10 +25,10 @@ final class AppModel {
     @ObservationIgnored private var started = false
 
     init(environment: AppEnvironment, manifest: ManifestLoader.Loaded, navigation: NavigationModel,
-         startupWarning: String?) {
+         notices: [StartupNotice]) {
         self.environment = environment
         self.navigation = navigation
-        self.startupWarning = startupWarning
+        self.notices = notices
         let mapModel = ChartMapModel(library: environment.charts)
         let chartsModel = ChartsModel(library: environment.charts, regions: manifest.regions,
                                       manifestError: manifest.error)
@@ -46,28 +46,55 @@ final class AppModel {
     /// The real app. Falls back to a temporary directory if the sandbox Library cannot be prepared
     /// (should not happen; the user is told charts will not be kept).
     static func live() -> AppModel {
-        let navigation = NavigationModel(makeDeviceService: { CoreLocationService() })
-        let manifest: ManifestLoader.Loaded = ManifestLoader.loadBundled()
+        let launch: LaunchConfiguration = AppModel.launchConfiguration()
+        let navigation = NavigationModel(makeDeviceService: { CoreLocationService() },
+                                         startSimulating: launch.simulateGPS)
+        var manifest: ManifestLoader.Loaded = ManifestLoader.loadBundled()
+        var transport: any ChartTransport = URLSessionChartTransport()
+        if launch.preinstallFixtureChart, let fixture = FixtureChart.bundledFile(in: Bundle.main) {
+            transport = LocalFileChartTransport(files: [FixtureChart.packageURL: fixture], fallback: transport)
+            // First in the list so the UI tests find its row without scrolling.
+            manifest.regions.insert(FixtureChart.region, at: 0)
+        }
         do {
-            let environment: AppEnvironment = try AppEnvironment.live()
-            return AppModel(environment: environment, manifest: manifest, navigation: navigation, startupWarning: nil)
+            let environment: AppEnvironment = try AppEnvironment.live(launch: launch, transport: transport)
+            return AppModel(environment: environment, manifest: manifest, navigation: navigation,
+                            notices: environment.notices)
         } catch {
             let fallbackRoot = FileManager.default.temporaryDirectory.appendingPathComponent("GulfNavFallback", isDirectory: true)
             do {
-                let environment: AppEnvironment = try AppEnvironment.make(
-                    paths: AppPaths(libraryDirectory: fallbackRoot), transport: URLSessionChartTransport(),
-                    acknowledgements: UserDefaultsAcknowledgementStore())
-                return AppModel(environment: environment, manifest: manifest, navigation: navigation,
-                                startupWarning: "Storage could not be prepared (\(error.localizedDescription)). Downloaded charts will not be kept.")
+                let environment: AppEnvironment = try AppEnvironment.open(
+                    paths: AppPaths(libraryDirectory: fallbackRoot), launch: launch, transport: transport,
+                    legacy: launch.usesIsolatedData ? nil : UserDefaultsAcknowledgementStore())
+                var notices: [StartupNotice] = [StartupNotice(
+                    kind: .storageFallback,
+                    message: "Storage could not be prepared (\(error.localizedDescription)). Downloaded charts and saved data will not be kept.")]
+                notices.append(contentsOf: environment.notices)
+                return AppModel(environment: environment, manifest: manifest, navigation: navigation, notices: notices)
             } catch {
-                fatalError("Cannot create any storage for charts: \(error)")
+                fatalError("Cannot create any storage: \(error)")
             }
         }
+    }
+
+    /// Test and simulator switches (see `LaunchConfiguration`). Only debug builds read the environment.
+    static func launchConfiguration() -> LaunchConfiguration {
+        #if DEBUG
+        return LaunchConfiguration(environment: ProcessInfo.processInfo.environment)
+        #else
+        return LaunchConfiguration()
+        #endif
     }
 
     func start() async {
         guard !started else { return }
         started = true
+        await environment.migrateLegacyAcknowledgement()
+        // Track recording arrives in the next step of this build; until then interrupted recordings are
+        // closed (kept, not resumed).
+        let recovery: RecordingRecovery.Outcome = await RecordingRecovery.recover(store: environment.store, now: Date(),
+                                                                                  allowResume: false)
+        notices.append(contentsOf: recovery.notices)
         var record: DisclaimerRecord? = nil
         do {
             record = try await environment.acknowledgements.disclaimerAcknowledgement()
@@ -80,7 +107,25 @@ final class AppModel {
             phase = .ready
             navigation.start()
         }
+        if environment.launch.preinstallFixtureChart {
+            await installFixtureChart()
+        }
         await charts.start()
+    }
+
+    /// UI tests: install the bundled 16 KB chart through the local transport (no network).
+    private func installFixtureChart() async {
+        let installed: InstalledRegion? = await environment.charts.installer.installedRegion(id: FixtureChart.regionID)
+        if installed != nil { return }
+        do {
+            try await environment.charts.install(FixtureChart.region)
+        } catch {
+            notices.append(StartupNotice(kind: .storageFallback, message: "Test chart could not be installed: \(error)"))
+        }
+    }
+
+    func dismissNotice(_ notice: StartupNotice) {
+        notices.removeAll { $0 == notice }
     }
 
     func acceptDisclaimer() async {

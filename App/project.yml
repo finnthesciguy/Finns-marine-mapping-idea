@@ -29,6 +29,10 @@ packages:
     path: ../Packages/ChartKit
   AppServices:
     path: ../Packages/AppServices
+  Persistence:
+    path: ../Packages/Persistence
+  GPXKit:
+    path: ../Packages/GPXKit
 
 targets:
   GulfNav:
@@ -46,6 +50,11 @@ targets:
       - path: ../Packages/ChartKit/Samples/gulf-manifest.sample.json
         buildPhase: resources
         group: Resources
+      # The 16 KB test chart the UI tests install offline (AppServices.FixtureChart). Excluded from Release
+      # builds by EXCLUDED_SOURCE_FILE_NAMES below.
+      - path: ../Packages/AppServices/Tests/AppServicesTests/Resources/tiny-a.mbtiles
+        buildPhase: resources
+        group: TestSupport
     info:
       path: Info.plist
       properties:
@@ -78,19 +87,70 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         ENABLE_PREVIEWS: YES
+      configs:
+        Release:
+          EXCLUDED_SOURCE_FILE_NAMES: tiny-a.mbtiles
     dependencies:
       - package: MapLibre
         product: MapLibre
       - package: NavCore
       - package: ChartKit
       - package: AppServices
+      - package: Persistence
+      - package: GPXKit
+
+  # Unit tests of app-target helpers, hosted in the app (TEST_HOST is set by XcodeGen from the dependency).
+  GulfNavTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UnitTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+    dependencies:
+      - target: GulfNav
+
+  # XCUITest UI tests: launch the app with LaunchConfiguration switches (isolated data directory,
+  # simulated GPS, offline test chart). No test uses the network.
+  GulfNavUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TEST_TARGET_NAME: GulfNav
+    dependencies:
+      - target: GulfNav
 
 schemes:
   GulfNav:
     build:
       targets:
         GulfNav: all
+        GulfNavTests: [test]
+        GulfNavUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      # On failure Xcode keeps automatic screenshots; for passing tests only the ones the tests attach.
+      captureScreenshotsAutomatically: true
+      deleteScreenshotsWhenEachTestSucceeds: true
+      preferredScreenCaptureFormat: screenshots
+      targets:
+        - name: GulfNavTests
+        - name: GulfNavUITests
     archive:
       config: Release

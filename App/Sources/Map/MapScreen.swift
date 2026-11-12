@@ -25,8 +25,15 @@ struct MapScreen: View {
 
             VStack(spacing: 8) {
                 topBar(map: map)
-                if let warning = model.startupWarning {
-                    Banner(text: warning, systemImage: "externaldrive.badge.exclamationmark")
+                ForEach(model.notices) { notice in
+                    Button {
+                        model.dismissNotice(notice)
+                    } label: {
+                        Banner(text: notice.message, systemImage: NoticeStyle.symbol(for: notice.kind))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("notice.\(notice.kind.rawValue)")
+                    .accessibilityHint("Dismisses this message")
                 }
                 if !navigation.authorization.allowsUpdates && navigation.authorization != .notDetermined {
                     Button {
@@ -45,6 +52,7 @@ struct MapScreen: View {
                         Banner(text: "No charts installed. Tap to download a region.", systemImage: "map")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("map.noChartsBanner")
                 }
                 Spacer()
                 HStack(alignment: .bottom) {
@@ -69,6 +77,7 @@ struct MapScreen: View {
         HStack {
             if let badge = map.badge {
                 ChartAgeBadgeView(badge: badge)
+                    .accessibilityIdentifier("map.chartAgeBadge")
             }
             Spacer()
             #if DEBUG
@@ -82,6 +91,7 @@ struct MapScreen: View {
                     .padding(.vertical, 6)
                     .background(.regularMaterial, in: Capsule())
             }
+            .accessibilityIdentifier("map.chartsButton")
         }
     }
 
@@ -97,6 +107,7 @@ struct MapScreen: View {
                     .background(.regularMaterial, in: Circle())
             }
             .accessibilityLabel(map.orientation.label)
+            .accessibilityIdentifier("map.orientationButton")
             Button {
                 map.follow.toggle()
             } label: {
@@ -106,6 +117,7 @@ struct MapScreen: View {
                     .background(.regularMaterial, in: Circle())
             }
             .accessibilityLabel(map.follow ? "Following position" : "Follow position")
+            .accessibilityIdentifier("map.followButton")
         }
     }
 }
@@ -117,9 +129,11 @@ struct InstrumentStrip: View {
     var body: some View {
         let position = InstrumentFormat.position(readout.lastFix?.coordinate)
         HStack(spacing: 0) {
-            cell(title: "SOG", value: InstrumentFormat.sog(metersPerSecond: readout.speedOverGround))
+            cell(title: "SOG", value: InstrumentFormat.sog(metersPerSecond: readout.speedOverGround),
+                 identifier: "instrument.sog")
             Divider().frame(height: 36)
-            cell(title: "COG", value: InstrumentFormat.cog(degrees: readout.courseOverGround))
+            cell(title: "COG", value: InstrumentFormat.cog(degrees: readout.courseOverGround),
+                 identifier: "instrument.cog")
             Divider().frame(height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text("POSITION")
@@ -127,17 +141,21 @@ struct InstrumentStrip: View {
                     .foregroundStyle(Color.secondary)
                 Text(position.latitude)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityIdentifier("instrument.latitude")
                 Text(position.longitude)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityIdentifier("instrument.longitude")
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("instrument.strip")
     }
 
-    private func cell(title: String, value: String) -> some View {
+    private func cell(title: String, value: String, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
@@ -146,6 +164,7 @@ struct InstrumentStrip: View {
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .accessibilityIdentifier(identifier)
         }
         .padding(.horizontal, 10)
         .frame(minWidth: 90, alignment: .leading)
@@ -193,6 +212,17 @@ struct ChartAgeBadgeView: View {
     }
 }
 
+enum NoticeStyle {
+    static func symbol(for kind: StartupNotice.Kind) -> String {
+        switch kind {
+        case .dataRecovered: return "exclamationmark.arrow.triangle.2.circlepath"
+        case .dataNotSaved: return "externaldrive.badge.xmark"
+        case .storageFallback: return "externaldrive.badge.exclamationmark"
+        case .recordingInterrupted: return "point.bottomleft.forward.to.point.topright.scurvepath"
+        }
+    }
+}
+
 struct Banner: View {
     let text: String
     let systemImage: String
@@ -224,6 +254,7 @@ struct DebugMenu: View {
                 .padding(8)
                 .background(.regularMaterial, in: Circle())
         }
+        .accessibilityIdentifier("map.debugMenu")
     }
 }
 #endif

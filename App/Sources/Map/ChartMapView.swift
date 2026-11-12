@@ -35,9 +35,10 @@ struct ChartMapView: UIViewRepresentable {
         ChartMapCoordinator()
     }
 
-    func makeUIView(context: Context) -> MLNMapView {
+    func makeUIView(context: Context) -> ChartMapContainerView {
         let mapView = MLNMapView(frame: CGRect(x: 0, y: 0, width: 320, height: 480), styleJSON: OfflineStyle.load())
         mapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        mapView.accessibilityIdentifier = MapAccessibility.mapIdentifier
         mapView.delegate = context.coordinator
         // Rotation is driven by the north-up / course-up toggle only; no tilt on a chart.
         mapView.isRotateEnabled = false
@@ -46,12 +47,61 @@ struct ChartMapView: UIViewRepresentable {
         mapView.maximumZoomLevel = 20
         // Start over Tampa Bay until the first fix arrives.
         mapView.setCenter(CLLocationCoordinate2D(latitude: 27.62, longitude: -82.70), zoomLevel: 9, animated: false)
-        context.coordinator.attach(mapView)
-        return mapView
+        let container = ChartMapContainerView(mapView: mapView)
+        context.coordinator.attach(mapView, probe: container.statusProbe)
+        return container
     }
 
-    func updateUIView(_ mapView: MLNMapView, context: Context) {
+    func updateUIView(_ container: ChartMapContainerView, context: Context) {
         context.coordinator.update(with: self)
+    }
+}
+
+/// Accessibility identifiers the UI tests rely on.
+enum MapAccessibility {
+    static let mapIdentifier = "chart-map"
+    static let statusIdentifier = "map.status"
+
+    /// Machine-readable map state for the UI tests: `style=loaded; chartLayers=1`.
+    static func statusValue(styleLoaded: Bool, chartLayers: Int) -> String {
+        "style=\(styleLoaded ? "loaded" : "pending"); chartLayers=\(chartLayers)"
+    }
+}
+
+/// Hosts the map plus, in debug builds, an invisible accessibility element (`map.status`) that reports
+/// whether the style has loaded and how many chart layers are in it, so UI tests can check the map
+/// without comparing pixels.
+final class ChartMapContainerView: UIView {
+    let mapView: MLNMapView
+    let statusProbe: UIView?
+
+    init(mapView: MLNMapView) {
+        self.mapView = mapView
+        #if DEBUG
+        let probe = UIView(frame: CGRect(x: 0, y: 120, width: 2, height: 2))
+        probe.backgroundColor = UIColor.clear
+        probe.isUserInteractionEnabled = false
+        probe.isAccessibilityElement = true
+        probe.accessibilityIdentifier = MapAccessibility.statusIdentifier
+        probe.accessibilityLabel = "Chart map status"
+        probe.accessibilityTraits = UIAccessibilityTraits.staticText
+        probe.accessibilityValue = MapAccessibility.statusValue(styleLoaded: false, chartLayers: 0)
+        self.statusProbe = probe
+        #else
+        self.statusProbe = nil
+        #endif
+        super.init(frame: mapView.frame)
+        mapView.frame = bounds
+        mapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(mapView)
+        if let statusProbe {
+            addSubview(statusProbe)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
     }
 }
 
@@ -59,6 +109,7 @@ struct ChartMapView: UIViewRepresentable {
 @MainActor
 final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
     private weak var mapView: MLNMapView?
+    private weak var statusProbe: UIView?
     private var latest: ChartMapView?
     private var styleLoaded = false
     private var appliedRevision = -1
@@ -88,8 +139,14 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         super.init()
     }
 
-    func attach(_ mapView: MLNMapView) {
+    func attach(_ mapView: MLNMapView, probe: UIView?) {
         self.mapView = mapView
+        self.statusProbe = probe
+    }
+
+    private func updateStatusProbe() {
+        statusProbe?.accessibilityValue = MapAccessibility.statusValue(styleLoaded: styleLoaded,
+                                                                       chartLayers: addedLayers.count)
     }
 
     func update(with view: ChartMapView) {
@@ -123,6 +180,7 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
             addedLayers.append(layer)
         }
         appliedRevision = view.planRevision
+        updateStatusProbe()
         let callback: (Int) -> Void = view.onPlanApplied
         let revision: Int = view.planRevision
         DispatchQueue.main.async {
@@ -203,6 +261,7 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         appliedRevision = -1
         addedLayers = []
         addedSources = []
+        updateStatusProbe()
         if let latest {
             update(with: latest)
         }

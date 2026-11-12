@@ -1,26 +1,20 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Persistence cannot be linked next to ChartKit yet: both packages declare a target named `CSQLite`, and
-// SwiftPM rejects the graph ("target names need to be unique across the package graph"). Once one of
-// them is renamed (App/README.md, "Needed in existing packages"), set this to true: it adds the dependency
-// and compiles PersistenceAcknowledgementStore and AppPaths.openStore().
-let includePersistence = true
-
-var serviceDependencies: [Target.Dependency] = [
+// Persistence is a hard dependency: the store for waypoints, routes, tracks and settings. (Its SQLite shim
+// target is named `PersistenceCSQLite` so it can sit next to ChartKit's `CSQLite` in one package graph.)
+let serviceDependencies: [Target.Dependency] = [
     .product(name: "NavCore", package: "NavCore"),
     .product(name: "ChartKit", package: "ChartKit"),
+    .product(name: "Persistence", package: "Persistence"),
+    .product(name: "GPXKit", package: "GPXKit"),
 ]
-var packageDependencies: [Package.Dependency] = [
+let packageDependencies: [Package.Dependency] = [
     .package(path: "../NavCore"),
     .package(path: "../ChartKit"),
+    .package(path: "../Persistence"),
+    .package(path: "../GPXKit"),
 ]
-var serviceSettings: [SwiftSetting] = []
-if includePersistence {
-    serviceDependencies.append(.product(name: "Persistence", package: "Persistence"))
-    packageDependencies.append(.package(path: "../Persistence"))
-    serviceSettings.append(.define("APPSERVICES_PERSISTENCE"))
-}
 
 let package = Package(
     name: "AppServices",
@@ -34,8 +28,7 @@ let package = Package(
         // including URLSessionChartTransport (via FoundationNetworking), builds and is tested on Linux.
         .target(
             name: "AppServices",
-            dependencies: serviceDependencies,
-            swiftSettings: serviceSettings
+            dependencies: serviceDependencies
         ),
         .testTarget(
             name: "AppServicesTests",
@@ -43,6 +36,8 @@ let package = Package(
                 "AppServices",
                 .product(name: "NavCore", package: "NavCore"),
                 .product(name: "ChartKit", package: "ChartKit"),
+                .product(name: "Persistence", package: "Persistence"),
+                .product(name: "GPXKit", package: "GPXKit"),
             ],
             resources: [.copy("Resources")]
         ),

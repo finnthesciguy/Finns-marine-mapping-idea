@@ -17,8 +17,10 @@ final class NavigationModel {
     @ObservationIgnored private var streamTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var running = false
 
-    init(makeDeviceService: @escaping @MainActor () -> any LocationService) {
+    /// - Parameter startSimulating: begin with the simulated track instead of the device (UI tests, simulator).
+    init(makeDeviceService: @escaping @MainActor () -> any LocationService, startSimulating: Bool = false) {
         self.makeDeviceService = makeDeviceService
+        self.isSimulating = startSimulating
     }
 
     /// Starts location updates after the disclaimer has been accepted (asks for when-in-use permission).

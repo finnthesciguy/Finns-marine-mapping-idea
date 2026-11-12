@@ -217,9 +217,11 @@ RoutingKit (the on-device engine), what is proven and what is open:
 
 | Piece | Status |
 |---|---|
-| `AppServices` (location, chart downloads, display helpers) | built; 52 tests pass on Linux |
-| App skeleton (`App/`): disclaimer, offline chart map, charts screen | written; first compile is the CI simulator build job |
-| GPS tracks, waypoints, routes, GPX screens | not started |
+| `AppServices` (location, chart downloads, display helpers, launch switches, store opening and recovery) | built; 67 tests pass on Linux |
+| App skeleton (`App/`): disclaimer, offline chart map, charts screen | compiles for the simulator on CI; first runtime check is the new UI-test job |
+| App on Persistence (store opened with corrupt-file and newer-schema handling, disclaimer in the store, UserDefaults migration, interrupted recordings closed) | written; not yet compiled for iOS |
+| Runtime tests on CI (XCUITest: disclaimer gate and relaunch, instruments from simulated GPS, offline test chart drawn; hosted unit tests) | written; first run pending |
+| GPS tracks, waypoints, routes, GPX, settings screens | not started |
 | Auto-route screen | not started |
 
 Known gaps in the app so far: chart downloads run in the foreground only; the app installs NOAA's dated 2024 packages until our own are published; bundle id, name and icon are placeholders.

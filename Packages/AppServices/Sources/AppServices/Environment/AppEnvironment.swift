@@ -1,5 +1,6 @@
 import ChartKit
 import Foundation
+import Persistence
 
 /// Where the app keeps its files.
 ///
@@ -69,36 +70,95 @@ public struct AppPaths: Sendable, Equatable {
     }
 }
 
-/// The app's composition root: paths, the chart library (installer + transport) and the settings store.
+/// The app's composition root: paths, the chart library (installer + transport), the Persistence store and
+/// the disclaimer store.
 public final class AppEnvironment: Sendable {
     public let paths: AppPaths
     public let charts: ChartLibrary
     public let acknowledgements: any AcknowledgementStore
+    /// User data: waypoints, routes, tracks, settings.
+    public let store: PersistenceStore
+    /// False when the store could not be opened and an in-memory store stands in (nothing is kept).
+    public let storeIsPersistent: Bool
+    /// The on-disk store's open report (nil for the in-memory fallback).
+    public let openReport: OpenReport?
+    /// Messages for the user from opening storage.
+    public let notices: [StartupNotice]
+    /// Where a disclaimer acceptance from a build before Persistence may still be stored (nil: none to migrate).
+    public let legacyAcknowledgements: (any RemovableAcknowledgementStore)?
+    public let launch: LaunchConfiguration
 
-    public init(paths: AppPaths, charts: ChartLibrary, acknowledgements: any AcknowledgementStore) {
+    public init(paths: AppPaths, charts: ChartLibrary, acknowledgements: any AcknowledgementStore,
+                store: PersistenceStore, storeIsPersistent: Bool = true, openReport: OpenReport? = nil,
+                notices: [StartupNotice] = [], legacyAcknowledgements: (any RemovableAcknowledgementStore)? = nil,
+                launch: LaunchConfiguration = LaunchConfiguration()) {
         self.paths = paths
         self.charts = charts
         self.acknowledgements = acknowledgements
+        self.store = store
+        self.storeIsPersistent = storeIsPersistent
+        self.openReport = openReport
+        self.notices = notices
+        self.legacyAcknowledgements = legacyAcknowledgements
+        self.launch = launch
     }
 
-    /// Builds the environment on `paths` with the given transport.
+    /// Builds the environment on `paths` with the given transport. Without `store`, an in-memory store is
+    /// used (tests); without `acknowledgements`, the disclaimer is kept in `store`.
     public static func make(paths: AppPaths, transport: any ChartTransport,
-                            acknowledgements: any AcknowledgementStore,
+                            acknowledgements: (any AcknowledgementStore)? = nil,
+                            store: PersistenceStore? = nil,
                             diskSpace: any DiskSpaceProvider = FileSystemDiskSpace(),
                             configuration: ChartInstaller.Configuration = ChartInstaller.Configuration()) throws -> AppEnvironment {
         try paths.prepare()
         let installer = try ChartInstaller(rootDirectory: paths.chartsDirectory, transport: transport,
                                            diskSpace: diskSpace, configuration: configuration)
         let library = ChartLibrary(installer: installer, transport: transport, diskSpace: diskSpace)
-        return AppEnvironment(paths: paths, charts: library, acknowledgements: acknowledgements)
+        let userStore: PersistenceStore = try store ?? PersistenceStore(inMemoryWith: PersistenceStore.Options())
+        let ack: any AcknowledgementStore = acknowledgements ?? PersistenceAcknowledgementStore(store: userStore)
+        return AppEnvironment(paths: paths, charts: library, acknowledgements: ack, store: userStore,
+                              storeIsPersistent: store != nil)
     }
 
-    #if canImport(Darwin)
-    /// The real app: sandbox `Library/`, URLSession transport, disclaimer in UserDefaults (interim, see
-    /// `AcknowledgementStore`).
-    public static func live() throws -> AppEnvironment {
-        try make(paths: try AppPaths.live(), transport: URLSessionChartTransport(),
-                 acknowledgements: UserDefaultsAcknowledgementStore())
+    /// The real app: sandbox `Library/` (or an isolated test directory, see `LaunchConfiguration`), the
+    /// Persistence store at `paths.storeURL` (opened by `StoreOpener`, never fatal), the disclaimer in that
+    /// store, and UserDefaults as the legacy acknowledgement to migrate.
+    ///
+    /// - Parameters:
+    ///   - transport: chart transport (default `URLSessionChartTransport`).
+    ///   - temporaryDirectory: parent of isolated test data roots.
+    public static func live(launch: LaunchConfiguration = LaunchConfiguration(),
+                            transport: (any ChartTransport)? = nil,
+                            temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+                            diskSpace: any DiskSpaceProvider = FileSystemDiskSpace()) throws -> AppEnvironment {
+        let paths: AppPaths = try launch.resolvePaths(temporaryDirectory: temporaryDirectory, live: { try AppPaths.live() })
+        return try open(paths: paths, launch: launch, transport: transport ?? URLSessionChartTransport(),
+                        diskSpace: diskSpace,
+                        legacy: launch.usesIsolatedData ? nil : UserDefaultsAcknowledgementStore())
     }
-    #endif
+
+    /// `live` on explicit paths (also used for the temporary-directory fallback and in tests).
+    public static func open(paths: AppPaths, launch: LaunchConfiguration, transport: any ChartTransport,
+                            diskSpace: any DiskSpaceProvider = FileSystemDiskSpace(),
+                            configuration: ChartInstaller.Configuration = ChartInstaller.Configuration(),
+                            legacy: (any RemovableAcknowledgementStore)?) throws -> AppEnvironment {
+        try paths.prepare()
+        let opened: StoreOpener.Result = try StoreOpener.open(at: paths.storeURL)
+        let installer = try ChartInstaller(rootDirectory: paths.chartsDirectory, transport: transport,
+                                           diskSpace: diskSpace, configuration: configuration)
+        let library = ChartLibrary(installer: installer, transport: transport, diskSpace: diskSpace)
+        return AppEnvironment(paths: paths, charts: library,
+                              acknowledgements: PersistenceAcknowledgementStore(store: opened.store),
+                              store: opened.store, storeIsPersistent: opened.isPersistent,
+                              openReport: opened.report, notices: opened.notices,
+                              legacyAcknowledgements: legacy, launch: launch)
+    }
+
+    /// Copies a disclaimer acceptance from the legacy store into the Persistence store (removing the legacy
+    /// copy only when the store is on disk). Call once at startup, before reading the acknowledgement.
+    @discardableResult
+    public func migrateLegacyAcknowledgement() async -> AcknowledgementMigration.Outcome {
+        guard let legacy = legacyAcknowledgements else { return .nothingToMigrate }
+        return await AcknowledgementMigration.run(from: legacy, to: acknowledgements, removeLegacy: storeIsPersistent)
+    }
 }

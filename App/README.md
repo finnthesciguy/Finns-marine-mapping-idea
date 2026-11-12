@@ -20,6 +20,47 @@ What this first piece does:
   Store guideline 4.2.3), progress, cancel (keeps the partial file), resume, update, delete, free space.
 - **Simulate GPS** (debug builds only, the ant button on the map): replays a short Tampa Bay run at 6 kn,
   one fix per second, through `SimulatedLocationService`.
+- **Persistence** (`AppServices.AppEnvironment.live`): the SQLite store at `Library/AppData/gulfnav.sqlite` is
+  opened by `StoreOpener`, which never fails. A damaged file is set aside by Persistence and a banner says so;
+  any other failure (e.g. a file from a newer app version) falls back to an in-memory store with a banner
+  saying changes will not be kept, and the file is left untouched. The disclaimer acceptance lives in the
+  store (`PersistenceAcknowledgementStore`); an acceptance stored in UserDefaults by earlier builds is copied
+  in once at startup and then removed (`AcknowledgementMigration`, kept if the store is in memory).
+  Recordings interrupted by termination are closed at startup (`RecordingRecovery`; resuming comes with the
+  track recorder).
+
+## Runtime tests (CI job `iOS app (Simulator UI tests)`)
+
+`UITests/` (XCUITest, target `GulfNavUITests`) and `UnitTests/` (hosted unit tests of app-target helpers,
+target `GulfNavTests`) run on a booted iPhone simulator. The job picks the simulator by parsing
+`xcrun simctl list devices available -j` (newest iOS runtime, plain "iPhone NN" preferred, one is created if
+none exists), builds with ad hoc signing (`CODE_SIGN_IDENTITY=-`, falling back to `CODE_SIGNING_ALLOWED=NO`
+on a signing error), runs `xcodebuild test-without-building`, prints test cases and failures compactly and
+uploads the logs, the `.xcresult` bundle and the screenshots (exported with `xcresulttool export attachments`).
+
+The UI tests drive the app through launch environment variables, read by debug builds only
+(`AppServices.LaunchConfiguration`):
+
+| Variable | Effect |
+|---|---|
+| `GULFNAV_DATA_ROOT=<name>` | all data (charts, store) in `tmp/GulfNavTestData/<name>/`; UserDefaults not used |
+| `GULFNAV_RESET_DATA=1` | delete that directory first (clean state) |
+| `GULFNAV_SIMULATE_GPS=1` | start on the simulated Tampa Bay track (CoreLocation never asks for permission) |
+| `GULFNAV_PREINSTALL_FIXTURE_CHART=1` | install the bundled 16 KB test chart (`FixtureChart`, AppServices' `tiny-a.mbtiles`, debug builds only) through `LocalFileChartTransport`, no network |
+
+Tests: (a) the disclaimer gates the app and is not shown again after relaunch; (b) the map style loads and
+the instrument strip shows speed, course and a DDM position from simulated GPS; (c) the pre-installed test
+chart is listed as installed with its data date, and the map reports a chart layer applied. The map state is
+read from a debug-only invisible accessibility element `map.status` with the value
+`style=loaded; chartLayers=N` (set by the map coordinator when the style loads and after each layer plan is
+applied), not from pixels. Accessibility identifiers used: `disclaimer.title`, `disclaimer.accept`,
+`map.chartsButton`, `map.noChartsBanner`, `map.orientationButton`, `map.followButton`, `map.debugMenu`,
+`map.chartAgeBadge`, `chart-map` (the `MLNMapView`), `map.status`, `instrument.strip`, `instrument.sog`,
+`instrument.cog`, `instrument.latitude`, `instrument.longitude`, `notice.<kind>`, `charts.done`,
+`region.title.<id>`, `region.status.<id>`, `region.dataDate.<id>`.
+
+To run locally: `xcodegen generate`, then in Xcode Product > Test (or `xcodebuild test -scheme GulfNav
+-destination 'platform=iOS Simulator,name=<an iPhone you have>'`).
 
 ## Generate and run on a Mac
 
@@ -78,7 +119,7 @@ covers Tampa Bay; it is 621 MB).
   launch screen, orientations, `ITSAppUsesNonExemptEncryption = NO`. `UIBackgroundModes` is deliberately
   absent; `LocationPolicy` will not set `allowsBackgroundLocationUpdates` without it.
 - **Privacy manifest** (`Resources/PrivacyInfo.xcprivacy`): no tracking, no collected data; required-reason
-  APIs: UserDefaults `CA92.1` (disclaimer acceptance, interim), file timestamp `C617.1` (ChartKit reads file
+  APIs: UserDefaults `CA92.1` (read once to migrate an older disclaimer acceptance), file timestamp `C617.1` (ChartKit reads file
   attributes of its own packages), disk space `85F4.1` (shown on the Charts screen) and `E174.1` (free-space
   check before a download).
 - **Storage**: charts in `Library/Charts` (no spaces, excluded from backup), the Persistence store at
@@ -113,7 +154,8 @@ URL are used so the region box can be set: NOAA packages contain world-wide tile
 
 ## Needed in existing packages
 
-1. **Blocking Persistence in the app — rename one `CSQLite` target.** ChartKit and Persistence both declare a
+1. **Done:** Persistence's shim target is now `PersistenceCSQLite` and AppServices depends on Persistence
+   unconditionally. Previous note, for the record — **rename one `CSQLite` target.** ChartKit and Persistence both declare a
    system-library target named `CSQLite`. SwiftPM (and Xcode) refuse any package graph containing both:
    `multiple packages ('chartkit', 'persistence') declare targets with a conflicting name: 'CSQLite'`
    (reproduced here with Swift 6.4.2; `moduleAliases` does not help because the module name comes from the
@@ -153,8 +195,9 @@ When the chart build service publishes `manifest.json` with real checksums:
 
 ## Known gaps
 
-- **Not compiled here.** This container has no Xcode; the app target is compiled only by the CI job
-  `iOS app (Simulator build)`. AppServices (everything except `CoreLocationService`) is built and tested on
+- **Not compiled here.** This container has no Xcode; the app target is compiled only by the CI jobs
+  `iOS app (Simulator build)` and `iOS app (Simulator UI tests)` (the UI-test file is type-checked on Linux
+  against stub XCUI types, which proves nothing about the real framework). AppServices (everything except `CoreLocationService`) is built and tested on
   Linux; the CI `apple` job also builds AppServices for iOS and tests it on macOS.
 - **Foreground downloads only.** `URLSessionChartTransport` uses a data task in a default session and streams
   into the partial file; iOS suspends it when the app leaves the foreground, and the next attempt resumes.
@@ -171,8 +214,8 @@ When the chart build service publishes `manifest.json` with real checksums:
   them). The app removes the layer before ChartKit deletes or supersedes a file, so the handle is not read
   again, but the disk space of a deleted package may only be returned when the app restarts.
 - The chart-age badge shows the oldest installed region, not the one under the viewport.
-- Not handled yet: tracks, waypoints, routes, GPX, auto-routing, manifest fetching, retina (512 px) packages
-  (the manifest has no tile-size field yet), units other than knots/degrees, the Persistence store.
+- Not handled yet: tracks, waypoints, routes, GPX, settings screen, auto-routing, manifest fetching, retina
+  (512 px) packages (the manifest has no tile-size field yet), units other than knots/degrees.
 - `URLSessionChartTransport` integration tests (real HTTP with Range/If-Range, drops, cancellation) run only
   when `APPSERVICES_TEST_SERVER` points at `Packages/AppServices/Scripts/range_server.py`; they passed on
   Linux (FoundationNetworking) but have not run on Apple's URLSession.
