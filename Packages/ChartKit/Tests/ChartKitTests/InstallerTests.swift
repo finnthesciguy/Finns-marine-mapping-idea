@@ -278,10 +278,18 @@ import Testing
         #expect(await installer.state(for: r1.id) == .installed(version: "v2"))
         let newFile = installer.fileURL(for: second.chart)
         #expect(newFile != oldFile)
-        #expect(!FileManager.default.fileExists(atPath: oldFile.path))
-        // An already-open handle on the superseded file keeps working until closed.
+        // The superseded file stays on disk so an already-open reader keeps working
+        // (Apple's SQLite fails with an I/O error once its database file is unlinked).
+        #expect(FileManager.default.fileExists(atPath: oldFile.path))
+        #expect(await installer.supersededFiles() == [oldFile])
         #expect(try await oldReader.tile(zoom: 2, x: 1, y: 1) == Fixtures.png(1))
         #expect(try await MBTilesReader(url: newFile).tile(zoom: 2, x: 1, y: 1) == Fixtures.png(2))
+        // Once the app has switched to the new file it releases the old one.
+        await oldReader.close()
+        #expect(await installer.removeSupersededFiles() == [oldFile])
+        #expect(!FileManager.default.fileExists(atPath: oldFile.path))
+        #expect(await installer.supersededFiles().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: newFile.path))
 
         let plan2 = await installer.apply(ChartManifest(generatedAt: Date(), regions: [good]))
         #expect(plan2.unchanged.count == 1)
@@ -314,7 +322,10 @@ import Testing
         #expect(await server.requests.count == 3) // only the routing pack was fetched
         #expect(b.chart == a.chart)
         #expect(b.routingPack?.version == "r2")
-        #expect(!FileManager.default.fileExists(atPath: installer.fileURL(for: a.routingPack!).path))
+        let oldPack = installer.fileURL(for: a.routingPack!)
+        #expect(FileManager.default.fileExists(atPath: oldPack.path)) // kept until released
+        #expect(await installer.removeSupersededFiles() == [oldPack])
+        #expect(!FileManager.default.fileExists(atPath: oldPack.path))
     }
 
     @Test func headSizeMismatchStopsBeforeDownloading() async throws {

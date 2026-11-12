@@ -103,8 +103,9 @@ struct PersistedInstallState: Codable, Equatable {
 /// An update downloads and verifies into `staging/`, renames into `regions/<id>/` under a new
 /// versioned name, and then commits by atomically rewriting the state file. Until that commit the
 /// old version stays installed and usable; if anything fails the new file is removed (rollback).
-/// The superseded file is deleted after the commit (an open SQLite handle on it keeps working on
-/// POSIX file systems until closed).
+/// The superseded file is kept on disk after the commit so open readers keep working; the app
+/// deletes it with `removeSupersededFiles()` once it has switched to the new file. Apple's SQLite
+/// fails with an I/O error when its database file is unlinked, so it must not be deleted earlier.
 public actor ChartInstaller {
     public struct Configuration: Sendable {
         /// Extra free space required beyond the download itself.
@@ -126,6 +127,24 @@ public actor ChartInstaller {
     }
 
     public static let stateFileName = "chartkit-state.json"
+
+    /// Files replaced by an update during this installer's lifetime and not yet deleted.
+    private var superseded: [URL] = []
+
+    /// Files replaced by an update that are still on disk so open readers keep working.
+    public func supersededFiles() -> [URL] { superseded }
+
+    /// Deletes files replaced by an update. Call after every reader of the old files has been
+    /// closed and the map has been pointed at the new files. Returns the files removed.
+    @discardableResult
+    public func removeSupersededFiles() -> [URL] {
+        let removed = superseded
+        superseded = []
+        for url in removed {
+            try? FileManager.default.removeItem(at: url)
+        }
+        return removed
+    }
 
     public nonisolated let rootDirectory: URL
     private let transport: any ChartTransport
@@ -453,10 +472,14 @@ public actor ChartInstaller {
         }
         persisted = next
 
-        // 6. Drop superseded files.
+        // 6. Retire superseded files. They are NOT deleted here: a reader that still has the old
+        //    package open (the map) must keep working until the app has switched to the new file.
+        //    On Apple platforms SQLite fails with an I/O error once its database file is unlinked.
+        //    The app calls `removeSupersededFiles()` after switching; anything left over is
+        //    removed as an orphan the next time an installer is created.
         let live = Set([chartArtifact?.relativePath, routingArtifact?.relativePath].compactMap { $0 })
         for old in [existing?.chart, existing?.routingPack].compactMap({ $0 }) where !live.contains(old.relativePath) {
-            try? fm.removeItem(at: fileURL(for: old))
+            superseded.append(fileURL(for: old))
         }
 
         guard let installed = installedRegion(id: id) else { throw InstallFailure.fileSystem("state lost after commit") }

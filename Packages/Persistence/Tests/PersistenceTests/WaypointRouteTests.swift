@@ -69,9 +69,11 @@ struct WaypointRouteTests {
 
     @Test func routePointsKeepTheirOrder() async throws {
         let store = try PersistenceStore(inMemoryWith: TestClock().options)
-        let pts = (0..<50).map { i in
-            RoutePoint(coordinate: Coordinate(latitude: 27 + Double(i) * 0.01, longitude: -82.5 - Double(i % 7) * 0.003),
-                       name: i % 3 == 0 ? "P\(i)" : nil)
+        let pts: [RoutePoint] = (0..<50).map { (i: Int) -> RoutePoint in
+            let latitude: Double = 27.0 + Double(i) * 0.01
+            let longitude: Double = -82.5 - Double(i % 7) * 0.003
+            let name: String? = (i % 3 == 0) ? "P\(i)" : nil
+            return RoutePoint(coordinate: Coordinate(latitude: latitude, longitude: longitude), name: name)
         }
         var r = Route(name: "Tampa to Venice", notes: "ICW", points: pts)
         try await store.save(r)

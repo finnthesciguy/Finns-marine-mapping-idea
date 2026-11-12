@@ -80,8 +80,9 @@ regions/<id>/<kind>-<version>-<sha12>.<ext>  installed files, never modified in 
 
 `install(region)`: free-space precheck → HEAD for validators (and a size check against the manifest)
 → GET, resuming with `Range` + `If-Range` → streamed SHA-256 → MBTiles integrity check → rename into
-`regions/` under a new name → atomically rewrite the state file (the commit) → delete the superseded
-file. Until the commit the old version stays installed; any failure removes the new file and keeps
+`regions/` under a new name → atomically rewrite the state file (the commit) → keep the superseded
+file until the app calls `removeSupersededFiles()` (after it has closed its readers and pointed the
+map at the new file; leftovers are removed the next time an installer is created). Until the commit the old version stays installed; any failure removes the new file and keeps
 the old one. Paths in the state file are relative to the root, because iOS changes the app container
 path between installs.
 
