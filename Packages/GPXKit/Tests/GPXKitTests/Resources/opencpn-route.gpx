@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<gpx version="1.1" creator="OpenCPN" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 http://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd" xmlns:opencpn="http://www.opencpn.org">
+    <wpt lat="27.600833333" lon="-82.760000000">
+        <time>2024-03-09T14:05:07Z</time>
+        <name>Egmont Key Anch</name>
+        <desc>Good holding in sand, 12 ft. Watch the current &amp; ferry wake.</desc>
+        <link href="https://example.org/egmont">
+            <text>Cruising guide</text>
+            <type>text/html</type>
+        </link>
+        <sym>anchorage</sym>
+        <type>WPT</type>
+        <extensions>
+            <opencpn:guid>6c0e1f9a-3b42-4b0e-9c51-0d2f7f3a1b11</opencpn:guid>
+            <opencpn:viz_name>1</opencpn:viz_name>
+            <opencpn:arrival_radius>0.050</opencpn:arrival_radius>
+            <opencpn:waypoint_range_rings visible="false" number="0" step="1" units="0" colour="#FF0000" />
+            <opencpn:scale_min_max UseScale="false" ScaleMin="2147483646" ScaleMax="0" />
+        </extensions>
+    </wpt>
+    <wpt lat="27.078500000" lon="-82.457333333">
+        <time>2024-03-09T14:12:44Z</time>
+        <name>Venice Inlet</name>
+        <sym>circle</sym>
+        <type>WPT</type>
+        <extensions>
+            <opencpn:guid>a71f7b3e-2c11-4b2a-8d5e-6f1e9a0c4d22</opencpn:guid>
+        </extensions>
+    </wpt>
+    <rte>
+        <name>Skyway to Venice</name>
+        <extensions>
+            <opencpn:start>Skyway Channel</opencpn:start>
+            <opencpn:end>Venice Inlet</opencpn:end>
+            <opencpn:viz>1</opencpn:viz>
+            <opencpn:guid>e4b0c7d2-9f13-4a77-a2c8-3d5b8e6f7a33</opencpn:guid>
+            <opencpn:planned_speed>6.00</opencpn:planned_speed>
+            <opencpn:time_display>PC</opencpn:time_display>
+            <gpxx:RouteExtension>
+                <gpxx:IsAutoNamed>false</gpxx:IsAutoNamed>
+            </gpxx:RouteExtension>
+        </extensions>
+        <rtept lat="27.618166667" lon="-82.736500000">
+            <time>2024-03-09T15:00:00Z</time>
+            <name>Skyway Channel</name>
+            <sym>diamond</sym>
+            <type>WPT</type>
+            <extensions>
+                <opencpn:guid>11111111-0000-4000-8000-000000000001</opencpn:guid>
+                <opencpn:auto_name>0</opencpn:auto_name>
+            </extensions>
+        </rtept>
+        <rtept lat="27.583333333" lon="-82.800000000">
+            <name>SWC sea buoy</name>
+            <sym>diamond</sym>
+        </rtept>
+        <rtept lat="27.300000000" lon="-82.633333333">
+            <name>001</name>
+            <sym>diamond</sym>
+        </rtept>
+        <rtept lat="27.078500000" lon="-82.457333333">
+            <name>Venice Inlet</name>
+            <sym>circle</sym>
+        </rtept>
+    </rte>
+</gpx>
