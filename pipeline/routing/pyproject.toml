@@ -1,0 +1,24 @@
+[project]
+name = "enc-routing"
+version = "0.1.0"
+description = "Spike: NOAA ENC (S-57) cells to routing layers and a prototype navigation mesh"
+requires-python = ">=3.11"
+dependencies = [
+  "shapely>=2.1",     # needs GEOS >= 3.10 for constrained_delaunay_triangles, 3.12 recommended
+  "geopandas>=1.0",
+  "pyogrio>=0.9",     # bundles GDAL with the S57 driver
+  "pyproj>=3.6",
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "matplotlib>=3.8",
+  "pillow>=10",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+enc-routing = "enc_routing.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

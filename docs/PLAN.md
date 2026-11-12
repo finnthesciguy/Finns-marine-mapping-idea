@@ -152,6 +152,28 @@ Each piece is built by an Opus worker against a written brief, reviewed and inte
 
 **Later:** USACE channel survey depths with dates, tide credit, opening-bridge schedules, Coast Guard notices as temporary hazards, anchor alarm, AIS-traffic route prior.
 
+## 5a. Wave 1 results (12 Nov 2026)
+
+All four pieces are built and their tests pass on Linux. None of the Swift code has been compiled for iOS yet.
+
+| Piece | Result |
+|---|---|
+| `NavCore`, `GPXKit` | 61 and 21 tests pass |
+| `ChartKit` | 69 tests pass, including against a real NOAA package |
+| `pipeline/catalog` + chart-source spike | 40 tests pass; rendering source settled (D1) |
+| `pipeline/routing` spike | 19 tests pass; end-to-end pilot for Tampa Bay to Charlotte Harbor ([report](spikes/routing-data.md)) |
+
+What the routing pilot found, and what it changes:
+
+- **The approach works.** A triangle mesh of navigable water (494,000 triangles for the pilot) routes in well under a second in Python and compresses to about 3–4 MB. Projected whole-Gulf size is about 45 MB, below the original estimate.
+- **Charted depth alone breaks the Intracoastal Waterway.** At any draft over 3 ft the chart data shows two gaps south of Sarasota (Roberts Bay and south of Venice), where the chart shows 0–3 ft but the marked channel continues. The inside route only connects if the Army Corps maintained ("project") depth of 9 ft is trusted there.
+  - **Design decision:** the router has two depth sources. Charted depth is the default and produces green legs. Legs that rely on Army Corps project depth are allowed only if the user turns on "use maintained channels", and are always graded yellow with the reason shown.
+- **Depth bands are coarse.** The charts have no contour between 3 and 6 ft, so a 4 ft and a 6 ft boat get the same answer. Refining bands with spot soundings is Wave 2 work.
+- **Clearance data is patchy.** Only 155 of 390 bridge parts over water carry a clearance. Bridge parts and cables with no clearance are treated as impassable unless the user accepts an "unknown clearance" caution leg.
+- **72% of charted hazards have no depth** and are treated as blocking.
+- **Known defects to fix in Wave 2:** routes can pass within a few metres of jetties and run close to beaches (water must be shrunk by a safety clearance, plus a distance-to-hazard cost); entry-prohibited areas are not yet honoured; the mesh has a small number of topology flaws.
+- **NOAA stores depths truncated to 0.1 m**, so thresholds must be converted the same way or whole depth bands vanish.
+
 ## 6. What the owner has to do
 
 Nothing is needed for Waves 1 and 2. Before Wave 3:
