@@ -38,10 +38,10 @@ A native iPhone/iPad app for recreational boaters on the US Gulf Coast (Brownsvi
 **NOAA ENC product catalog** — `https://www.charts.noaa.gov/ENCs/ENCProdCat.xml` **(verified)**
 
 - 10 MB XML, regenerated daily. Lists every chart cell with edition, update number, dates, states and zip URL.
-- 1,419 active cells touch TX, LA, MS, AL or FL (this includes Florida's Atlantic side): 945 harbour-scale, 380 approach, 78 coastal, 16 smaller-scale. Together they are only **147 MB zipped**. Newest update in the set: 5 Nov 2026.
+- 1,157 active cells cover the Gulf Coast area of interest (selected by coverage geometry, so Florida's Atlantic side is excluded): 768 harbour-scale, 315 approach, 64 coastal, 10 smaller-scale. Together they are only **133 MB zipped**.
 - Cell names are changing as NOAA moves to a gridded layout, so everything keys on the catalog, never on hard-coded cell names.
 
-**NOAA live tile service** — `https://gis.charttools.noaa.gov/arcgis/rest/services/MarineChart_Services/NOAACharts/MapServer/WMTS` responds **(verified reachable; freshness and rate limits not yet checked)**.
+**NOAA live services** on `gis.charttools.noaa.gov` **(verified)**: the cached WMTS tile service is a September 2023 cache; the dynamic `MCS/NOAAChartDisplay` export service is current. See D1.
 
 **Not yet verified:** USACE National Channel Framework, Coast Guard NAVCEN GeoJSON feeds, NOAA tide API, licence wording. All are public-domain US government sources per search results. Hosts are now allowed in this environment so the build workers will verify them.
 
@@ -56,14 +56,16 @@ A scheduled job (GitHub Actions) that:
 3. publishes region packages plus a small `manifest.json` (region, version, date, size, checksum, URL);
 4. the app polls the manifest, shows "update available", and downloads in the background.
 
-Rendering source, in order of preference:
+Rendering source — **settled by the Wave 1 spike** ([docs/spikes/chart-source.md](spikes/chart-source.md)):
 
-- **A. NOAA's live chart tile service** as the renderer (paper-chart look, no symbology work). Needs a politeness budget and ideally NOAA's blessing; changed-tiles-only keeps the load small.
-- **B. Render from S-57 ourselves** if A proves stale, rate-limited or unreliable. Much more work (chart symbology).
+- **NOAA's dynamic chart export service** (`MCS/NOAAChartDisplay` MaritimeChartService export) is the renderer. It is current: lights added on 3 Nov 2026 were already drawn on 12 Nov. It uses the paper-chart look, returns identical output for identical requests, and can render true retina tiles.
+- NOAA's cached tile service (WMTS) is **not** usable: it is a September 2023 cache, older than the offline packages.
+- Live tiles cannot be patched into NOAA's 2024 packages because the renderer has changed since; we build our own baseline once, then update it.
+- Measured cost at a polite 1 request/second: full Gulf baseline about 7.5 hours (about 27,000 requests); a typical weekly update about 18 minutes (median 24.5 changed cells per week over the last 12 weeks).
+- Rendering from S-57 ourselves stays as the contingency if NOAA's service changes or throttles.
+- NOAA publishes no terms or rate limits for this service. Before the first full build we should write to the NOAA contact named in the service description.
 
-Day-one fallback, already working: ship NOAA's May 2024 packages unchanged, clearly dated in the UI. The app code is identical either way because both are MBTiles.
-
-Wave 1 measures option A (is the live service current? how fast can we fetch politely?) before we commit.
+Until our first baseline exists, the app ships NOAA's May 2024 packages unchanged, clearly dated in the UI. The app code is identical either way because both are MBTiles.
 
 ### D2. Map engine — MapLibre Native iOS
 
