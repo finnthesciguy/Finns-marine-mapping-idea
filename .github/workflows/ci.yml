@@ -1,7 +1,8 @@
 # Continuous integration for everything testable without signing keys:
 #   - every Swift package under Packages/ built and tested on Linux (official Swift container),
 #   - every Python tool under pipeline/ installed from scratch and its offline tests run,
-#   - every Swift package built for iOS and tested on macOS.
+#   - every Swift package built for iOS and tested on macOS,
+#   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing.
 # Packages and tools are discovered at run time, so new ones are picked up without editing this file.
 name: CI
 
@@ -197,4 +198,70 @@ jobs:
             echo "|---|---|"
             echo "| iOS build (generic/platform=iOS) | ${{ steps.ios.outcome }} |"
             echo "| swift test (macOS) | ${{ steps.macos-test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios-app:
+    # The SwiftUI app in App/: XcodeGen generates the project from App/project.yml (no .xcodeproj is
+    # committed), then it is built for the iOS Simulator without signing. Errors are printed compactly at
+    # the end of the build step; the full log is uploaded as an artifact.
+    name: iOS app (Simulator build)
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: App
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+      - name: Resolve packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies -project GulfNav.xcodeproj -scheme GulfNav \
+            -derivedDataPath "$RUNNER_TEMP/AppDerivedData" 2>&1 | tee "$RUNNER_TEMP/resolve.log"
+      - id: build
+        name: Build for iOS Simulator (no signing)
+        run: |
+          set +e
+          set -o pipefail
+          xcodebuild -project GulfNav.xcodeproj -scheme GulfNav \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/AppDerivedData" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/app-build.log" 2>&1
+          status=$?
+          echo "xcodebuild exit status: $status"
+          echo "----- last 40 log lines -----"
+          tail -n 40 "$RUNNER_TEMP/app-build.log"
+          echo "----- lines containing 'error:' (3 lines of context) -----"
+          grep -n -B 3 -A 3 'error:' "$RUNNER_TEMP/app-build.log" | head -n 400 || echo "(none)"
+          echo "----- error count: $(grep -c 'error:' "$RUNNER_TEMP/app-build.log" || true) -----"
+          exit $status
+      - name: Upload build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-app-build-log
+          path: |
+            ${{ runner.temp }}/app-build.log
+            ${{ runner.temp }}/resolve.log
+          if-no-files-found: ignore
+      - name: Report
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          {
+            echo "### iOS app"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Simulator build (generic/platform=iOS Simulator) | ${{ steps.build.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

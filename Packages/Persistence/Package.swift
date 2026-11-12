@@ -13,13 +13,13 @@ let package = Package(
     ],
     targets: [
         // On Linux we link the system libsqlite3 (libsqlite3-dev). Apple platforms use the SDK's SQLite3 module.
-        .systemLibrary(name: "CSQLite", path: "Sources/CSQLite", providers: [.apt(["libsqlite3-dev"])]),
+        .systemLibrary(name: "PersistenceCSQLite", path: "Sources/PersistenceCSQLite", providers: [.apt(["libsqlite3-dev"])]),
         .target(
             name: "Persistence",
             dependencies: [
                 .product(name: "NavCore", package: "NavCore"),
                 .product(name: "GPXKit", package: "GPXKit"),
-                .target(name: "CSQLite", condition: .when(platforms: [.linux])),
+                .target(name: "PersistenceCSQLite", condition: .when(platforms: [.linux])),
             ]
         ),
         .testTarget(
@@ -28,7 +28,7 @@ let package = Package(
                 "Persistence",
                 .product(name: "NavCore", package: "NavCore"),
                 .product(name: "GPXKit", package: "GPXKit"),
-                .target(name: "CSQLite", condition: .when(platforms: [.linux])),
+                .target(name: "PersistenceCSQLite", condition: .when(platforms: [.linux])),
             ]
         ),
     ],
