@@ -1,7 +1,7 @@
 {
  "schema": "routing-vectors/1",
  "pack": "sarasota.pack",
- "pack_sha256": "9face2bf45bbc391f28e6b4cba7b5cd4539ab9f2a1b54b78c5150102f408e621",
+ "pack_sha256": "c8289967a0546f46b3e895b2693a418df63bcfb9850d3b65326d3cbf29867da5",
  "tolerances": {
   "waypoints_units": 0,
   "distance_m": 1e-06,
@@ -44,7 +44,7 @@
      "x": -825465389,
      "y": 273329841,
      "triangle": 19959,
-     "snap_m": 4.227,
+     "snap_m": 4.23,
      "in_mesh": false
     },
     "corridor": [
@@ -1080,7 +1080,7 @@
      "x": -825465389,
      "y": 273329841,
      "triangle": 19959,
-     "snap_m": 4.227,
+     "snap_m": 4.23,
      "in_mesh": false
     },
     "corridor": [
@@ -2155,16 +2155,16 @@
      "x": -825465389,
      "y": 273329841,
      "triangle": 19959,
-     "snap_m": 4.227,
+     "snap_m": 4.23,
      "in_mesh": false
     },
     "goal": {
-     "lon": -82.53844,
-     "lat": 27.2622732,
-     "x": -825384400,
-     "y": 272622732,
+     "lon": -82.5384399,
+     "lat": 27.2622731,
+     "x": -825384399,
+     "y": 272622731,
      "triangle": 6097,
-     "snap_m": 63.142,
+     "snap_m": 63.144,
      "in_mesh": false
     },
     "corridor": [
@@ -2731,8 +2731,8 @@
       272628240
      ],
      [
-      -825384400,
-      272622732
+      -825384399,
+      272622731
      ]
     ],
     "waypoints": [
@@ -2957,8 +2957,8 @@
       27.262824
      ],
      [
-      -82.53844,
-      27.2622732
+      -82.5384399,
+      27.2622731
      ]
     ],
     "legs": [
@@ -4085,14 +4085,14 @@
        27.262824
       ],
       "to": [
-       -82.53844,
-       27.2622732
+       -82.5384399,
+       27.2622731
       ],
       "triangles": [
        334,
        339
       ],
-      "length_m": 62.856100441710446,
+      "length_m": 62.86915827185961,
       "grade": "yellow",
       "reasons": [
        "MAINTAINED_DEPTH"
@@ -4103,8 +4103,8 @@
      }
     ],
     "summary": {
-     "distance_m": 8545.552681535743,
-     "distance_nm": 4.614229309684526,
+     "distance_m": 8545.565739365891,
+     "distance_nm": 4.6142363603487535,
      "legs": 55,
      "green_legs": 39,
      "yellow_legs": 16,
@@ -4127,7 +4127,7 @@
      "data_date": 20261023
     },
     "data_date": 20261023,
-    "distance_m": 8545.552681535743
+    "distance_m": 8545.565739365891
    }
   },
   {
@@ -4159,7 +4159,7 @@
      "x": -825465389,
      "y": 273329841,
      "triangle": 19959,
-     "snap_m": 4.227,
+     "snap_m": 4.23,
      "in_mesh": false
     },
     "goal": {
@@ -4222,7 +4222,7 @@
      "x": -825465389,
      "y": 273329841,
      "triangle": 19959,
-     "snap_m": 4.227,
+     "snap_m": 4.23,
      "in_mesh": false
     },
     "goal": {
@@ -6751,6 +6751,55 @@
     "start": {
      "error": "NO_WATER_NEARBY",
      "located": 37109
+    },
+    "data_date": 20261023
+   }
+  },
+  {
+   "id": "q9_not_connected",
+   "start": [
+    -82.5454965,
+    27.3326002
+   ],
+   "goal": [
+    -82.603,
+    27.403
+   ],
+   "profile": {
+    "draft_ft": 4.5,
+    "margin_ft": 1.5,
+    "air_draft_ft": 20
+   },
+   "note": "start in a small water part near Marina Jack that the mesh does not connect to the bay: NOT_CONNECTED, every hint false",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "NO_ROUTE",
+    "req_dm": 18,
+    "air_dm": 60,
+    "start": {
+     "lon": -82.5454965,
+     "lat": 27.3326002,
+     "x": -825454965,
+     "y": 273326002,
+     "triangle": 20011,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -82.603,
+     "lat": 27.403,
+     "x": -826030000,
+     "y": 274030000,
+     "triangle": 38094,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "reason": "NOT_CONNECTED",
+    "blocked": [],
+    "hints": {
+     "use_maintained": false,
+     "accept_unknown_clearance": false
     },
     "data_date": 20261023
    }

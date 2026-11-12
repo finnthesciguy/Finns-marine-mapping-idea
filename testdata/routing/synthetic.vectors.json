@@ -1,7 +1,7 @@
 {
  "schema": "routing-vectors/1",
  "pack": "synthetic.pack",
- "pack_sha256": "ee5034db6a880ba15ad9e8b607d9a6967f410f7f5a131c404c6a1b3190f50fe0",
+ "pack_sha256": "e32df39fd14943412827390e9c79a600e2dbe02506e2749ca27b06dd4816f32d",
  "tolerances": {
   "waypoints_units": 0,
   "distance_m": 1e-06,
@@ -354,7 +354,13 @@
       ],
       "min_depth_dm": 15,
       "min_spare_dm": 0,
-      "crossings": []
+      "crossings": [
+       {
+        "record": 3,
+        "clearance_dm": 500,
+        "opening": false
+       }
+      ]
      },
      {
       "from": [
@@ -1095,6 +1101,337 @@
     },
     "data_date": 20261101,
     "distance_m": 99.07333917907565
+   }
+  },
+  {
+   "id": "s10_overhead_point",
+   "start": [
+    -81.9995,
+    27.0025
+   ],
+   "goal": [
+    -81.9945,
+    27.0025
+   ],
+   "profile": {
+    "draft_ft": 1,
+    "margin_ft": 0.5,
+    "air_draft_ft": 5
+   },
+   "note": "a leg along the row 1/row 2 boundary passes 0.44 m from the overhead point object (OVHD 3), outside the leg's bounding box: it is listed as a crossing; the cable and bridge line ends it touches are not",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 6,
+    "air_dm": 15,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0025,
+     "x": -819995000,
+     "y": 270025000,
+     "triangle": 8,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9945,
+     "lat": 27.0025,
+     "x": -819945000,
+     "y": 270025000,
+     "triangle": 42,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     8,
+     9,
+     12,
+     15,
+     5,
+     6,
+     18,
+     25,
+     24,
+     28,
+     33,
+     32,
+     41,
+     42
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270025000
+     ],
+     [
+      -819980000,
+      270020000
+     ],
+     [
+      -819950000,
+      270020000
+     ],
+     [
+      -819945000,
+      270025000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0025
+     ],
+     [
+      -81.998,
+      27.002
+     ],
+     [
+      -81.995,
+      27.002
+     ],
+     [
+      -81.9945,
+      27.0025
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0025
+      ],
+      "to": [
+       -81.998,
+       27.002
+      ],
+      "triangles": [
+       0,
+       5
+      ],
+      "length_m": 158.6698439631322,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 21,
+      "min_spare_dm": 15,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.998,
+       27.002
+      ],
+      "to": [
+       -81.995,
+       27.002
+      ],
+      "triangles": [
+       6,
+       11
+      ],
+      "length_m": 297.2213392447422,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 9,
+      "min_spare_dm": 3,
+      "crossings": [
+       {
+        "record": 3,
+        "clearance_dm": 500,
+        "opening": false
+       }
+      ]
+     },
+     {
+      "from": [
+       -81.995,
+       27.002
+      ],
+      "to": [
+       -81.9945,
+       27.0025
+      ],
+      "triangles": [
+       12,
+       13
+      ],
+      "length_m": 74.46461584778442,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 21,
+      "min_spare_dm": 15,
+      "crossings": [
+       {
+        "record": 1,
+        "clearance_dm": 30,
+        "opening": false
+       }
+      ]
+     }
+    ],
+    "summary": {
+     "distance_m": 530.3557990556587,
+     "distance_nm": 0.2863692219522995,
+     "legs": 3,
+     "green_legs": 3,
+     "yellow_legs": 0,
+     "shallowest": {
+      "depth_dm": 9,
+      "triangle": 24,
+      "lon": -81.9966667,
+      "lat": 27.0016666,
+      "maintained": false
+     },
+     "lowest_clearance": {
+      "clearance_dm": 18,
+      "overhead": 0,
+      "name": "Test Opening Bridge",
+      "opening": true
+     },
+     "openings": [],
+     "unknown_clearances": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 530.3557990556587
+   }
+  },
+  {
+   "id": "s11_start_is_goal",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9995,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "start equal to goal: a route with one waypoint and no legs",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     4
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270015000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0015
+     ]
+    ],
+    "legs": [],
+    "summary": {
+     "distance_m": 0.0,
+     "distance_nm": 0.0,
+     "legs": 0,
+     "green_legs": 0,
+     "yellow_legs": 0,
+     "shallowest": {
+      "depth_dm": 36,
+      "triangle": 4,
+      "lon": -81.9993334,
+      "lat": 27.0013333,
+      "maintained": false
+     },
+     "lowest_clearance": null,
+     "openings": [],
+     "unknown_clearances": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 0.0
+   }
+  },
+  {
+   "id": "s12_invalid_profile",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": -1,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "negative draft: INVALID_REQUEST",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "INVALID_REQUEST",
+    "data_date": 20261101
+   }
+  },
+  {
+   "id": "s13_goal_out_of_range",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    95.0
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "latitude 95: GOAL_OUTSIDE_PACK, with the snapped start",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": false,
+    "error": "GOAL_OUTSIDE_PACK",
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "error": "OUTSIDE_PACK"
+    },
+    "data_date": 20261101
    }
   }
  ]

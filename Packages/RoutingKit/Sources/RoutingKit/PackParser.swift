@@ -68,16 +68,17 @@ struct PackParser {
         let fileSize = Int(v.u32(16)!)
         guard fileSize == file.count else { throw .fileSizeMismatch(header: fileSize, actual: file.count) }
 
+        // 5. header fields (header_size, section_table_offset, section_count, bounding box, counts).
         let header = try parseHeader(v, major: major, minor: minor, crc: headerCRC)
+        // 6. section-table CRC (format 1.1 and later), then the entries.
         let sections = try parseSectionTable(v, header: header)
+        // 7. layout: back to back in table order at 8-byte boundaries, zero padding, nothing after the end.
+        try checkLayout(sections, tableEnd: header.sectionTableOffset + 32 * header.sectionCount)
         var c = PackContents(header: header, sections: sections)
 
-        // 5. bounds and CRC of every section (unknown tags included), before anything is decoded.
+        // 8. CRC of every section (unknown tags included), 9. unique tags, before anything is decoded.
         var byTag: [String: PackSection] = [:]
         for s in sections {
-            guard s.offset <= UInt64(file.count), UInt64(s.storedLength) <= UInt64(file.count) - s.offset else {
-                throw .sectionOutOfBounds(tag: s.tag)
-            }
             let stored = UnsafeBufferPointer(rebasing: file[Int(s.offset)..<(Int(s.offset) + s.storedLength)])
             guard CRC32.checksum(stored) == s.crc32 else { throw .sectionChecksumMismatch(tag: s.tag) }
             guard byTag[s.tag] == nil else { throw .duplicateSection(tag: s.tag) }
@@ -88,7 +89,7 @@ struct PackParser {
             throw .invalidHeader("flag bit 0 (ADJC present) disagrees with the section table")
         }
 
-        // 6. decode (inflating where needed).
+        // 10. encodings and inflated lengths, 11. section contents (decoded in place or inflated).
         let T = header.triangleCount, V = header.vertexCount
         c.info = try withSection(byTag[Tag.info]!) { p throws(PackError) in Self.decodeInfo(p) }
         let strs = try withSection(byTag[Tag.strs]!) { p throws(PackError) in try Self.decodeStrings(p, section: byTag[Tag.strs]!) }
@@ -107,6 +108,13 @@ struct PackParser {
             var g = ContiguousArray<Int32>(repeating: 0, count: p.count / 4)
             let bv = ByteView(p)
             for i in 0..<g.count { g[i] = bv.i32(4 * i)! }
+            // Every GEOM point lies inside the header bounding box (spec A.3), which keeps A.8 exact.
+            for i in 0..<(g.count / 2) {
+                let x = g[2 * i], y = g[2 * i + 1]
+                guard x >= header.minLon, x <= header.maxLon, y >= header.minLat, y <= header.maxLat else {
+                    throw .malformedSection(tag: Tag.geom, reason: "point \(i) outside the header bounding box")
+                }
+            }
             return g
         }
         let geomPoints = UInt64(c.geom.count / 2)
@@ -114,8 +122,12 @@ struct PackParser {
             guard let gt = PackGeometryType(rawValue: type) else {
                 throw .malformedSection(tag: tag, reason: "record \(i): geometry type \(type)")
             }
-            guard count >= 1, UInt64(first) + UInt64(count) <= geomPoints else {
+            guard UInt64(first) + UInt64(count) <= geomPoints else {
                 throw .malformedSection(tag: tag, reason: "record \(i): geometry range outside GEOM")
+            }
+            let minimum: UInt32 = gt == .point ? 1 : (gt == .polyline ? 2 : 3)
+            guard count >= minimum, gt != .point || count == 1 else {
+                throw .malformedSection(tag: tag, reason: "record \(i): \(count) points for geometry type \(type)")
             }
             return gt
         }
@@ -180,6 +192,7 @@ struct PackParser {
         if let adj = byTag[Tag.adjc] {
             guard adj.count == T else { throw .malformedSection(tag: Tag.adjc, reason: "count \(adj.count) != triangle_count \(T)") }
             c.nbr = try withSection(adj) { p throws(PackError) in try Self.decodeAdjacency(p, T: T) }
+            try Self.checkAdjacency(tris: c.tris, nbr: c.nbr)
         } else {
             c.nbr = try Self.deriveAdjacency(tris: c.tris, vertexCount: V)
             c.adjacencyWasDerived = true
@@ -191,7 +204,9 @@ struct PackParser {
         try withSection(at) { p throws(PackError) in try Self.decodeAttributes(p, T: T, into: &c) }
 
         // Point-location grid.
-        try withSection(byTag[Tag.grid]!) { p throws(PackError) in try Self.decodeGrid(p, section: byTag[Tag.grid]!, T: T, into: &c) }
+        try withSection(byTag[Tag.grid]!) { p throws(PackError) in
+            try Self.decodeGrid(p, section: byTag[Tag.grid]!, header: header, into: &c)
+        }
         return c
     }
 
@@ -212,13 +227,17 @@ struct PackParser {
             dataDate: PackDate(rawValue: v.u32(80)!), buildDate: PackDate(rawValue: v.u32(84)!), buildTime: v.u32(88)!,
             vertexCount: Int(v.u32(92)!), triangleCount: Int(v.u32(96)!),
             clearanceDm: Int(v.u16(100)!), checkDm: Int(v.u16(102)!), shoreRing0M: Int(v.u16(104)!),
-            shoreRing1M: Int(v.u16(106)!), headerCRC32: crc)
+            shoreRing1M: Int(v.u16(106)!), tableCRC32: minor >= 1 ? v.u32(108)! : 0, headerCRC32: crc)
         guard h.headerSize == 256 else { throw .invalidHeader("header_size \(h.headerSize)") }
+        guard h.sectionTableOffset == 256 else { throw .invalidHeader("section_table_offset \(h.sectionTableOffset)") }
+        guard h.sectionCount >= 1, h.sectionCount <= 4096, 256 + 32 * h.sectionCount <= file.count else {
+            throw .invalidHeader("section_count \(h.sectionCount)")
+        }
         guard h.minLon <= h.maxLon, h.minLat <= h.maxLat,
               Int64(h.maxLon) - Int64(h.minLon) <= maxSpanUnits, Int64(h.maxLat) - Int64(h.minLat) <= maxSpanUnits,
               h.minLon >= -1_800_000_000, h.maxLon <= 1_800_000_000, h.minLat >= -900_000_000, h.maxLat <= 900_000_000
         else { throw .invalidHeader("bounding box") }
-        guard h.vertexCount >= 3, h.triangleCount >= 1, h.vertexCount < Int(Int32.max), h.triangleCount < Int(Int32.max) / 3 else {
+        guard h.vertexCount >= 3, h.triangleCount >= 1, h.vertexCount <= Int(Int32.max), 3 * h.triangleCount <= Int(Int32.max) else {
             throw .invalidHeader("vertex/triangle counts")
         }
         return h
@@ -226,7 +245,11 @@ struct PackParser {
 
     private func parseSectionTable(_ v: ByteView, header: PackHeader) throws(PackError) -> [PackSection] {
         let n = header.sectionCount, off = header.sectionTableOffset
-        guard n <= 4096, off >= 256, v.has(off, n * 32) else { throw .truncated("section table runs past the end of the file") }
+        guard v.has(off, n * 32) else { throw .truncated("section table runs past the end of the file") }
+        if header.formatMinor >= 1 {
+            let table = UnsafeBufferPointer(rebasing: file[off..<(off + 32 * n)])
+            guard CRC32.checksum(table) == header.tableCRC32 else { throw .sectionTableChecksumMismatch }
+        }
         var out: [PackSection] = []
         out.reserveCapacity(n)
         for i in 0..<n {
@@ -237,6 +260,28 @@ struct PackParser {
                                    crc32: v.u32(o + 24)!, count: Int(v.u32(o + 28)!)))
         }
         return out
+    }
+
+    /// Spec A.4 check 7: section i starts at the first multiple of 8 at or after the end of section i-1 (the
+    /// first one after the table), every padding byte is zero and the file ends at the padded end of the last
+    /// section. Together with the CRCs this covers every byte of the file.
+    private func checkLayout(_ sections: [PackSection], tableEnd: Int) throws(PackError) {
+        @inline(__always) func align8(_ n: Int) -> Int { (n + 7) & ~7 }
+        var prevEnd = tableEnd
+        var expected = align8(tableEnd)
+        for s in sections {
+            guard s.offset == UInt64(expected) else {
+                throw .invalidLayout("section \(s.tag) at offset \(s.offset), expected \(expected)")
+            }
+            guard expected <= file.count, s.storedLength <= file.count - expected else { throw .sectionOutOfBounds(tag: s.tag) }
+            for i in prevEnd..<expected where file[i] != 0 { throw .invalidLayout("non-zero padding at byte \(i)") }
+            prevEnd = expected + s.storedLength
+            expected = align8(prevEnd)
+        }
+        guard file.count == expected else {
+            throw .invalidLayout("file is \(file.count) bytes, the padded end of the last section is \(expected)")
+        }
+        for i in prevEnd..<expected where file[i] != 0 { throw .invalidLayout("non-zero padding at byte \(i)") }
     }
 
     // MARK: Section access
@@ -331,7 +376,17 @@ struct PackParser {
             prev = o
         }
         guard offsets[1] == 0 else { throw .malformedSection(tag: Tag.strs, reason: "string 0 is not empty") }
+        guard Int(offsets[n]) == blobLength else {
+            throw .malformedSection(tag: Tag.strs, reason: "offsets end at \(offsets[n]), the blob has \(blobLength) bytes")
+        }
         let blob = ContiguousArray(UnsafeBufferPointer(rebasing: p[blobStart...]))
+        for i in 0..<n {
+            let bytes = blob[Int(offsets[i])..<Int(offsets[i + 1])]
+            // Decoding replaces every invalid sequence, so a valid string re-encodes to the same bytes.
+            guard String(decoding: bytes, as: UTF8.self).utf8.elementsEqual(bytes) else {
+                throw .malformedSection(tag: Tag.strs, reason: "string \(i) is not valid UTF-8")
+            }
+        }
         return (offsets, blob)
     }
 
@@ -419,6 +474,24 @@ struct PackParser {
         return nbr
     }
 
+    /// Spec A.4: a stored neighbour n of (t, k) is another triangle that owns the reversed edge and lists t across it.
+    static func checkAdjacency(tris: ContiguousArray<Int32>, nbr: ContiguousArray<Int32>) throws(PackError) {
+        let T = tris.count / 3
+        for t in 0..<T {
+            for k in 0..<3 {
+                let n = Int(nbr[3 * t + k])
+                if n < 0 { continue }
+                guard n != t else { throw .malformedSection(tag: Tag.adjc, reason: "triangle \(t) is its own neighbour") }
+                let p = tris[3 * t + k], q = tris[3 * t + (k + 1) % 3]
+                var found = false
+                for j in 0..<3 where tris[3 * n + j] == q && tris[3 * n + (j + 1) % 3] == p && nbr[3 * n + j] == Int32(t) {
+                    found = true
+                }
+                guard found else { throw .malformedSection(tag: Tag.adjc, reason: "adjacency of triangle \(t) is not consistent") }
+            }
+        }
+    }
+
     /// Derived adjacency (spec A.5): the neighbour across directed edge p→q is the triangle owning q→p.
     /// Uses a per-vertex bucket of outgoing edges (compressed rows) instead of a hash map: 8 bytes per edge.
     static func deriveAdjacency(tris: ContiguousArray<Int32>, vertexCount V: Int) throws(PackError) -> ContiguousArray<Int32> {
@@ -489,12 +562,21 @@ struct PackParser {
         }
     }
 
-    static func decodeGrid(_ p: UnsafeBufferPointer<UInt8>, section: PackSection, T: Int, into c: inout PackContents) throws(PackError) {
+    static func decodeGrid(_ p: UnsafeBufferPointer<UInt8>, section: PackSection, header h: PackHeader,
+                           into c: inout PackContents) throws(PackError) {
+        let T = h.triangleCount
         let v = ByteView(p)
         guard p.count >= 20 else { throw .malformedSection(tag: Tag.grid, reason: "too short") }
         let ox = v.i32(0)!, oy = v.i32(4)!, cell = v.i32(8)!
         let nx = Int(v.u32(12)!), ny = Int(v.u32(16)!)
-        guard cell > 0, nx > 0, ny > 0, nx <= p.count, ny <= p.count, nx * ny <= p.count - 20, nx * ny == section.count else {
+        guard ox == h.minLon, oy == h.minLat, cell > 0 else {
+            throw .malformedSection(tag: Tag.grid, reason: "origin or cell size")
+        }
+        // nx = max(1, ceil((max_lon - min_lon) / cell)), ny likewise (spec A.5).
+        let cellSize = Int64(cell)
+        let nxExpected = max(1, Int(floorDiv(Int64(h.maxLon) - Int64(h.minLon) + cellSize - 1, cellSize)))
+        let nyExpected = max(1, Int(floorDiv(Int64(h.maxLat) - Int64(h.minLat) + cellSize - 1, cellSize)))
+        guard nx == nxExpected, ny == nyExpected, nx * ny <= p.count - 20, nx * ny == section.count else {
             throw .malformedSection(tag: Tag.grid, reason: "grid dimensions")
         }
         let cells = nx * ny

@@ -35,7 +35,10 @@ RESTRICTED_PENALTY_M = 1000.0
 BLOCKED_FACTOR = 50.0
 BLOCKED_PENALTY_M = 100000.0
 MAX_SNAP_M = 750.0
+MAX_SNAP_LIMIT_M = 100_000.0        # spec B.13: a larger max_snap_m is an invalid request
+MAX_DIMENSION_FT = 1000.0           # spec B.2: draft, margin, air draft and draft + margin must be below this
 THIN_MARGIN_DM = 3
+OVERHEAD_POINT_M = 1.0              # spec B.10: a point object within this distance is passed under
 
 # block reasons (spec B.3), in precedence order
 BLOCK_REASONS = ["PROHIBITED", "OPEN_GULF", "DEPTH", "CLEARANCE", "UNKNOWN_CLEARANCE"]
@@ -59,8 +62,26 @@ def dist_m(lon1, lat1, lon2, lat2) -> float:
     return R_EARTH * math.sqrt(dx * dx + dy * dy)
 
 
-def to_units(deg: float) -> int:
-    return math.floor(deg * UNITS + 0.5)
+def to_units(deg: float) -> int | None:
+    """Spec B.6 step 1: floor(deg * 1e7 + 0.5), or None when that is not finite."""
+    v = deg * UNITS + 0.5
+    if not math.isfinite(v):
+        return None
+    return math.floor(v)
+
+
+def request_is_valid(prof: "Profile", max_snap_m: float) -> bool:
+    """Spec B.13 INVALID_REQUEST: every boat dimension finite, >= 0 and below 1000 ft (draft +
+    margin too), and 0 <= max_snap_m <= 100000."""
+    dims = (prof.draft_ft, prof.margin_ft, prof.air_draft_ft)
+    try:
+        if not all(math.isfinite(v) and 0.0 <= v < MAX_DIMENSION_FT for v in dims):
+            return False
+        if not prof.draft_ft + prof.margin_ft < MAX_DIMENSION_FT:
+            return False
+        return math.isfinite(max_snap_m) and 0.0 <= max_snap_m <= MAX_SNAP_LIMIT_M
+    except TypeError:
+        return False
 
 
 @dataclass
@@ -198,7 +219,7 @@ class Router:
     def snap(self, lon, lat, cls: Classified, max_m=MAX_SNAP_M):
         x, y = to_units(lon), to_units(lat)
         b = self.p.bbox
-        if not (b[0] <= x <= b[2] and b[1] <= y <= b[3]):
+        if x is None or y is None or not (b[0] <= x <= b[2] and b[1] <= y <= b[3]):
             return {"error": "OUTSIDE_PACK"}
         t = self.locate(x, y)
         if t is not None and cls.ok[t]:
@@ -233,7 +254,21 @@ class Router:
                     "nearest_m": best_d}
         sx = to_units(lon0 + best_pt[0] / kx)
         sy = to_units(lat0 + best_pt[1] / ky)
-        return {"triangle": best_t, "x": sx, "y": sy, "snap_m": best_d, "in_mesh": t is not None,
+        if not self.contains(best_t, sx, sy):
+            # The rounded point fell outside the snapped triangle: take the nearest of the eight
+            # surrounding whole-unit points and the triangle's vertices that the triangle contains.
+            a, b_, c = self._tri_l[best_t]
+            cands = [(sx + i, sy + j) for j in (-1, 0, 1) for i in (-1, 0, 1) if (i, j) != (0, 0)]
+            cands += [(self._vx[v], self._vy[v]) for v in (a, b_, c)]
+            pick = None
+            for px, py in cands:
+                if self.contains(best_t, px, py):
+                    dd = math.hypot((px / UNITS - lon0) * kx, (py / UNITS - lat0) * ky)
+                    if pick is None or dd < pick[0]:
+                        pick = (dd, px, py)
+            sx, sy = pick[1], pick[2]
+        snap_m = math.hypot((sx / UNITS - lon0) * kx, (sy / UNITS - lat0) * ky)
+        return {"triangle": best_t, "x": sx, "y": sy, "snap_m": snap_m, "in_mesh": t is not None,
                 "located": None if t is None else int(t)}
 
     # ----------------------------------------------------------- B.7 A*
@@ -342,14 +377,34 @@ class Router:
                     viol.append({"kind": "HAZARD", "record": int(h), "distance_m": d, "valsou_dm": v})
         if len(self.ov_bb):
             bb = self.ov_bb
-            cand = np.flatnonzero((bb[:, 0] <= x1) & (bb[:, 2] >= x0) & (bb[:, 1] <= y1) & (bb[:, 3] >= y0))
-            for o in cand.tolist():
+            ox = math.ceil((OVERHEAD_POINT_M + 1) / kx * UNITS)
+            oy = math.ceil((OVERHEAD_POINT_M + 1) / ky * UNITS)
+            cand = np.flatnonzero((bb[:, 0] <= x1 + ox) & (bb[:, 2] >= x0 - ox) & (bb[:, 1] <= y1 + oy)
+                                  & (bb[:, 3] >= y0 - oy)).tolist()
+            geoms = {}
+            lines = []
+            for o in cand:
                 r = p.overhead[o]
-                c = p.geom[r["geom_first"]: r["geom_first"] + r["geom_count"]].astype(np.int64)
-                hx, hy = loc(c)
+                c = p.geom[r["geom_first"]: r["geom_first"] + r["geom_count"]].tolist()
                 gt = int(r["geom_type"])
-                if not seg_crosses(sx, sy, hx, hy, gt):
-                    continue
+                if gt == 2:
+                    c = dedupe_consecutive(c)
+                    if len(c) == 1:
+                        gt = 1  # a polyline whose points are all equal is a point object
+                    else:
+                        lines.append((o, c))
+                geoms[o] = (gt, c)
+            crossed_lines = polyline_crossings(A, B, lines)
+            for o in cand:
+                r = p.overhead[o]
+                gt, c = geoms[o]
+                if gt == 2:
+                    if o not in crossed_lines:
+                        continue
+                else:
+                    hx, hy = loc(np.array(c, dtype=np.int64).reshape(-1, 2))
+                    if not seg_crosses(sx, sy, hx, hy, gt):
+                        continue
                 clr = int(r["clearance_dm"])
                 opening = bool(r["flags"] & 1)
                 item = {"record": int(o), "clearance_dm": clr, "opening": opening}
@@ -366,6 +421,8 @@ class Router:
     # ----------------------------------------------------------- full query
     def route(self, start, goal, prof: Profile, max_snap_m=MAX_SNAP_M) -> dict:
         p = self.p
+        if not request_is_valid(prof, max_snap_m):
+            return {"ok": False, "error": "INVALID_REQUEST", "profile": asdict(prof), "data_date": int(p.data_date)}
         cls = Classified(p, prof)
         res = {"ok": False, "profile": asdict(prof), "req_dm": cls.req, "air_dm": cls.air,
                "data_date": int(p.data_date)}
@@ -489,7 +546,7 @@ class Router:
                                 "lon": x / UNITS, "lat": y / UNITS})
                 prev = bool(mask[t])
             return out
-        total = sum(l["length_m"] for l in legs)
+        total = sum((l["length_m"] for l in legs), 0.0)
         return {
             "distance_m": total, "distance_nm": total / 1852.0, "legs": len(legs),
             "green_legs": sum(l["grade"] == "green" for l in legs),
@@ -511,7 +568,9 @@ class Router:
         corridor, _ = self.astar(s, g, S, G, ok, factor, cls.needs_opening, cls.unknown_used, cls.restricted,
                                  extra_pen=blocked)
         if corridor is None:
-            return {"reason": "NOT_CONNECTED", "blocked": []}
+            # Disconnected water: no option can connect it, so every hint is false (no search needed).
+            hints = {opt: False for opt in ("use_maintained", "accept_unknown_clearance") if not getattr(prof, opt)}
+            return {"reason": "NOT_CONNECTED", "blocked": [], "hints": hints}
         a = self.p.attrs
         out, prev = [], False
         for i, t in enumerate(corridor):
@@ -608,15 +667,13 @@ def seg_geom_distance(sx, sy, hx, hy, gtype) -> float:
 
 
 def seg_crosses(sx, sy, hx, hy, gtype) -> bool:
-    """Spec B.10: does the leg pass under an overhead object? Point: within
-    1 m. Polyline: segment-segment distance 0 (touching counts). Ring: some
-    part of the leg lies strictly inside the ring; merely touching its
-    boundary (a leg along the edge of an adjacent bridge part) does not count."""
+    """Spec B.10 for point objects and rings, in the leg's local metric frame (polylines use the
+    exact integer rule of polyline_crossings). Point: within 1 m. Ring: some part of the leg lies
+    strictly inside the ring; merely touching its boundary (a leg along the edge of an adjacent
+    bridge part) does not count."""
     ax, ay, bx, by = float(sx[0]), float(sy[0]), float(sx[1]), float(sy[1])
     if gtype == 1 or len(hx) == 1:
-        return seg_geom_distance(sx, sy, hx, hy, 1) <= 1.0
-    if gtype == 2:
-        return seg_geom_distance(sx, sy, hx, hy, 2) == 0.0
+        return seg_geom_distance(sx, sy, hx, hy, 1) <= OVERHEAD_POINT_M
     n = len(hx)
     dx, dy = bx - ax, by - ay
     params = [0.0, 1.0]
@@ -647,6 +704,78 @@ def seg_crosses(sx, sy, hx, hy, gtype) -> bool:
         if point_in_ring(mx, my, hx, hy) and ring_boundary_distance(mx, my, hx, hy) > 1e-6:
             return True
     return False
+
+
+def dedupe_consecutive(pts):
+    """Polyline points with consecutive duplicates removed."""
+    out = [tuple(pts[0])]
+    for q in pts[1:]:
+        q = tuple(q)
+        if q != out[-1]:
+            out.append(q)
+    return out
+
+
+def polyline_crossings(A, B, lines) -> set:
+    """Spec B.10 polyline rule, exact on integer units. `lines` is [(record, points)] with
+    consecutive duplicate points removed (at least 2 points). Returns the records the leg AB
+    passes under:
+      1. AB properly crosses one of its segments (all four orientations non-zero, opposite pairs);
+      2. AB overlaps one of its segments collinearly over a positive length;
+      3. A or B lies on the polyline (closed segments);
+      4. AB passes through a point V strictly between A and B where polyline vertices meet, and the
+         polyline arms leaving V (the neighbouring vertices, over every polyline record with a
+         vertex at V) lie strictly on both sides of AB: every record with an arm at V is crossed.
+    A leg that only touches a polyline (at a vertex whose arms all lie on one side, for example the
+    end of a line on the edge of its footprint) does not pass under it."""
+    ax, ay = A
+    bx, by = B
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    crossed = set()
+    arms = {}
+
+    def on_segment(px, py, c, d):
+        return (orient(c[0], c[1], d[0], d[1], px, py) == 0 and min(c[0], d[0]) <= px <= max(c[0], d[0])
+                and min(c[1], d[1]) <= py <= max(c[1], d[1]))
+
+    for rec, pts in lines:
+        m = len(pts)
+        hit = False
+        for i in range(m - 1):
+            c, d = pts[i], pts[i + 1]
+            o1 = orient(ax, ay, bx, by, c[0], c[1])
+            o2 = orient(ax, ay, bx, by, d[0], d[1])
+            o3 = orient(c[0], c[1], d[0], d[1], ax, ay)
+            o4 = orient(c[0], c[1], d[0], d[1], bx, by)
+            if o1 and o2 and o3 and o4 and (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0):
+                hit = True
+            elif o1 == 0 and o2 == 0:
+                tc = (c[0] - ax) * dx + (c[1] - ay) * dy
+                td = (d[0] - ax) * dx + (d[1] - ay) * dy
+                if max(min(tc, td), 0) < min(max(tc, td), L2):
+                    hit = True
+            if on_segment(ax, ay, c, d) or on_segment(bx, by, c, d):
+                hit = True
+        for i, (vx, vy) in enumerate(pts):
+            if orient(ax, ay, bx, by, vx, vy) != 0:
+                continue
+            t = (vx - ax) * dx + (vy - ay) * dy
+            if not 0 < t < L2:
+                continue
+            for k in (i - 1, i + 1):
+                if 0 <= k < m:
+                    side = orient(ax, ay, bx, by, pts[k][0], pts[k][1])
+                    if side != 0:
+                        e = arms.setdefault((vx, vy), [False, False, set()])
+                        e[0 if side > 0 else 1] = True
+                        e[2].add(rec)
+        if hit:
+            crossed.add(rec)
+    for pos, neg, recs in arms.values():
+        if pos and neg:
+            crossed |= recs
+    return crossed
 
 
 def ring_boundary_distance(px, py, hx, hy) -> float:

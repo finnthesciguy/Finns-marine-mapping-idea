@@ -12,6 +12,7 @@ struct RecHeader: Decodable {
     var dataDate: UInt32, buildDate: UInt32, buildTime: UInt32
     var vertexCount: Int, triangleCount: Int
     var clearanceDm: Int, checkDm: Int, shoreRing0M: Int, shoreRing1M: Int
+    var tableCrc32: UInt32
     var headerCrc32: UInt32
 }
 
@@ -92,7 +93,7 @@ func headerFields(_ h: PackHeader) -> [Int64] {
     f.add(h.sectionTableOffset); f.add(h.flags); f.add(h.minLon); f.add(h.minLat); f.add(h.maxLon); f.add(h.maxLat)
     f.add(h.dataDate.rawValue); f.add(h.buildDate.rawValue); f.add(h.buildTime); f.add(h.vertexCount)
     f.add(h.triangleCount); f.add(h.clearanceDm); f.add(h.checkDm); f.add(h.shoreRing0M); f.add(h.shoreRing1M)
-    f.add(h.headerCRC32)
+    f.add(h.tableCRC32); f.add(h.headerCRC32)
     return f.values
 }
 
@@ -102,7 +103,7 @@ func headerFields(_ w: RecHeader) -> [Int64] {
     f.add(w.sectionTableOffset); f.add(w.flags); f.add(w.minLon); f.add(w.minLat); f.add(w.maxLon); f.add(w.maxLat)
     f.add(w.dataDate); f.add(w.buildDate); f.add(w.buildTime); f.add(w.vertexCount)
     f.add(w.triangleCount); f.add(w.clearanceDm); f.add(w.checkDm); f.add(w.shoreRing0M); f.add(w.shoreRing1M)
-    f.add(w.headerCrc32)
+    f.add(w.tableCrc32); f.add(w.headerCrc32)
     return f.values
 }
 
@@ -325,7 +326,9 @@ func geomFields(_ pts: [GridPoint]) -> [[Int32]] { pts.map { [$0.x, $0.y] } }
 
     @Test func spec_A10_workedExamples() throws {
         let pack = Fixtures.synthetic
-        #expect(pack.header.headerCRC32 == 0x58F6_ED65)
+        #expect(pack.header.formatMajor == 1 && pack.header.formatMinor == 1 && pack.header.fileSize == 1824)
+        #expect(pack.header.tableCRC32 == 0x0387_020D)
+        #expect(pack.header.headerCRC32 == 0x34A0_171D)
         #expect(pack.sections[3].tag == "VERT" && pack.sections[3].encoding == 1 && pack.sections[3].rawLength == 182)
         #expect(pack.vertex(1) == GridPoint(x: -819_990_000, y: 270_000_000))
         #expect(pack.vertex(2) == GridPoint(x: -819_990_000, y: 270_010_000))
@@ -334,6 +337,7 @@ func geomFields(_ pts: [GridPoint]) -> [[Int32]] { pts.map { [$0.x, $0.y] } }
         #expect(pack.string(1) == "Test Opening Bridge")
         #expect(pack.attributes(0).quality == 0x55 && pack.attributes(0).catzoc == 5 && pack.attributes(0).surveyDecade == 1950)
         #expect(pack.geometry(first: 0, count: 1) == [GridPoint(x: -819_945_000, y: 270_010_000)])
+        #expect(pack.hazards[0].geomFirst == 7 && pack.overheadObjects[3].geomType == .point)
         #expect(pack.dataDate.description == "2026-11-01")
     }
 }

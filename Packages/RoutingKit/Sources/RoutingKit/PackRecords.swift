@@ -78,6 +78,8 @@ public struct PackHeader: Hashable, Sendable {
     public var checkDm: Int
     public var shoreRing0M: Int
     public var shoreRing1M: Int
+    /// CRC-32 of the section table (format 1.1; 0 in a 1.0 file, which has none).
+    public var tableCRC32: UInt32
     public var headerCRC32: UInt32
 
     /// True when header flag bit 0 says an `ADJC` section is present.

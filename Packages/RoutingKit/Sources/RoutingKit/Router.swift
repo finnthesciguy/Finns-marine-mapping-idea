@@ -107,8 +107,34 @@ extension RoutingPack {
         guard let sx = toUnits(lon0 + bestQ.0 / kx), let sy = toUnits(lat0 + bestQ.1 / ky) else {
             return .failure(.outsidePack)
         }
-        return .success(SnappedEndpoint(requested: coordinate, point: GridPoint(x: sx, y: sy), triangle: bestT,
-                                        snapMeters: bestD, inMesh: located != nil))
+        func localDistance(_ q: GridPoint) -> Double {
+            hypot((Double(q.x) / 1e7 - lon0) * kx, (Double(q.y) / 1e7 - lat0) * ky)
+        }
+        var point = GridPoint(x: sx, y: sy)
+        if !triangle(bestT, contains: point) {
+            // The rounded point fell outside the snapped triangle (B.6): take the nearest of the eight surrounding
+            // whole-unit points and the triangle's vertices that the triangle contains (a vertex always qualifies).
+            var candidates: [GridPoint] = []
+            for j: Int32 in -1...1 {
+                for i: Int32 in -1...1 where i != 0 || j != 0 {
+                    candidates.append(GridPoint(x: sx + i, y: sy + j))
+                }
+            }
+            let (a, b, c) = triangleVertices(bestT)
+            candidates.append(vertex(a))
+            candidates.append(vertex(b))
+            candidates.append(vertex(c))
+            var nearest = Double.infinity
+            for q in candidates where triangle(bestT, contains: q) {
+                let d = localDistance(q)
+                if d < nearest {
+                    nearest = d
+                    point = q
+                }
+            }
+        }
+        return .success(SnappedEndpoint(requested: coordinate, point: point, triangle: bestT,
+                                        snapMeters: localDistance(point), inMesh: located != nil))
     }
 }
 
@@ -483,14 +509,39 @@ struct RouteEngine {
                                                clearanceDm: nil))
             }
         }
+        // Overhead candidates: geometry bbox within 2 m (the 1 m point radius plus 1 m) of the leg bbox.
         let ob = pack.overheadBoxes
+        let px = Int64(((overheadPointMeters + 1) / kx * 1e7).rounded(.up))
+        let py = Int64(((overheadPointMeters + 1) / ky * 1e7).rounded(.up))
+        var candidates: [Int] = []
+        var lines: [PolylineGeometry] = []
+        var singlePoints: [Int: GridPoint] = [:]
         for o in 0..<pack.overheadObjects.count {
-            guard Int64(ob[4 * o]) <= x1, Int64(ob[4 * o + 2]) >= x0, Int64(ob[4 * o + 1]) <= y1, Int64(ob[4 * o + 3]) >= y0 else {
-                continue
-            }
+            guard Int64(ob[4 * o]) <= x1 + px, Int64(ob[4 * o + 2]) >= x0 - px,
+                  Int64(ob[4 * o + 1]) <= y1 + py, Int64(ob[4 * o + 3]) >= y0 - py else { continue }
+            candidates.append(o)
             let r = pack.overheadObjects[o]
-            let (hx, hy) = local(r.geomFirst, r.geomCount)
-            guard segmentCrosses(ax, ay, bx, by, hx, hy, r.geomType) else { continue }
+            if r.geomType == .polyline {
+                let pts = dedupeConsecutive(pack.geometry(of: r))
+                if pts.count >= 2 {
+                    lines.append(PolylineGeometry(record: o, points: pts))
+                } else {
+                    singlePoints[o] = pts[0]  // every point equal: a point object
+                }
+            }
+        }
+        let crossedLines = polylineCrossings(A, B, lines)
+        for o in candidates {
+            let r = pack.overheadObjects[o]
+            if r.geomType == .polyline && singlePoints[o] == nil {
+                guard crossedLines.contains(o) else { continue }
+            } else if let q = singlePoints[o] {
+                let hx = [(Double(q.x) / 1e7 - lonm) * kx], hy = [(Double(q.y) / 1e7 - latm) * ky]
+                guard segmentCrosses(ax, ay, bx, by, hx, hy, .point) else { continue }
+            } else {
+                let (hx, hy) = local(r.geomFirst, r.geomCount)
+                guard segmentCrosses(ax, ay, bx, by, hx, hy, r.geomType) else { continue }
+            }
             let c = Int(r.clearanceDm)
             let opening = r.isOpeningSpan
             var needs: Bool?

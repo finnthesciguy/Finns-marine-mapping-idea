@@ -45,18 +45,6 @@ let syntheticProfiles: [BoatProfile] = [
     BoatProfile(draftFeet: 12, safetyMarginFeet: 1, airDraftFeet: 20),
 ]
 
-/// Distance in units from a point to triangle t (0 inside).
-func unitsDistance(_ pack: RoutingPack, _ p: GridPoint, _ t: Int) -> Double {
-    let (a, b, c) = pack.triangleVertices(t)
-    let vs: [GridPoint] = [pack.vertex(a), pack.vertex(b), pack.vertex(c)]
-    let X = (Double(vs[0].x - p.x), Double(vs[1].x - p.x), Double(vs[2].x - p.x))
-    let Y = (Double(vs[0].y - p.y), Double(vs[1].y - p.y), Double(vs[2].y - p.y))
-    return closestOnTriangle(X, Y).0
-}
-
-/// Counts of known, reported spec behaviours seen by the property tests.
-nonisolated(unsafe) var endpointGrazes = 0
-
 @Suite(.serialized) struct PropertyTests {
     /// Checks every invariant a returned route must satisfy; returns the violations.
     func invariants(_ r: RouteResult, pack: RoutingPack) -> [String] {
@@ -69,6 +57,9 @@ nonisolated(unsafe) var endpointGrazes = 0
             if n0 != u && n1 != u && n2 != u { bad.append("corridor \(t)->\(u) not adjacent") }
         }
         if r.corridor.first != r.start.triangle || r.corridor.last != r.goal.triangle { bad.append("corridor ends") }
+        // B.6: a snapped endpoint lies in (or on) its triangle.
+        if !pack.triangle(r.start.triangle, contains: r.start.point) { bad.append("start outside its triangle") }
+        if !pack.triangle(r.goal.triangle, contains: r.goal.point) { bad.append("goal outside its triangle") }
         if r.waypointsUnits.first != r.start.point || r.waypointsUnits.last != r.goal.point { bad.append("waypoint ends") }
         if r.legs.count != max(r.waypointsUnits.count - 1, 0) { bad.append("leg count") }
         // Impassable triangles and their bounding boxes, computed once.
@@ -88,19 +79,7 @@ nonisolated(unsafe) var endpointGrazes = 0
             let ly0 = min(leg.from.y, leg.to.y), ly1 = max(leg.from.y, leg.to.y)
             for bt in blocked where bt.x0 <= lx1 && bt.x1 >= lx0 && bt.y0 <= ly1 && bt.y1 >= ly0 {
                 if segmentEntersTriangleInterior(pack, leg.from, leg.to, bt.t) {
-                    // Known spec B.6 behaviour (reported): a snapped endpoint is rounded to whole units and can lie
-                    // up to about one unit outside its snapped triangle, inside a neighbouring impassable one.
-                    // Accept only that: the endpoint is outside its own triangle and within 2 units of bt.
-                    let ends: [SnappedEndpoint] = [r.start, r.goal]
-                    let graze = ends.contains { e in
-                        (e.point == leg.from || e.point == leg.to) && !pack.triangle(e.triangle, contains: e.point)
-                            && unitsDistance(pack, e.point, bt.t) <= 2.0
-                    }
-                    if graze {
-                        endpointGrazes += 1
-                    } else {
-                        bad.append("leg \(leg.from)->\(leg.to) crosses impassable triangle \(bt.t)")
-                    }
+                    bad.append("leg \(leg.from)->\(leg.to) crosses impassable triangle \(bt.t)")
                 }
             }
         }
@@ -109,9 +88,12 @@ nonisolated(unsafe) var endpointGrazes = 0
         return bad
     }
 
+    /// Every ordered pair of square centres under every profile, forwards and backwards (11,904 queries, each
+    /// forward one repeated): deterministic, the same outcome class in both directions, every route satisfies the
+    /// invariants, and no leg fails validation (a leg running along a footprint edge is not under the object).
     @Test func syntheticAllPairs() {
         let pack = Fixtures.synthetic
-        var routes = 0, failures = 0, legValidations = 0
+        var routes = 0, noRoutes = 0, legValidations = 0
         var problems: [String] = []
         for profile in syntheticProfiles {
             for (i, a) in syntheticPoints.enumerated() {
@@ -123,27 +105,57 @@ nonisolated(unsafe) var endpointGrazes = 0
                     // Determinism: the same query gives the same answer.
                     let again = Result { () throws(RoutingError) -> RouteResult in try pack.routeSynchronously(req) }
                     if again != forward { problems.append("non-deterministic \(i)->\(j)") }
-                    // Symmetry: passability does not depend on direction, so a route exists both ways or neither.
-                    // LEG_VALIDATION still means the search found a corridor. It occurs here only where a leg along
-                    // a row boundary touches the end of an overhead polyline (known spec B.10 behaviour, reported;
-                    // the Python reference fails the same queries identically).
-                    if case .success(let f) = forward { routes += 1; problems += invariants(f, pack: pack) }
+                    if case .success(let f) = forward { problems += invariants(f, pack: pack) }
                     if case .success(let g) = backward { problems += invariants(g, pack: pack) }
-                    for case .failure(let e) in [forward, backward] {
-                        if e.code == "NO_ROUTE" { failures += 1 }
-                        if case .legValidation(let v) = e {
-                            legValidations += 1
-                            for x in v.violations where x.kind == .hazard { problems.append("hazard violation \(i)->\(j)") }
+                    let classForward: OutcomeClass = outcomeClass(forward)
+                    let classBackward: OutcomeClass = outcomeClass(backward)
+                    for c in [classForward, classBackward] {
+                        switch c {
+                        case .route: routes += 1
+                        case .noRoute: noRoutes += 1
+                        case .validation: legValidations += 1
+                        case .other: problems.append("unexpected error \(i)<->\(j)")
                         }
                     }
-                    let found1 = outcomeFoundCorridor(forward), found2 = outcomeFoundCorridor(backward)
-                    if found1 != found2 { problems.append("asymmetric passability \(i)<->\(j)") }
+                    if classForward != classBackward {
+                        problems.append("asymmetric outcome \(i)<->\(j): \(classForward) / \(classBackward)")
+                    }
                 }
             }
         }
-        print("[property] synthetic: \(routes) routes, \(failures) NO_ROUTE, \(legValidations) LEG_VALIDATION (polyline touch)")
-        #expect(routes > 100)
+        print("[property] synthetic: \(routes) routes, \(noRoutes) NO_ROUTE, \(legValidations) LEG_VALIDATION")
+        #expect(routes > 5000)
+        #expect(noRoutes > 1000)
+        #expect(legValidations == 0)
         #expect(problems.isEmpty, "\(problems.prefix(10))")
+    }
+
+    /// B.6: the whole-unit snapped point always lies in (or on) the snapped triangle.
+    @Test func snappedPointIsInsideItsTriangle() {
+        let pack = Fixtures.sarasota
+        let h = pack.header
+        let profiles: [BoatProfile] = [
+            BoatProfile(draftFeet: 4.5, safetyMarginFeet: 1.5, airDraftFeet: 20),
+            BoatProfile(draftFeet: 1, safetyMarginFeet: 0.5, airDraftFeet: 5),
+            BoatProfile(draftFeet: 15, safetyMarginFeet: 1.5, airDraftFeet: 20),
+        ]
+        var rng = SplitMix(seed: 11)
+        var moved = 0
+        var outside: [String] = []
+        let spanX = UInt64(Int64(h.maxLon) - Int64(h.minLon) + 1)
+        let spanY = UInt64(Int64(h.maxLat) - Int64(h.minLat) + 1)
+        for profile in profiles {
+            for _ in 0..<400 {
+                let x = Int64(h.minLon) + Int64(rng.next() % spanX)
+                let y = Int64(h.minLat) + Int64(rng.next() % spanY)
+                let c = Coordinate(latitude: Double(y) / 1e7, longitude: Double(x) / 1e7)
+                guard case .success(let s) = pack.snap(c, profile: profile) else { continue }
+                if s.snapMeters > 0 { moved += 1 }
+                if !pack.triangle(s.triangle, contains: s.point) { outside.append("\(s.point) not in \(s.triangle)") }
+            }
+        }
+        #expect(moved > 100)
+        #expect(outside.isEmpty, "\(outside.prefix(5))")
     }
 
     @Test func sarasotaRoutesNeverCrossImpassableTriangles() throws {
@@ -160,7 +172,6 @@ nonisolated(unsafe) var endpointGrazes = 0
             if let back { problems += invariants(back, pack: pack) } else { problems.append("\(q.id) has no reverse route") }
         }
         #expect(checked == 4)
-        print("[property] sarasota: \(endpointGrazes) leg/triangle grazes by a rounded snapped endpoint")
         #expect(problems.isEmpty, "\(problems.prefix(10))")
     }
 
@@ -226,13 +237,17 @@ nonisolated(unsafe) var endpointGrazes = 0
     }
 }
 
-/// True for a route, or a failure that happened after the search found a corridor.
-func outcomeFoundCorridor(_ r: Result<RouteResult, RoutingError>) -> Bool? {
+/// The outcome class compared by the symmetry property.
+enum OutcomeClass: String {
+    case route, noRoute, validation, other
+}
+
+func outcomeClass(_ r: Result<RouteResult, RoutingError>) -> OutcomeClass {
     switch r {
-    case .success: return true
-    case .failure(.legValidation): return true
-    case .failure(.noRoute): return false
-    default: return nil  // snap errors: not about passability
+    case .success: return .route
+    case .failure(.noRoute): return .noRoute
+    case .failure(.legValidation): return .validation
+    case .failure: return .other
     }
 }
 

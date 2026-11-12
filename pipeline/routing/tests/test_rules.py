@@ -162,3 +162,117 @@ def test_leg_validation_catches_a_hazard(rt):
 def test_tri2_exact_on_large_coordinates():
     a, b, c = (-826000000, 273000000), (-825999999, 273000000), (-825999998, 273000000)
     assert tri2(a, b, c) == 0
+
+
+# ------------------------------------------------------------------ B.10 polyline rule (exact)
+
+from enc_routing.router import polyline_crossings, request_is_valid  # noqa: E402
+
+POLY_CASES = [
+    # (name, A, B, lines, crossed records)
+    ("proper crossing", (0, 0), (10, 0), [(0, [(5, -5), (5, 5)])], {0}),
+    ("misses", (0, 0), (10, 0), [(0, [(5, 1), (5, 5)])], set()),
+    ("line ends on the leg", (0, 0), (10, 0), [(0, [(5, 0), (5, 5)])], set()),
+    ("kink touches the leg", (0, 0), (10, 0), [(0, [(3, 4), (5, 0), (7, 4)])], set()),
+    ("crosses through a vertex", (0, 0), (10, 0), [(0, [(3, 4), (5, 0), (7, -4)])], {0}),
+    ("two parts meet on the leg, opposite sides", (0, 0), (10, 0), [(0, [(5, -5), (5, 0)]), (1, [(5, 0), (5, 5)])],
+     {0, 1}),
+    ("two parts meet on the leg, same side", (0, 0), (10, 0), [(0, [(4, 5), (5, 0)]), (1, [(5, 0), (6, 5)])], set()),
+    ("collinear overlap", (0, 0), (10, 0), [(0, [(-5, 0), (3, 0)])], {0}),
+    ("collinear, only an end point shared", (0, 0), (10, 0), [(0, [(10, 0), (20, 0)])], {0}),
+    ("collinear, beyond the leg", (0, 0), (10, 0), [(0, [(11, 0), (20, 0)])], set()),
+    ("leg starts on the line", (5, 0), (10, 3), [(0, [(0, 0), (10, 0)])], {0}),
+    ("leg ends at the line's end", (0, 3), (5, 0), [(0, [(5, 0), (5, -5)])], {0}),
+    ("collinear arm through the vertex", (0, 0), (10, 0), [(0, [(5, 5), (5, 0), (8, 0)])], {0}),
+]
+
+
+@pytest.mark.parametrize("case", POLY_CASES, ids=[c[0] for c in POLY_CASES])
+def test_polyline_rule(case):
+    name, A, B, lines, want = case
+    big = [(r, [(x - 826000000, y + 273000000) for x, y in pts]) for r, pts in lines]
+    sh = lambda p: (p[0] - 826000000, p[1] + 273000000)  # noqa: E731
+    assert polyline_crossings(sh(A), sh(B), big) == want
+    assert polyline_crossings(sh(B), sh(A), big) == want  # direction-symmetric
+
+
+def test_leg_along_a_row_boundary_is_not_under_the_cable_end(rt):
+    """The leg runs along the edge of the cable's footprint and touches the end of its line:
+    not a crossing. The overhead point 0.44 m away (outside the leg's bounding box) is one."""
+    A = (synth.LON0 + 10000, synth.LAT0 + 20000)
+    B = (synth.LON0 + 70000, synth.LAT0 + 20000)
+    for a, b in ((A, B), (B, A)):
+        v, cr = rt.validate_leg(a, b, Profile(1, 0.5, 30))
+        assert not v and [c["record"] for c in cr] == [3]
+    v, cr = rt.validate_leg((synth.LON0 + 20000, synth.LAT0 + 25000), (synth.LON0 + 30000, synth.LAT0 + 25000),
+                            Profile(1, 0.5, 5))
+    assert [x["kind"] for x in v] == ["UNKNOWN_CLEARANCE"] and cr[0]["record"] == 2
+
+
+# ------------------------------------------------------------------ B.6 snapping and B.13 inputs
+
+def test_snapped_point_is_inside_its_triangle():
+    """B.6: the whole-unit snapped point always lies in (or on) the snapped triangle."""
+    from conftest import TESTDATA
+
+    rs = Router(P.read_pack(TESTDATA / "sarasota.pack"))
+    b = rs.p.bbox
+    rng = np.random.default_rng(3)
+    moved = 0
+    for prof in (Profile(4.5, 1.5, 20), Profile(1, 0.5, 5), Profile(15, 1.5, 20)):
+        cls = Classified(rs.p, prof)
+        for _ in range(400):
+            lon = rng.uniform(b[0], b[2]) / 1e7
+            lat = rng.uniform(b[1], b[3]) / 1e7
+            s = rs.snap(lon, lat, cls, 750)
+            if "error" in s:
+                continue
+            assert rs.contains(s["triangle"], s["x"], s["y"]), (lon, lat, s)
+            moved += s["snap_m"] > 0
+    assert moved > 100
+
+
+def test_unspecified_inputs(rt):
+    nan = float("nan")
+    assert rt.route((nan, 27.0015), (-81.9925, 27.0015), Profile(4, 1, 20))["error"] == "START_OUTSIDE_PACK"
+    assert rt.route((-81.9995, 27.0015), (float("inf"), 27.0015), Profile(4, 1, 20))["error"] == "GOAL_OUTSIDE_PACK"
+    assert rt.route((-81.9995, 1e308), (-81.9925, 27.0015), Profile(4, 1, 20))["error"] == "START_OUTSIDE_PACK"
+    for prof, snap in ((Profile(nan, 1, 20), 750), (Profile(4, -0.5, 20), 750), (Profile(4, 1, 1000), 750),
+                       (Profile(600, 400, 20), 750), (Profile(4, 1, 20), -1), (Profile(4, 1, 20), nan),
+                       (Profile(4, 1, 20), 100001)):
+        assert not request_is_valid(prof, snap)
+        assert rt.route((-81.9995, 27.0015), (-81.9925, 27.0015), prof, snap)["error"] == "INVALID_REQUEST"
+    assert request_is_valid(Profile(0, 0, 0), 0) and request_is_valid(Profile(999, 0, 999.9), 100000)
+    same = rt.route((-81.9995, 27.0015), (-81.9995, 27.0015), Profile(4, 1, 20))
+    assert same["ok"] and same["legs"] == [] and len(same["waypoints_units"]) == 1
+    assert same["summary"]["distance_m"] == 0.0
+
+
+# ------------------------------------------------------------------ symmetry (all pairs, both directions)
+
+SYMMETRY_PROFILES = [Profile(1, 0.5, 5), Profile(4, 1, 20), Profile(4, 1, 20, use_maintained=True),
+                     Profile(4, 1, 8, accept_unknown_clearance=True),
+                     Profile(5, 1, 9, use_maintained=True, accept_unknown_clearance=True), Profile(12, 1, 20)]
+
+
+def _outcome(res):
+    if res["ok"]:
+        return "route"
+    return "validation" if res["error"] == "LEG_VALIDATION" else ("no_route" if res["error"] == "NO_ROUTE" else res["error"])
+
+
+def test_synthetic_all_pairs_symmetric(rt):
+    """Every ordered pair of square centres under the six property-test profiles: the outcome class is
+    the same in both directions, and no leg fails validation."""
+    pts = [(-82.0 + 0.001 * c + 0.0005, 27.0 + 0.001 * r + 0.0005) for r in range(4) for c in range(8)]
+    counts = {}
+    for prof in SYMMETRY_PROFILES:
+        for i, a in enumerate(pts):
+            for j, b in enumerate(pts):
+                if j <= i:
+                    continue
+                f, g = _outcome(rt.route(a, b, prof)), _outcome(rt.route(b, a, prof))
+                assert f == g, (prof, a, b, f, g)
+                counts[f] = counts.get(f, 0) + 2
+    assert "validation" not in counts, counts
+    assert counts["route"] > 4000 and counts["no_route"] > 1000

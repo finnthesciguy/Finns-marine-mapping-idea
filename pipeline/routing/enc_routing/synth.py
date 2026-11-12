@@ -6,8 +6,11 @@ split into two triangles along its SW-NE diagonal, with square (col 2,
 row 0) missing (an "island"). Columns run west to east (0..7), rows south
 to north (0..3).
 
-  row 3  deep 60 dm      | col 2 cable, unknown clearance (rows 2-3) | col 5 fixed bridge 30 dm (rows 2-3) | col 6 PROHIBITED
-  row 2  open 21 dm      | col 4 known-depth hazard zone 15 dm       | col 6 RESTRICTED | col 7 band 9 dm refined to 21 dm
+  row 3  deep 60 dm      | col 2 cable, unknown clearance (rows 2-3) | col 5 fixed bridge 30 dm (rows 2-3,
+                           its line starting 0.0001 degree north of row 2's edge) | col 6 PROHIBITED
+  row 2  open 21 dm      | col 4 known-depth hazard zone 15 dm, and an overhead point object (50 m
+                           clearance) 4 units north of the row 1/row 2 boundary | col 6 RESTRICTED |
+                           col 7 band 9 dm refined to 21 dm
   row 1  channel 36 dm   (HIGHWAY, NCF maintained 27 dm), col 3 shoaled to 9 dm, col 5 opening bridge closed 18 dm
   row 0  shallow 6 dm, CATZOC D | col 1 CAUTION | col 2 missing (island)
 
@@ -23,6 +26,7 @@ from .layers import quality_byte
 LON0, LAT0, STEP = -820000000, 270000000, 10000  # units (1e-7 deg)
 NX, NY = 8, 4
 MISSING = {(2, 0)}
+FIXED_BRIDGE_INSET = 1000  # units: the fixed bridge line starts this far north of row 2's southern edge
 
 
 def square_values(c, r):
@@ -92,7 +96,7 @@ def build_synthetic() -> P.Pack:
     }
     strings = ["", "Test Opening Bridge", "Test Fixed Bridge", "Test Cable", "Test Wreck",
                "Test Channel", "CUT-1", "Approach Cut", "Prohibited Zone", "Restricted Zone",
-               "Caution Zone", "Shoal reported", "US5TEST1"]
+               "Caution Zone", "Shoal reported", "US5TEST1", "Test Overhead Point"]
     sid = {s: i for i, s in enumerate(strings)}
 
     def pt(c, r):  # units of a grid node
@@ -103,16 +107,26 @@ def build_synthetic() -> P.Pack:
         first = len(geom)
         geom.extend(points)
         return first, len(points)
-    # overhead 0: opening bridge, a N-S line across col 5 row 1 at lon of col 5.5
+    # overhead 0: opening bridge, a N-S line across col 5 row 1 at lon of col 5.5.
+    # overhead 1: the fixed bridge over rows 2-3 on the same line. Its line starts 0.0001 degree
+    # (11 m) inside its own footprint, so the two lines do not meet on the row 1/row 2 boundary.
+    # A leg along that boundary runs beside the fixed bridge, not under it (spec C.6: a footprint
+    # contains its line with a margin, which the builder's 5 m line buffer provides).
     x55 = LON0 + 5 * STEP + STEP // 2
     g0 = add([(x55, LAT0 + 1 * STEP), (x55, LAT0 + 2 * STEP)])
-    g1 = add([(x55, LAT0 + 2 * STEP), (x55, LAT0 + 4 * STEP)])
+    g1 = add([(x55, LAT0 + 2 * STEP + FIXED_BRIDGE_INSET), (x55, LAT0 + 4 * STEP)])
     x25 = LON0 + 2 * STEP + STEP // 2
     g2 = add([(x25, LAT0 + 2 * STEP), (x25, LAT0 + 4 * STEP)])
+    # overhead 3: a point object with a high clearance, 4 units (0.44 m) north of the row 1/row 2
+    # boundary at column 4.5. A leg along that boundary passes within 1 m of it without its bounding
+    # box containing it (spec B.10 overhead prefilter). No triangle refers to it.
+    g4 = add([(LON0 + 45000, LAT0 + 2 * STEP + 4)])
     ovh = np.array([
         (1, 1, 1 << 4, 18, P.CLR_UNKNOWN, 274, 0, sid["Test Opening Bridge"], x55, LAT0 + 15000, *g0, 2, (0,) * 7),
         (1, 0, 1 << 0, 30, P.CLR_UNKNOWN, P.CLR_UNKNOWN, 0, sid["Test Fixed Bridge"], x55, LAT0 + 30000, *g1, 2, (0,) * 7),
         (2, 0, 0, P.CLR_UNKNOWN, P.CLR_UNKNOWN, P.CLR_UNKNOWN, 0, sid["Test Cable"], x25, LAT0 + 30000, *g2, 2, (0,) * 7),
+        (2, 0, 0, 500, P.CLR_UNKNOWN, P.CLR_UNKNOWN, 0, sid["Test Overhead Point"], LON0 + 45000, LAT0 + 2 * STEP + 4,
+         *g4, 1, (0,) * 7),
     ], dtype=P.OVHD_DT)
     hx, hy = pt(4, 2)
     g3 = add([(hx + STEP // 2, hy + STEP // 2)])

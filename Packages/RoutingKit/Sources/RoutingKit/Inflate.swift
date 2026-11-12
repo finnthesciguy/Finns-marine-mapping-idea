@@ -61,6 +61,52 @@ public enum Zlib {
     }
 }
 
+/// Single-member gzip (RFC 1952) reader on the same INFLATE. Packs never use gzip; this reads the raw-source
+/// regression fixtures (`testdata/routing/*.wkb.gz`) without a system library.
+enum Gzip {
+    static func decompress(_ input: [UInt8]) throws(InflateError) -> [UInt8] {
+        let n = input.count
+        guard n >= 18, input[0] == 0x1F, input[1] == 0x8B, input[2] == 8 else { throw InflateError("not a gzip stream") }
+        let flags = input[3]
+        var start = 10
+        if flags & 4 != 0 {
+            guard start + 2 <= n else { throw InflateError("gzip header truncated") }
+            start += 2 + (Int(input[start]) | Int(input[start + 1]) << 8)
+        }
+        for bit: UInt8 in [8, 16] where flags & bit != 0 {
+            while start < n && input[start] != 0 { start += 1 }
+            start += 1
+        }
+        if flags & 2 != 0 { start += 2 }
+        guard start <= n - 8 else { throw InflateError("gzip header truncated") }
+        func le32(_ o: Int) -> UInt32 {
+            UInt32(input[o]) | UInt32(input[o + 1]) << 8 | UInt32(input[o + 2]) << 16 | UInt32(input[o + 3]) << 24
+        }
+        let expectedLength = Int(le32(n - 4))
+        // DEFLATE cannot expand more than about 1032:1; refuse an impossible ISIZE before allocating.
+        guard expectedLength <= (n - start - 8) * 1032 + 1024 else { throw InflateError("gzip ISIZE impossible") }
+        var output = [UInt8](repeating: 0, count: expectedLength)
+        var failure: InflateError?
+        var produced = 0, consumed = 0
+        input.withUnsafeBufferPointer { (p: UnsafeBufferPointer<UInt8>) in
+            output.withUnsafeMutableBufferPointer { (out: inout UnsafeMutableBufferPointer<UInt8>) in
+                var inflater = Inflater(input: p, start: start, output: out)
+                do throws(InflateError) {
+                    try inflater.run()
+                    produced = inflater.outPos
+                    consumed = inflater.byteAlignedPosition()
+                } catch {
+                    failure = error
+                }
+            }
+        }
+        if let failure { throw failure }
+        guard produced == expectedLength, consumed + 8 == n else { throw InflateError("gzip length mismatch") }
+        guard CRC32.checksum(output) == le32(n - 8) else { throw InflateError("gzip CRC-32 mismatch") }
+        return output
+    }
+}
+
 // MARK: - Huffman tables
 
 private let fastBits = 10

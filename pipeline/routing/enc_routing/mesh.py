@@ -628,7 +628,9 @@ def build_pack(region, merged, metas, merge_stats=None, out_path=None) -> tuple[
     attrs_t = {k: np.asarray(v)[face_of] for k, v in fa.items()}
     verts, ctris, perm = P.canonicalize(coords, tris)
     attrs_t = {k: v[perm] for k, v in attrs_t.items()}
-    vmin, vmax = verts.min(0), verts.max(0)
+    # the header bbox holds every vertex and every GEOM point (spec A.3)
+    allpts = np.vstack([verts.astype(np.int64), geom.astype(np.int64).reshape(-1, 2)])
+    vmin, vmax = allpts.min(0), allpts.max(0)
     bbox = (min(b[0], int(vmin[0])), min(b[1], int(vmin[1])), max(b[2], int(vmax[0])), max(b[3], int(vmax[1])))
     nbr, dup = P.adjacency(ctris)
     assert dup == 0

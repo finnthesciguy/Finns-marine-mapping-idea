@@ -1,11 +1,11 @@
 {
  "file": "synthetic.pack",
- "sha256": "ee5034db6a880ba15ad9e8b607d9a6967f410f7f5a131c404c6a1b3190f50fe0",
+ "sha256": "e32df39fd14943412827390e9c79a600e2dbe02506e2749ca27b06dd4816f32d",
  "header": {
   "major": 1,
-  "minor": 0,
+  "minor": 1,
   "header_size": 256,
-  "file_size": 1784,
+  "file_size": 1824,
   "section_count": 13,
   "section_table_offset": 256,
   "flags": 1,
@@ -23,7 +23,8 @@
   "check_dm": 110,
   "shore_ring0_m": 50,
   "shore_ring1_m": 150,
-  "header_crc32": 1492577637
+  "table_crc32": 59179533,
+  "header_crc32": 882906909
  },
  "sections": [
   {
@@ -37,18 +38,18 @@
   },
   {
    "name": "STRS",
-   "count": 13,
+   "count": 14,
    "encoding": 1,
    "offset": 728,
-   "stored_length": 154,
-   "raw_length": 209,
-   "crc32": 3628528475
+   "stored_length": 168,
+   "raw_length": 232,
+   "crc32": 1387643729
   },
   {
    "name": "SRCS",
    "count": 1,
    "encoding": 0,
-   "offset": 888,
+   "offset": 896,
    "stored_length": 24,
    "raw_length": 24,
    "crc32": 4085256812
@@ -57,7 +58,7 @@
    "name": "VERT",
    "count": 45,
    "encoding": 1,
-   "offset": 912,
+   "offset": 920,
    "stored_length": 63,
    "raw_length": 182,
    "crc32": 1613663742
@@ -66,7 +67,7 @@
    "name": "TRIS",
    "count": 62,
    "encoding": 1,
-   "offset": 976,
+   "offset": 984,
    "stored_length": 116,
    "raw_length": 186,
    "crc32": 3009574474
@@ -75,7 +76,7 @@
    "name": "ADJC",
    "count": 62,
    "encoding": 1,
-   "offset": 1096,
+   "offset": 1104,
    "stored_length": 131,
    "raw_length": 186,
    "crc32": 1012292422
@@ -84,7 +85,7 @@
    "name": "ATTR",
    "count": 62,
    "encoding": 1,
-   "offset": 1232,
+   "offset": 1240,
    "stored_length": 202,
    "raw_length": 1054,
    "crc32": 4165949614
@@ -93,34 +94,34 @@
    "name": "GRID",
    "count": 8,
    "encoding": 1,
-   "offset": 1440,
+   "offset": 1448,
    "stored_length": 98,
    "raw_length": 192,
    "crc32": 1808985301
   },
   {
    "name": "OVHD",
-   "count": 3,
+   "count": 4,
    "encoding": 1,
-   "offset": 1544,
-   "stored_length": 72,
-   "raw_length": 120,
-   "crc32": 12199255
+   "offset": 1552,
+   "stored_length": 95,
+   "raw_length": 160,
+   "crc32": 3236895071
   },
   {
    "name": "HAZD",
    "count": 1,
    "encoding": 0,
-   "offset": 1616,
+   "offset": 1648,
    "stored_length": 32,
    "raw_length": 32,
-   "crc32": 2006250608
+   "crc32": 3657197025
   },
   {
    "name": "CHAN",
    "count": 1,
    "encoding": 0,
-   "offset": 1648,
+   "offset": 1680,
    "stored_length": 32,
    "raw_length": 32,
    "crc32": 2311523809
@@ -129,19 +130,19 @@
    "name": "AREA",
    "count": 3,
    "encoding": 1,
-   "offset": 1680,
+   "offset": 1712,
    "stored_length": 55,
    "raw_length": 96,
    "crc32": 2478541044
   },
   {
    "name": "GEOM",
-   "count": 7,
+   "count": 8,
    "encoding": 1,
-   "offset": 1736,
-   "stored_length": 42,
-   "raw_length": 56,
-   "crc32": 4099219179
+   "offset": 1768,
+   "stored_length": 50,
+   "raw_length": 64,
+   "crc32": 3458843118
   }
  ],
  "info": {
@@ -149,7 +150,7 @@
   "note": "synthetic test pack"
  },
  "strings": {
-  "count": 13,
+  "count": 14,
   "first": {
    "0": "",
    "1": "Test Opening Bridge",
@@ -432,7 +433,7 @@
    "geom": [
     [
      -819945000,
-     270020000
+     270021000
     ],
     [
      -819945000,
@@ -444,24 +445,20 @@
    "kind": 2,
    "flags": 0,
    "catbrg": 0,
-   "clearance_dm": 65534,
+   "clearance_dm": 500,
    "open_clearance_dm": 65534,
    "hor_clearance_dm": 65534,
-   "name": 3,
-   "lon": -819975000,
-   "lat": 270030000,
-   "geom_first": 4,
-   "geom_count": 2,
-   "geom_type": 2,
-   "index": 2,
+   "name": 13,
+   "lon": -819955000,
+   "lat": 270020004,
+   "geom_first": 6,
+   "geom_count": 1,
+   "geom_type": 1,
+   "index": 3,
    "geom": [
     [
-     -819975000,
-     270020000
-    ],
-    [
-     -819975000,
-     270040000
+     -819955000,
+     270020004
     ]
    ]
   }
@@ -475,7 +472,7 @@
    "valsou_dm": 15,
    "lon": -819955000,
    "lat": 270025000,
-   "geom_first": 6,
+   "geom_first": 7,
    "geom_count": 1,
    "name": 4,
    "index": 0,

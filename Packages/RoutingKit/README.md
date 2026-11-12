@@ -51,7 +51,8 @@ do {
 | `corridor`, `waypoints_units` | `corridor: [Int]`, `waypointsUnits: [GridPoint]`. These are the exact values to compare. |
 | legs `{triangles: [lo, hi], length_m, grade, reasons, min_depth_dm, min_spare_dm, crossings}` | `RouteLeg.corridorRange`, `.lengthMeters`, `.grade` (`RouteGrade`), `.reasons` (`[CautionReason]`, raw values are the spec names), `.minDepthDm`, `.minSpareDm`, `.crossings` |
 | summary (B.12) | `RouteSummary`. `overhead` is `nil` where the pack has `0xFFFF`. |
-| `NO_ROUTE` `{reason, blocked, hints}` | `NoRouteReport.reason` (`.blocked(BlockReason)` or `.notConnected`), `.blocked`, `.hints`. A hint is `nil` when that option was already on, which is when the reference omits the key. |
+| `NO_ROUTE` `{reason, blocked, hints}` | `NoRouteReport.reason` (`.blocked(BlockReason)` or `.notConnected`), `.blocked`, `.hints`. A hint is `nil` when that option was already on, which is when the spec omits the key; for `NOT_CONNECTED` every other hint is `false`. |
+| `INVALID_REQUEST` | `RoutingError.invalidRequest` (spec B.2 valid-profile rule) |
 | `LEG_VALIDATION` `{violations}` | `LegValidationReport.violations` (`LegViolation`) and `.corridor` |
 | Errors `START_…` and `GOAL_…` | `SnapFailure.code`. `.start` carries the snapped start when the goal failed. `.noWaterNearby(locatedTriangle:nearestMeters:)` |
 
@@ -73,30 +74,32 @@ do {
   - Integer division uses `floorDiv`.
   - Floating-point expressions follow the spec's operation order, and the reference's where the spec is silent.
 - **Validation on load.**
-  - The A.4 checks, in the spec's order.
+  - Every A.4 check of format 1.1, in the spec's order: header fields, the section-table CRC, the exact layout with zero padding (so every byte of the file is covered by a check), section CRCs, tags, encodings, and the content checks. Format 1.0 files (no table CRC) are accepted.
   - Every count and length, and every index range: vertices, neighbours, grid ids, `CHAN`, `OVHD` and `AREA` references, `GEOM` ranges and string ids.
-  - The A.9 orientation check, and directed-edge uniqueness when deriving adjacency.
+  - The A.9 orientation check, stored-adjacency consistency, and directed-edge uniqueness when deriving adjacency.
+  - GEOM points inside the header bbox, which keeps every A.8 and B.10 orientation exact in Int64.
   - Varint overflow and trailing bytes.
 
 ## Tests
 
-`swift test` (swift-testing) finds `testdata/routing` relative to the package through `#filePath`. It runs 37 tests in about 10 s (debug).
+`swift test` (swift-testing) finds `testdata/routing` relative to the package through `#filePath`. It runs 41 tests in about 9 s (debug).
 
 - **Records.** Every field in both `*.records.json` files and the A.10 worked examples. On the synthetic pack, stored and derived adjacency must be equal. Adjacency must be symmetric. Grid location must agree with a brute-force search.
-- **Vectors.** Every query in both `*.vectors.json` files (9 + 8) must reproduce exactly under the part D rules: integers and sequences exactly, distances to 1e-6 m, `snap_m` to 1e-3 m. A negative control checks that the comparator really detects differences.
+- **Vectors.** Every query in both `*.vectors.json` files (13 + 9) must reproduce exactly under the part D rules: integers and sequences exactly, distances to 1e-6 m, `snap_m` to 1e-3 m. A negative control checks that the comparator really detects differences.
 - **Properties.** These run over all 992 ordered point pairs on the synthetic pack under 6 profiles. Each query is also run in reverse and repeated, 17,856 queries in all:
   - **Determinism:** the same query always gives the same result.
-  - **Symmetry:** a corridor exists from A to B exactly when one exists from B to A.
-  - **Route invariants:** corridor adjacency, leg and grade consistency, and no leg entering the interior of any impassable triangle, checked by an exact separating-axis test.
+  - **Symmetry:** the outcome class (route, no route, leg-validation failure) is the same in both directions, and no query fails leg validation.
+  - **Route invariants:** corridor adjacency, leg and grade consistency, snapped endpoints inside their triangles, and no leg entering the interior of any impassable triangle, checked by an exact separating-axis test.
 
-  The Sarasota routes are checked forwards and backwards too.
+  The Sarasota routes are checked forwards and backwards too, and 1,200 random points are snapped to check that every snapped point lies in its triangle.
+- **Raw-source regression.** `ObstacleRegressionTests` reads `sarasota.obstacles.wkb.gz` and `sarasota.bridge_zone.wkb.gz` (gzip through the package's INFLATE, WKB parsed in the test) and requires every Sarasota route, forwards and reversed, to stay clear of the raw land, structures and blocking hazards: ≥ 11.5 m outside the bridge zones and ≥ 3.5 m inside them, exactly as the Python test.
 - **Corruption.**
   - Every single-bit flip of `synthetic.pack`, and a sample of `sarasota.pack`.
   - Truncation at about 1,500 lengths, with `file_size` and the header CRC both left as they are and patched.
   - Mutations that keep the checksums valid: a test-only re-encoder writes every section raw, then the section contents or section-table fields are mutated and the CRCs fixed.
   - Corrupt zlib streams with a valid section CRC.
 
-  Every case must give a typed error, or load identical content when the flip hits uncovered alignment padding. Packs that load anyway are routed once, to show routing cannot crash either.
+  Every bit flip must give a typed error (format 1.1 leaves no byte unchecked). Mutations with every checksum fixed up must give a typed error or load; packs that load are routed once, to show routing cannot crash either. Specific checks (table CRC, padding, `header_size`, `section_table_offset`, duplicate tags, flag bit 0, STRS and GRID counts) have typed-error tests, and a 1.0 copy of each pack must load with identical content.
 - **Cancellation and timeouts.**
   - Pre-cancelled async and synchronous queries.
   - Cancellation from inside a running search.
@@ -123,7 +126,7 @@ do {
 | c strict (NO_ROUTE, with relaxed search and 2 hint searches) | 4.1 s | 0.28 s |
 | Latency from a mid-search cancel to return | 12 ms | 0.5 ms |
 
-- All 19 pilot reference routes match the Python reference exactly. The Python reference takes about 14 s for all 19.
+- All 19 pilot reference routes match the Python reference exactly (format 1.1 pack, rebuilt 2026-11-12). The Python reference takes about 14 s for all 19.
 - Loading costs about 56 MB above baseline at its peak and about 48 MB once loaded.
 - Pack sizes vary by region. About 45 MB of packs across five regions averages about 9 MB per pack, or about twice the pilot. Expect about 90 MB of arrays for such a region, and load one region at a time.
 
@@ -160,9 +163,6 @@ let route = Route(name: name, points: points, metadata: try RouteMetadata(info))
 
 ## Known limitations
 
-- **Spec issues found while porting.** The full list is in the hand-back report. The reference router behaves identically in every case listed below, and the tests encode these behaviours explicitly:
-  - **B.6 snap rounding.** A snapped endpoint is rounded to whole units and can lie about 1 unit (≈1 cm) outside its snapped triangle, inside an impassable neighbour. This happens twice on Sarasota q3.
-  - **B.10 polyline rule.** Touching an overhead polyline counts as crossing it. A leg that runs exactly along the boundary of an overhead footprint, through passable triangles, therefore fails `LEG_VALIDATION`. This happens in 588 of the 11,904 forward and reverse synthetic all-pairs queries, and only in one direction. On the real (buffered) packs it has not been seen.
-- The "no route touches land" regression check against `sarasota.obstacles.wkb.gz` is not ported, because it needs a WKB reader. Instead, the routes are checked exactly against the mesh's impassable triangles.
+- The specification issues found while porting (snap rounding, the overhead polyline rule, the overhead prefilter, under-specified results and reader checks, no table checksum) are fixed in format and algorithm 1.1; see "Changes from 1.0" in the spec.
 - Only one region is in memory at a time. Routing across region boundaries is not specified yet.
 - `route` keeps 13 bytes per triangle per concurrent query (about 11 MB on the pilot pack). The no-route path runs up to 4 searches in sequence.

@@ -16,6 +16,11 @@ public enum PackError: Error, Hashable, Sendable, CustomStringConvertible {
     case fileSizeMismatch(header: Int, actual: Int)
     /// A header field is outside its allowed range.
     case invalidHeader(String)
+    /// The section-table CRC-32 (format 1.1, header offset 108) does not match the table.
+    case sectionTableChecksumMismatch
+    /// The sections are not stored back to back in table order at 8-byte boundaries, a padding byte is not
+    /// zero, or the file does not end at the padded end of the last section.
+    case invalidLayout(String)
     /// A section's offset/length lies outside the file.
     case sectionOutOfBounds(tag: String)
     /// A section's stored bytes do not match its CRC-32.
@@ -42,6 +47,8 @@ public enum PackError: Error, Hashable, Sendable, CustomStringConvertible {
         case .headerChecksumMismatch: return "routing pack header checksum mismatch"
         case .fileSizeMismatch(let h, let a): return "routing pack size mismatch: header says \(h) bytes, file has \(a)"
         case .invalidHeader(let s): return "invalid routing pack header: \(s)"
+        case .sectionTableChecksumMismatch: return "routing pack section table checksum mismatch"
+        case .invalidLayout(let s): return "invalid routing pack layout: \(s)"
         case .sectionOutOfBounds(let t): return "section \(t) lies outside the file"
         case .sectionChecksumMismatch(let t): return "section \(t) checksum mismatch"
         case .duplicateSection(let t): return "duplicate section \(t)"

@@ -70,7 +70,9 @@ def cut_pack(pack: P.Pack, bbox_deg, region_id: str) -> P.Pack:
     src = pack.sources.copy()
     for r in src:
         r["name"] = S(r["name"])
-    vmin, vmax = V.min(0), V.max(0)
+    # the header bbox holds every vertex and every GEOM point (spec A.3)
+    pts = np.vstack([V, np.array(geom, np.int64).reshape(-1, 2)]) if geom else V
+    vmin, vmax = pts.min(0), pts.max(0)
     bbox = (min(b[0], int(vmin[0])), min(b[1], int(vmin[1])), max(b[2], int(vmax[0])), max(b[3], int(vmax[1])))
     nbr, dup = P.adjacency(T)
     assert dup == 0
@@ -157,7 +159,7 @@ def dump_records(path) -> dict:
 # --------------------------------------------------------------------------- expected results
 
 EXPECTED_KEYS = ["ok", "error", "req_dm", "air_dm", "start", "goal", "corridor", "waypoints_units",
-                 "waypoints", "legs", "summary", "reason", "blocked", "hints", "data_date"]
+                 "waypoints", "legs", "summary", "reason", "blocked", "hints", "violations", "data_date"]
 
 
 def expected(res) -> dict:
@@ -226,6 +228,19 @@ SYNTH_QUERIES = [
     {"id": "s9_sounding", "start": [-81.9935, 27.0025], "goal": [-81.9925, 27.0025],
      "profile": {"draft_ft": 5, "margin_ft": 1, "air_draft_ft": 5},
      "note": "goal in the sounding-refined square (band 9, refined 21 dm)"},
+    {"id": "s10_overhead_point", "start": [-81.9995, 27.0025], "goal": [-81.9945, 27.0025],
+     "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
+     "note": "a leg along the row 1/row 2 boundary passes 0.44 m from the overhead point object (OVHD 3), "
+             "outside the leg's bounding box: it is listed as a crossing; the cable and bridge line ends it "
+             "touches are not"},
+    {"id": "s11_start_is_goal", "start": [-81.9995, 27.0015], "goal": [-81.9995, 27.0015],
+     "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
+     "note": "start equal to goal: a route with one waypoint and no legs"},
+    {"id": "s12_invalid_profile", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
+     "profile": {"draft_ft": -1, "margin_ft": 1, "air_draft_ft": 20}, "note": "negative draft: INVALID_REQUEST"},
+    {"id": "s13_goal_out_of_range", "start": [-81.9995, 27.0015], "goal": [-81.9925, 95.0],
+     "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
+     "note": "latitude 95: GOAL_OUTSIDE_PACK, with the snapped start"},
 ]
 
 SARASOTA_QUERIES = [
@@ -250,4 +265,8 @@ SARASOTA_QUERIES = [
      "profile": {"draft_ft": 4.5, "margin_ft": 1.5, "air_draft_ft": 20}},
     {"id": "q7_15ft", "start": [-82.6000, 27.3800], "goal": [-82.5465, 27.3330],
      "profile": {"draft_ft": 15, "margin_ft": 1.5, "air_draft_ft": 20}},
+    {"id": "q9_not_connected", "start": [-82.5454965, 27.3326002], "goal": [-82.6030, 27.4030],
+     "profile": {"draft_ft": 4.5, "margin_ft": 1.5, "air_draft_ft": 20},
+     "note": "start in a small water part near Marina Jack that the mesh does not connect to the bay: "
+             "NOT_CONNECTED, every hint false"},
 ]

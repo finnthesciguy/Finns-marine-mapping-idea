@@ -54,8 +54,10 @@ def test_header_layout_and_crc(synth_pack):
     buf = synth_pack.read_bytes()
     assert buf[:8] == b"GCRTPACK"
     major, minor, hsize = struct.unpack_from("<HHI", buf, 8)
-    assert (major, minor, hsize) == (1, 0, 256)
+    assert (major, minor, hsize) == (1, 1, 256)
     assert struct.unpack_from("<I", buf, 16)[0] == len(buf)
+    n = struct.unpack_from("<I", buf, 20)[0]
+    assert struct.unpack_from("<I", buf, 108)[0] == zlib.crc32(buf[256:256 + 32 * n])
     assert struct.unpack_from("<I", buf, 252)[0] == zlib.crc32(buf[:252])
     bad = bytearray(buf)
     bad[40] ^= 1
@@ -109,3 +111,125 @@ def test_grid_cells_are_closed():
     cells = {c: g["ids"][g["offsets"][c]:g["offsets"][c + 1]].tolist() for c in range(g["nx"] * g["ny"])}
     # triangle 0 spans x 0..10, y 0..10: touches cells (0,0),(0,1),(1,0),(1,1) because cells are closed
     assert cells == {0: [0, 1], 1: [0, 1], 2: [0, 1], 3: [0, 1]}
+
+
+# ------------------------------------------------------------------ reader checks (spec A.4)
+
+def _fix_crcs(buf: bytearray, table_crc: bool = True) -> bytes:
+    """Recompute the section-table CRC (format 1.1) and the header CRC after a mutation."""
+    n = struct.unpack_from("<I", buf, 20)[0]
+    if table_crc:
+        struct.pack_into("<I", buf, 108, zlib.crc32(bytes(buf[256:256 + 32 * n])))
+    struct.pack_into("<I", buf, 252, zlib.crc32(bytes(buf[:252])))
+    return bytes(buf)
+
+
+def _entry(buf, tag):
+    n = struct.unpack_from("<I", buf, 20)[0]
+    for i in range(n):
+        if buf[256 + 32 * i: 260 + 32 * i] == tag:
+            return 256 + 32 * i
+    raise KeyError(tag)
+
+
+def test_reader_accepts_format_1_0(synth_pack):
+    buf = bytearray(synth_pack.read_bytes())
+    struct.pack_into("<H", buf, 10, 0)       # minor 0
+    struct.pack_into("<I", buf, 108, 0)      # reserved in 1.0: no section-table CRC
+    old = P.decode_pack(_fix_crcs(buf, table_crc=False))
+    new = P.read_pack(synth_pack)
+    assert old.header["minor"] == 0 and new.header["minor"] == 1
+    assert np.array_equal(old.tris, new.tris) and np.array_equal(old.nbr, new.nbr)
+    # a 1.0 file has no table CRC, so a table change is not detected by a checksum ...
+    struct.pack_into("<I", buf, _entry(buf, b"INFO") + 28, 5)  # INFO count is informative
+    P.decode_pack(_fix_crcs(buf, table_crc=False))
+    # ... but in 1.1 it is
+    buf = bytearray(synth_pack.read_bytes())
+    struct.pack_into("<I", buf, _entry(buf, b"INFO") + 28, 5)
+    with pytest.raises(P.PackError, match="section table CRC"):
+        P.decode_pack(bytes(buf))
+
+
+def _mutations(buf):
+    """(name, mutated bytes) with every CRC fixed, so the semantic checks are reached."""
+    out = []
+    b = bytearray(buf)
+    struct.pack_into("<I", b, 12, 255)
+    out.append(("header_size", _fix_crcs(b)))
+    b = bytearray(buf)
+    struct.pack_into("<I", b, 24, 264)
+    out.append(("section_table_offset", _fix_crcs(b)))
+    b = bytearray(buf)
+    b[_entry(b, b"CHAN"): _entry(b, b"CHAN") + 4] = b"AREA"
+    out.append(("duplicate tag", _fix_crcs(b)))
+    b = bytearray(buf)
+    struct.pack_into("<I", b, 28, 0)
+    out.append(("flag bit 0 without ADJC", _fix_crcs(b)))
+    b = bytearray(buf)
+    struct.pack_into("<I", b, _entry(b, b"STRS") + 28, 12)
+    out.append(("STRS count", _fix_crcs(b)))
+    b = bytearray(buf)
+    struct.pack_into("<I", b, _entry(b, b"GRID") + 28, 9)
+    out.append(("GRID count", _fix_crcs(b)))
+    b = bytearray(buf)
+    struct.pack_into("<I", b, 16, len(b) + 8)
+    out.append(("file_size", _fix_crcs(b + bytearray(8))[:len(b)]))
+    b = bytearray(buf) + bytearray(8)
+    struct.pack_into("<I", b, 16, len(b))
+    out.append(("trailing padding block", _fix_crcs(b)))
+    b = bytearray(buf)
+    e = _entry(b, b"INFO")
+    off, slen = struct.unpack_from("<QI", b, e + 8)
+    if (off + slen) % 8:
+        b[off + slen] = 1
+        out.append(("non-zero padding", bytes(b)))
+    b = bytearray(buf)
+    struct.pack_into("<i", b, 72, struct.unpack_from("<i", b, 64)[0] + (1 << 30) + 1)
+    out.append(("bbox span", _fix_crcs(b)))
+    return out
+
+
+@pytest.mark.parametrize("i", range(10))
+def test_reader_rejects_checksum_valid_mutations(synth_pack, i):
+    muts = _mutations(synth_pack.read_bytes())
+    if i < len(muts):
+        name, b = muts[i]
+        with pytest.raises(P.PackError):
+            P.decode_pack(b)
+
+
+def test_every_bit_flip_is_rejected(synth_pack):
+    """Format 1.1 covers every byte: header CRC, table CRC, section CRCs, zero padding."""
+    buf = synth_pack.read_bytes()
+    accepted = []
+    for pos in range(len(buf)):
+        for bit in range(8):
+            b = bytearray(buf)
+            b[pos] ^= 1 << bit
+            try:
+                P.decode_pack(bytes(b))
+                accepted.append((pos, bit))
+            except P.PackError:
+                pass
+    assert not accepted, accepted[:10]
+
+
+def test_reader_rejects_geometry_outside_bbox(tmp_path):
+    src = synth.build_synthetic()
+    src.geom = src.geom.copy()
+    src.geom[0, 0] = src.bbox[0] - 1
+    p = tmp_path / "geom.pack"
+    P.write_pack(src, p, with_adjacency=True)
+    with pytest.raises(P.PackError, match="GEOM"):
+        P.read_pack(p)
+
+
+def test_reader_rejects_inconsistent_adjacency(tmp_path):
+    src = synth.build_synthetic()
+    src.nbr = src.nbr.copy()
+    t = int(np.flatnonzero((src.nbr >= 0).all(axis=1))[0])
+    src.nbr[t, 0], src.nbr[t, 1] = src.nbr[t, 1], src.nbr[t, 0]
+    p = tmp_path / "adj.pack"
+    P.write_pack(src, p, with_adjacency=True)
+    with pytest.raises(P.PackError, match="ADJC"):
+        P.read_pack(p)

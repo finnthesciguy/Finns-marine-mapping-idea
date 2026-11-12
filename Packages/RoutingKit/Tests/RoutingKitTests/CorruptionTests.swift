@@ -39,8 +39,16 @@ struct RawPack {
         var raw = RawPack(bytes: out, sections: layout)
         for i in 0..<layout.count { raw.fixSectionCRC(i) }
         put32(&raw.bytes, 16, UInt32(raw.bytes.count))
+        raw.fixTableCRC()
         raw.fixHeaderCRC()
         return raw
+    }
+
+    /// The section-table CRC-32 at header offset 108 (format 1.1).
+    mutating func fixTableCRC() {
+        let n = sections.count
+        let crc: UInt32 = bytes.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[256..<(256 + 32 * n)])) }
+        put32(&bytes, 108, crc)
     }
 
     mutating func fixSectionCRC(_ i: Int) {
@@ -55,6 +63,15 @@ struct RawPack {
         let crc: UInt32 = bytes.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
         put32(&bytes, 252, crc)
     }
+}
+
+/// Recomputes the section-table CRC and the header CRC of a pack held in `b`.
+func fixTableAndHeaderCRC(_ b: inout [UInt8]) {
+    let n = Int(b[20]) | Int(b[21]) << 8 | Int(b[22]) << 16 | Int(b[23]) << 24
+    let table: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[256..<(256 + 32 * n)])) }
+    put32(&b, 108, table)
+    let header: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
+    put32(&b, 252, header)
 }
 
 func put32(_ b: inout [UInt8], _ o: Int, _ v: UInt32) {
@@ -119,15 +136,70 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
 
         b = try Fixtures.bytes("synthetic.pack")
         b[8] = 2
-        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 0)) { try RoutingPack(bytes: b) }
+        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 1)) { try RoutingPack(bytes: b) }
 
         b = try Fixtures.bytes("synthetic.pack")
         b[200] ^= 1
         #expect(throws: PackError.headerChecksumMismatch) { try RoutingPack(bytes: b) }
 
         b = try Fixtures.bytes("synthetic.pack")
+        let size = b.count
         b.append(0)
-        #expect(throws: PackError.fileSizeMismatch(header: 1784, actual: 1785)) { try RoutingPack(bytes: b) }
+        #expect(throws: PackError.fileSizeMismatch(header: size, actual: size + 1)) { try RoutingPack(bytes: b) }
+
+        // A.4 check 6: the section table is covered by its own CRC (format 1.1).
+        b = try Fixtures.bytes("synthetic.pack")
+        b[256 + 28] ^= 1
+        #expect(throws: PackError.sectionTableChecksumMismatch) { try RoutingPack(bytes: b) }
+
+        // A.4 check 7: padding must be zero, and the file must end at the padded end of the last section.
+        b = try Fixtures.bytes("synthetic.pack")
+        let info = Fixtures.synthetic.sections[0]
+        let padding = Int(info.offset) + info.storedLength
+        #expect(padding % 8 != 0)
+        b[padding] = 1
+        #expect(throws: PackError.invalidLayout("non-zero padding at byte \(padding)")) { try RoutingPack(bytes: b) }
+        b = try Fixtures.bytes("synthetic.pack")
+        b += [UInt8](repeating: 0, count: 8)
+        put32(&b, 16, UInt32(b.count))
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.self) { try RoutingPack(bytes: b) }
+
+        // A.4 check 5: header_size and section_table_offset.
+        b = try Fixtures.bytes("synthetic.pack")
+        put32(&b, 24, 264)
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.invalidHeader("section_table_offset 264")) { try RoutingPack(bytes: b) }
+        b = try Fixtures.bytes("synthetic.pack")
+        put32(&b, 12, 255)
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.invalidHeader("header_size 255")) { try RoutingPack(bytes: b) }
+
+        // A.4 check 9: duplicate tags; flag bit 0 versus ADJC.
+        b = try Fixtures.bytes("synthetic.pack")
+        let chan = 256 + 32 * 10
+        #expect(Array(b[chan..<(chan + 4)]) == Array("CHAN".utf8))
+        for (k, ch) in Array("AREA".utf8).enumerated() { b[chan + k] = ch }
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.duplicateSection(tag: "AREA")) { try RoutingPack(bytes: b) }
+        b = try Fixtures.bytes("synthetic.pack")
+        put32(&b, 28, 0)
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.invalidHeader("flag bit 0 (ADJC present) disagrees with the section table")) {
+            try RoutingPack(bytes: b)
+        }
+
+        // A.4 check 11: STRS and GRID counts.
+        b = try Fixtures.bytes("synthetic.pack")
+        put32(&b, 256 + 32 * 1 + 28, UInt32(Fixtures.synthetic.stringCount - 1))
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.malformedSection(tag: "STRS", reason: "string count \(Fixtures.synthetic.stringCount)")) {
+            try RoutingPack(bytes: b)
+        }
+        b = try Fixtures.bytes("synthetic.pack")
+        put32(&b, 256 + 32 * 7 + 28, 9)
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.malformedSection(tag: "GRID", reason: "grid dimensions")) { try RoutingPack(bytes: b) }
 
         b = try Fixtures.bytes("synthetic.pack")
         let vert = Fixtures.synthetic.sections[3]
@@ -138,20 +210,37 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
         #expect(throws: PackError.self) { try RoutingPack(bytes: []) }
     }
 
+    /// A 1.1 reader accepts a 1.0 file: the same bytes with minor 0 and no section-table CRC.
+    @Test func acceptsFormat1_0() throws {
+        for name in ["synthetic", "sarasota"] {
+            var b = try Fixtures.bytes("\(name).pack")
+            b[10] = 0
+            b[11] = 0
+            put32(&b, 108, 0)
+            let crc: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
+            put32(&b, 252, crc)
+            let old = try RoutingPack(bytes: b)
+            let new = try RoutingPack(bytes: try Fixtures.bytes("\(name).pack"))
+            #expect(old.header.formatMinor == 0 && new.header.formatMinor == 1)
+            #expect(old.header.tableCRC32 == 0)
+            #expect(sameContent(old, new), "\(name)")
+        }
+    }
+
     @Test func truncationAlwaysThrows() throws {
         for name in ["synthetic", "sarasota"] {
             let original = try Fixtures.bytes("\(name).pack")
             let ref = try RoutingPack(bytes: original)
-            // Cutting only the alignment padding after the last section (and patching file_size) leaves a valid file.
-            let dataEnd = ref.sections.map { Int($0.offset) + $0.storedLength }.max() ?? 0
             let step = max(1, original.count / 1500)
+            #expect(ref.sections.count > 0)
             var thrown = 0, cases = 0
             for n in stride(from: 0, to: original.count, by: step) {
                 cases += 2
                 let cut = Array(original[0..<n])
                 if (try? RoutingPack(bytes: cut)) == nil { thrown += 1 }
-                // Same, with file_size and the header CRC patched so the reader reaches the section checks.
-                if n >= 256 && n < dataEnd {
+                // Same, with file_size and the header CRC patched so the reader reaches the section checks (cutting
+                // only the padding after the last section is rejected too: the file must end at the padded end).
+                if n >= 256 {
                     var fixed = cut
                     put32(&fixed, 16, UInt32(n))
                     let crc: UInt32 = fixed.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
@@ -165,8 +254,8 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
         }
     }
 
-    /// Every single-bit flip of the synthetic pack, and a sample of the Sarasota pack: a typed error, or (for
-    /// bytes no checksum covers, i.e. alignment padding) a pack with identical content. Never a crash.
+    /// Every single-bit flip of the synthetic pack, and a sample of the Sarasota pack, is a typed error: in format
+    /// 1.1 the header CRC, the section-table CRC, the section CRCs and the zero-padding rule cover every byte.
     @Test func bitFlips() throws {
         for name in ["synthetic", "sarasota"] {
             let original = try Fixtures.bytes("\(name).pack")
@@ -187,12 +276,14 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
                     }
                 }
             }
-            print("[fuzz] \(name) bit flips: \(rejected) rejected, \(loadedSame) harmless (padding), \(loadedDifferent) changed")
+            print("[fuzz] \(name) bit flips: \(rejected) rejected, \(loadedSame) loaded unchanged, \(loadedDifferent) changed")
             #expect(loadedDifferent == 0)
+            #expect(loadedSame == 0)
         }
     }
 
-    /// Mutations that keep every CRC valid: raw sections (re-encoded) and the section table, which no CRC covers.
+    /// Mutations that keep every CRC valid: raw sections (re-encoded), and section-table fields with the table and
+    /// header CRCs recomputed, so the semantic checks are reached.
     @Test func checksumValidMutations() throws {
         for name in ["synthetic", "sarasota"] {
             let raw = try RawPack.reencode(try Fixtures.bytes("\(name).pack"))
@@ -218,6 +309,8 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
                         var m = raw
                         let v = UInt32(truncatingIfNeeded: rng.next() % 4 == 0 ? rng.next() : rng.next() % 64)
                         put32(&m.bytes, s.entry + field, v)
+                        m.fixTableCRC()
+                        m.fixHeaderCRC()
                         if loadAndExercise(m.bytes) == nil { rejected += 1 } else { loaded += 1 }
                     }
                 }

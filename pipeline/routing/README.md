@@ -16,7 +16,7 @@ python -m enc_routing route --start -82.6225,27.768 --goal -82.5465,27.333 --dra
 python -m enc_routing reference                            # reference routes, checked against the source data
 python -m enc_routing render [--out DIR]                   # PNG figures
 python -m enc_routing vectors [--out testdata/routing]     # synthetic pack, Sarasota cut, vectors, record dumps
-python -m pytest -q                                        # offline, about 1 s
+python -m pytest -q                                        # offline, about 10 s
 ```
 
 Everything that is downloaded or generated goes under `$ENC_ROUTING_WORK`. The default is the session scratchpad `.../scratchpad/routing-spike`. The command `vectors` writes into `testdata/routing/`.

@@ -205,12 +205,24 @@ RoutingKit (the on-device engine), what is proven and what is open:
 
 - **Proven:** written from the specification, it reproduces the Python reference exactly on all 17 test-vector queries and all 19 pilot reference routes. Corrupt and truncated pack files give typed errors, never a crash.
 - **Performance on the full pilot pack (Linux, release build):** loads in about 0.3 s, uses about 80 MB of memory, and computes a 30–60 nm route in 18–28 ms. A "no route" answer with its explanation takes about 0.3 s. One region is loaded at a time.
-- **Specification issues found by the port, to fix in the format document, builder and both routers together:**
-  1. Rounding a snapped start or end point can leave it about 1 cm outside its triangle, so a leg can graze an impassable triangle.
-  2. A leg running exactly along the edge of a bridge or cable footprint is rejected, and only in one direction of travel.
-  3. A hazard point within 1 m of a leg can be missed by the bounding-box prefilter.
-  4. Several result fields and reader checks are under-specified; the section table has no checksum.
-- **Open:** the check that no route touches land in the raw chart data exists only in the Python tests, not yet in Swift.
+- **Specification issues found by the port — fixed** in the format document, the Python reference and RoutingKit together (format 1.1; 1.0 packs still load):
+  1. A snapped start or end point is now always inside or on its triangle.
+  2. The bridge and cable crossing test is exact and the same in both directions of travel. On the synthetic pack, 588 false leg-validation failures dropped to zero.
+  3. Hazard points within 1 m of a leg can no longer be missed.
+  4. Result shapes, summary field sources and reader checks are fully specified; the section table now has a checksum, so every byte of a pack is verified.
+  - None of the 19 pilot routes changed outcome, grade or bridge crossings; five had an endpoint move by about 1 cm.
+- The check that no route touches land or structures in the raw chart data now also runs in Swift.
+
+## 5c. Wave 3 progress
+
+| Piece | Status |
+|---|---|
+| `AppServices` (location, chart downloads, display helpers) | built; 52 tests pass on Linux |
+| App skeleton (`App/`): disclaimer, offline chart map, charts screen | written; first compile is the CI simulator build job |
+| GPS tracks, waypoints, routes, GPX screens | not started |
+| Auto-route screen | not started |
+
+Known gaps in the app so far: chart downloads run in the foreground only; the app installs NOAA's dated 2024 packages until our own are published; bundle id, name and icon are placeholders.
 
 ## 6. What the owner has to do
 

@@ -1,9 +1,9 @@
 {
  "file": "sarasota.pack",
- "sha256": "9face2bf45bbc391f28e6b4cba7b5cd4539ab9f2a1b54b78c5150102f408e621",
+ "sha256": "c8289967a0546f46b3e895b2693a418df63bcfb9850d3b65326d3cbf29867da5",
  "header": {
   "major": 1,
-  "minor": 0,
+  "minor": 1,
   "header_size": 256,
   "file_size": 216368,
   "section_count": 12,
@@ -16,14 +16,15 @@
   "max_lat": 274200000,
   "data_date": 20261023,
   "build_date": 20261112,
-  "build_time": 43231,
+  "build_time": 162144,
   "vertex_count": 27854,
   "triangle_count": 42520,
   "clearance_dm": 120,
   "check_dm": 110,
   "shore_ring0_m": 50,
   "shore_ring1_m": 150,
-  "header_crc32": 3659834171
+  "table_crc32": 1491784086,
+  "header_crc32": 2582088106
  },
  "sections": [
   {
@@ -31,9 +32,9 @@
    "count": 0,
    "encoding": 1,
    "offset": 640,
-   "stored_length": 540,
+   "stored_length": 541,
    "raw_length": 966,
-   "crc32": 3629398446
+   "crc32": 4070774855
   },
   {
    "name": "STRS",
@@ -136,7 +137,7 @@
   }
  ],
  "info": {
-  "builder": "enc_routing 2.0.0",
+  "builder": "enc_routing 2.1.0",
   "params": "{\"clearance_m\": 12.0, \"bridge_clearance_m\": 4.0, \"bridge_zone_m\": 60.0, \"fender_clearance_m\": 3.0, \"simplify_m\": 1.0, \"close_m\": 5.0, \"min_part_m2\": 200.0, \"hazard_ring_m\": 30.0, \"shore_rings_m\": [50.0, 150.0], \"ring_simplify_m\": 5.0, \"grid_deg\": 0.02, \"sounding_near_m\": 12.0, \"tin_edge_frac\": 0.02, \"tin_edge_cap_m\": 400.0, \"ncf_tolerance_m\": 15.0, \"track_buffer_m\": 15.0, \"highway_buffer_m\": 30.0, \"overhead_line_buffer_m\": 5.0, \"overhead_poly_buffer_m\": 0.0, \"index_cell_deg\": 0.01, \"sample_radius_units\": 3.0}",
   "params_key": "5d5b5974cf10848e",
   "crs": "+proj=tmerc +lat_0=0 +lon_0=-82.6000 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",

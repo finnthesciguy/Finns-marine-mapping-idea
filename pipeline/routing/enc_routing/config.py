@@ -39,7 +39,7 @@ CUTS = {
 
 # Bump when the builder's output changes for identical inputs; part of every
 # cache key and written into the pack's build info.
-BUILDER_VERSION = "2.0.0"
+BUILDER_VERSION = "2.1.0"  # 2.1.0: pack format 1.1 (section-table CRC), bbox holds every GEOM point
 
 
 @dataclass(frozen=True)

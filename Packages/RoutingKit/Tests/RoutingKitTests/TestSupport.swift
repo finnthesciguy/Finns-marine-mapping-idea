@@ -76,6 +76,16 @@ struct VectorEndpoint: Decodable {
     var inMesh: Bool?
     var error: String?
     var located: Int?
+    var nearestM: Double?
+}
+
+struct VectorViolation: Decodable {
+    var kind: String
+    var record: Int
+    var leg: Int
+    var distanceM: Double?
+    var valsouDm: Int?
+    var clearanceDm: Int?
 }
 
 struct VectorCrossing: Decodable {
@@ -149,8 +159,9 @@ struct VectorBlocked: Decodable {
 struct VectorExpected: Decodable {
     var ok: Bool
     var error: String?
-    var reqDm: Int
-    var airDm: Int
+    /// Absent for INVALID_REQUEST.
+    var reqDm: Int?
+    var airDm: Int?
     var start: VectorEndpoint?
     var goal: VectorEndpoint?
     var corridor: [Int]?
@@ -162,6 +173,7 @@ struct VectorExpected: Decodable {
     var reason: String?
     var blocked: [VectorBlocked]?
     var hints: [String: Bool]?
+    var violations: [VectorViolation]?
 }
 
 // MARK: - Comparison (spec part D rules)
@@ -205,8 +217,8 @@ struct VectorComparator {
     mutating func route(_ r: RouteResult, _ e: VectorExpected) {
         check(e.ok, "got a route, expected error \(e.error ?? "?")")
         guard e.ok else { return }
-        int(r.requiredDepthDm, e.reqDm, "req_dm")
-        int(r.requiredAirDm, e.airDm, "air_dm")
+        intOpt(r.requiredDepthDm, e.reqDm, "req_dm")
+        intOpt(r.requiredAirDm, e.airDm, "air_dm")
         int(Int(r.dataDate.rawValue), e.dataDate, "data_date")
         endpoint(r.start, e.start, "start")
         endpoint(r.goal, e.goal, "goal")
@@ -274,19 +286,49 @@ struct VectorComparator {
         int(Int(g.dataDate.rawValue), w.dataDate, "summary.data_date")
     }
 
-    mutating func failure(_ err: RoutingError, _ e: VectorExpected) {
+    mutating func optionalDouble(_ got: Double?, _ want: Double?, _ tol: Double, _ field: String) {
+        if let got, let want {
+            double(got, want, tol, field)
+        } else {
+            check(got == nil && want == nil, "\(field): got \(String(describing: got)), want \(String(describing: want))")
+        }
+    }
+
+    mutating func failure(_ err: RoutingError, _ e: VectorExpected, profile: BoatProfile) {
         check(!e.ok, "got error \(err.code), expected a route")
         guard !e.ok else { return }
         check(err.code == e.error, "error: got \(err.code), want \(e.error ?? "?")")
         switch err {
+        case .invalidRequest:
+            check(e.reqDm == nil && e.airDm == nil && e.start == nil, "INVALID_REQUEST carries no req_dm, air_dm or start")
         case .snapFailed(let f):
+            intOpt(profile.requiredDepthDm, e.reqDm, "req_dm")
+            intOpt(profile.requiredAirDm, e.airDm, "air_dm")
             let want = f.endpoint == .start ? e.start : e.goal
             check(want?.error == f.kind.code, "snap error kind: got \(f.kind.code)")
-            if case .noWaterNearby(let located, _) = f.kind { intOpt(located, want?.located, "located") }
+            if case .noWaterNearby(let located, let nearest) = f.kind {
+                intOpt(located, want?.located, "located")
+                optionalDouble(nearest, want?.nearestM, distanceTolerance, "nearest_m")
+            }
             if f.endpoint == .goal, let s = f.start { endpoint(s, e.start, "start") }
+            if f.endpoint == .start { check(e.goal == nil, "a START_ error has no goal object") }
+        case .legValidation(let r):
+            check(r.corridor == (e.corridor ?? []), "corridor differs")
+            let want = e.violations ?? []
+            int(r.violations.count, want.count, "violations.count")
+            for (i, p) in zip(r.violations, want).enumerated() {
+                let (g, w) = p
+                let f = "violations[\(i)]"
+                check(g.kind.rawValue == w.kind, "\(f).kind: got \(g.kind.rawValue), want \(w.kind)")
+                int(g.record, w.record, "\(f).record")
+                int(g.leg, w.leg, "\(f).leg")
+                optionalDouble(g.distanceMeters, w.distanceM, distanceTolerance, "\(f).distance_m")
+                intOpt(g.valsouDm, w.valsouDm, "\(f).valsou_dm")
+                intOpt(g.clearanceDm, w.clearanceDm, "\(f).clearance_dm")
+            }
         case .noRoute(let r):
-            int(r.requiredDepthDm, e.reqDm, "req_dm")
-            int(r.requiredAirDm, e.airDm, "air_dm")
+            intOpt(r.requiredDepthDm, e.reqDm, "req_dm")
+            intOpt(r.requiredAirDm, e.airDm, "air_dm")
             int(Int(r.dataDate.rawValue), e.dataDate, "data_date")
             endpoint(r.start, e.start, "start")
             endpoint(r.goal, e.goal, "goal")
@@ -322,7 +364,7 @@ func compareVector(_ q: VectorQuery, on pack: RoutingPack) -> [String] {
         let r = try pack.routeSynchronously(q.request)
         cmp.route(r, q.expected)
     } catch {
-        cmp.failure(error, q.expected)
+        cmp.failure(error, q.expected, profile: q.request.profile)
     }
     return cmp.mismatches
 }
