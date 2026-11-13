@@ -80,6 +80,24 @@ public final class RoutingPack: Sendable {
         try self.init(data: data)
     }
 
+    /// Reads and checks only the 256-byte header of a pack file (magic, version, header CRC, file size and
+    /// header fields; spec A.4 steps 1–5), without decoding or validating any section. Cheap: the file is
+    /// memory-mapped and only the header is read. Use it to list installed packs (region, bounding box,
+    /// data date); open the pack with ``init(contentsOf:)`` before routing, which checks everything.
+    public static func header(contentsOf url: URL) throws(PackError) -> PackHeader {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url, options: .mappedIfSafe)
+        } catch {
+            throw .unreadable("\(url.lastPathComponent): \(error.localizedDescription)")
+        }
+        let result: Result<PackHeader, PackError> = data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            return Result { () throws(PackError) -> PackHeader in try PackParser(file: bytes).parseHeaderOnly() }
+        }
+        return try result.get()
+    }
+
     /// Decodes and validates a pack held in memory.
     public convenience init(data: Data) throws(PackError) {
         let result: Result<PackContents, PackError> = data.withUnsafeBytes { raw in

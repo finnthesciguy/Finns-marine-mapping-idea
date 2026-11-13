@@ -8,6 +8,7 @@ import Persistence
 ///
 ///     Library/Charts/    ChartKit installer root: state file, staging/, regions/  (excluded from backup)
 ///     Library/AppData/   Persistence store (waypoints, routes, tracks, settings)  (backed up)
+///     Library/RoutingPacks/  side-loaded routing packs (debug fixture, debug document picker)  (excluded from backup)
 ///
 /// `Library/Application Support` is avoided for charts because its path contains a space and the map
 /// engine reads packages through `mbtiles://` URLs (MapLibre percent-decodes the path; a plain path
@@ -29,6 +30,8 @@ public struct AppPaths: Sendable, Equatable {
     public var chartsDirectory: URL { libraryDirectory.appendingPathComponent("Charts", isDirectory: true) }
     public var dataDirectory: URL { libraryDirectory.appendingPathComponent("AppData", isDirectory: true) }
     public var storeURL: URL { dataDirectory.appendingPathComponent("gulfnav.sqlite", isDirectory: false) }
+    /// Side-loaded routing packs (packs installed with a chart region live under `chartsDirectory`).
+    public var routingPacksDirectory: URL { libraryDirectory.appendingPathComponent("RoutingPacks", isDirectory: true) }
 
     /// True when `url`'s path can go into an `mbtiles://` URL verbatim.
     public static func isSafeForMBTilesURL(_ url: URL) -> Bool {
@@ -47,7 +50,9 @@ public struct AppPaths: Sendable, Equatable {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: chartsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: routingPacksDirectory, withIntermediateDirectories: true)
         try AppPaths.excludeFromBackup(chartsDirectory)
+        try AppPaths.excludeFromBackup(routingPacksDirectory)
     }
 
     public static func excludeFromBackup(_ url: URL) throws {
@@ -87,11 +92,15 @@ public final class AppEnvironment: Sendable {
     /// Where a disclaimer acceptance from a build before Persistence may still be stored (nil: none to migrate).
     public let legacyAcknowledgements: (any RemovableAcknowledgementStore)?
     public let launch: LaunchConfiguration
+    /// Installed routing packs (with chart regions, plus side-loaded ones), opened one at a time.
+    public let routingPacks: RoutingPackLibrary
+    /// The auto-route planner on `routingPacks`, gated by the auto-route notice in `store`.
+    public let planner: AutoRoutePlanner
 
     public init(paths: AppPaths, charts: ChartLibrary, acknowledgements: any AcknowledgementStore,
                 store: PersistenceStore, storeIsPersistent: Bool = true, openReport: OpenReport? = nil,
                 notices: [StartupNotice] = [], legacyAcknowledgements: (any RemovableAcknowledgementStore)? = nil,
-                launch: LaunchConfiguration = LaunchConfiguration()) {
+                launch: LaunchConfiguration = LaunchConfiguration(), routingPacks: RoutingPackLibrary? = nil) {
         self.paths = paths
         self.charts = charts
         self.acknowledgements = acknowledgements
@@ -101,6 +110,20 @@ public final class AppEnvironment: Sendable {
         self.notices = notices
         self.legacyAcknowledgements = legacyAcknowledgements
         self.launch = launch
+        let library: RoutingPackLibrary = routingPacks
+            ?? RoutingPackLibrary(sideLoadDirectory: paths.routingPacksDirectory, installer: charts.installer)
+        library.attach(installer: charts.installer)
+        self.routingPacks = library
+        self.planner = AutoRoutePlanner(library: library, noticeGate: AutoRouteNoticeGate(store: store))
+    }
+
+    /// The installer configuration with RoutingKit's full pack check as the routing-pack validator (unless the
+    /// caller set one), so a corrupt routing pack is rejected at install time.
+    static func withRoutingPackValidator(_ configuration: ChartInstaller.Configuration,
+                                         library: RoutingPackLibrary) -> ChartInstaller.Configuration {
+        var out: ChartInstaller.Configuration = configuration
+        if out.routingPackValidator == nil { out.routingPackValidator = library.installValidator }
+        return out
     }
 
     /// Builds the environment on `paths` with the given transport. Without `store`, an in-memory store is
@@ -111,13 +134,15 @@ public final class AppEnvironment: Sendable {
                             diskSpace: any DiskSpaceProvider = FileSystemDiskSpace(),
                             configuration: ChartInstaller.Configuration = ChartInstaller.Configuration()) throws -> AppEnvironment {
         try paths.prepare()
+        let packs = RoutingPackLibrary(sideLoadDirectory: paths.routingPacksDirectory)
         let installer = try ChartInstaller(rootDirectory: paths.chartsDirectory, transport: transport,
-                                           diskSpace: diskSpace, configuration: configuration)
+                                           diskSpace: diskSpace,
+                                           configuration: withRoutingPackValidator(configuration, library: packs))
         let library = ChartLibrary(installer: installer, transport: transport, diskSpace: diskSpace)
         let userStore: PersistenceStore = try store ?? PersistenceStore(inMemoryWith: PersistenceStore.Options())
         let ack: any AcknowledgementStore = acknowledgements ?? PersistenceAcknowledgementStore(store: userStore)
         return AppEnvironment(paths: paths, charts: library, acknowledgements: ack, store: userStore,
-                              storeIsPersistent: store != nil)
+                              storeIsPersistent: store != nil, routingPacks: packs)
     }
 
     /// The real app: sandbox `Library/` (or an isolated test directory, see `LaunchConfiguration`), the
@@ -144,14 +169,16 @@ public final class AppEnvironment: Sendable {
                             legacy: (any RemovableAcknowledgementStore)?) throws -> AppEnvironment {
         try paths.prepare()
         let opened: StoreOpener.Result = try StoreOpener.open(at: paths.storeURL)
+        let packs = RoutingPackLibrary(sideLoadDirectory: paths.routingPacksDirectory)
         let installer = try ChartInstaller(rootDirectory: paths.chartsDirectory, transport: transport,
-                                           diskSpace: diskSpace, configuration: configuration)
+                                           diskSpace: diskSpace,
+                                           configuration: withRoutingPackValidator(configuration, library: packs))
         let library = ChartLibrary(installer: installer, transport: transport, diskSpace: diskSpace)
         return AppEnvironment(paths: paths, charts: library,
                               acknowledgements: PersistenceAcknowledgementStore(store: opened.store),
                               store: opened.store, storeIsPersistent: opened.isPersistent,
                               openReport: opened.report, notices: opened.notices,
-                              legacyAcknowledgements: legacy, launch: launch)
+                              legacyAcknowledgements: legacy, launch: launch, routingPacks: packs)
     }
 
     /// Copies a disclaimer acceptance from the legacy store into the Persistence store (removing the legacy

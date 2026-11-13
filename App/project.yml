@@ -33,6 +33,10 @@ packages:
     path: ../Packages/Persistence
   GPXKit:
     path: ../Packages/GPXKit
+  # Auto-routing engine (pure Swift). Its targets are RoutingKit / RoutingKitTests, which clash with no other
+  # package's target names (SwiftPM refuses duplicate target names across a package graph).
+  RoutingKit:
+    path: ../Packages/RoutingKit
 
 targets:
   GulfNav:
@@ -123,6 +127,7 @@ targets:
       - package: AppServices
       - package: Persistence
       - package: GPXKit
+      - package: RoutingKit
 
   # Unit tests of app-target helpers, hosted in the app (TEST_HOST is set by XcodeGen from the dependency).
   GulfNavTests:

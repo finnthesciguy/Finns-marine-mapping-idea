@@ -30,6 +30,7 @@ do {
 | Type | Role |
 |---|---|
 | `RoutingPack` | One region in memory, immutable, `Sendable`. Holds the header, section table, `INFO`, side tables (`sources`, `overheadObjects`, `hazards`, `channels`, `areas`) and accessors (`vertex`, `triangleVertices`, `neighbors`, `attributes`, `string`, `geometry`, `locate`, `centroid`). |
+| `RoutingPack.header(contentsOf:)` | Reads and checks only the 256-byte header (magic, version, header CRC, file size, header fields) from a memory-mapped file, without decoding any section. For listing installed packs (region, bounding box, data date) cheaply; open the pack before routing. |
 | `PackError` | Typed load failure: bad magic or version, checksum or size mismatches, truncation, bad sections, inflate errors, malformed content. |
 | `BoatProfile` | Draft, margin and air draft in feet, plus the options of spec B.2. `init(draft:safetyMargin:airDraft:)` takes NavCore `Distance`. `requiredDepthDm` and `requiredAirDm` apply the B.2 rule. |
 | `RouteRequest` | Start, goal, profile, `maxSnapMeters` (750 by default) and an optional `timeLimit`. |
@@ -82,7 +83,7 @@ do {
 
 ## Tests
 
-`swift test` (swift-testing) finds `testdata/routing` relative to the package through `#filePath`. It runs 41 tests in about 9 s (debug).
+`swift test` (swift-testing) finds `testdata/routing` relative to the package through `#filePath`. It runs 43 tests in about 10 s (debug).
 
 - **Records.** Every field in both `*.records.json` files and the A.10 worked examples. On the synthetic pack, stored and derived adjacency must be equal. Adjacency must be symmetric. Grid location must agree with a brute-force search.
 - **Vectors.** Every query in both `*.vectors.json` files (13 + 9) must reproduce exactly under the part D rules: integers and sequences exactly, distances to 1e-6 m, `snap_m` to 1e-3 m. A negative control checks that the comparator really detects differences.

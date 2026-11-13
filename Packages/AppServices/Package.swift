@@ -1,19 +1,22 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Persistence is a hard dependency: the store for waypoints, routes, tracks and settings. (Its SQLite shim
+// RoutingKit (auto-routing engine, pure Swift) has the target names RoutingKit/RoutingKitTests, which
+// clash with no other package. Persistence is a hard dependency: the store for waypoints, routes, tracks and settings. (Its SQLite shim
 // target is named `PersistenceCSQLite` so it can sit next to ChartKit's `CSQLite` in one package graph.)
 let serviceDependencies: [Target.Dependency] = [
     .product(name: "NavCore", package: "NavCore"),
     .product(name: "ChartKit", package: "ChartKit"),
     .product(name: "Persistence", package: "Persistence"),
     .product(name: "GPXKit", package: "GPXKit"),
+    .product(name: "RoutingKit", package: "RoutingKit"),
 ]
 let packageDependencies: [Package.Dependency] = [
     .package(path: "../NavCore"),
     .package(path: "../ChartKit"),
     .package(path: "../Persistence"),
     .package(path: "../GPXKit"),
+    .package(path: "../RoutingKit"),
 ]
 
 let package = Package(
@@ -38,6 +41,7 @@ let package = Package(
                 .product(name: "ChartKit", package: "ChartKit"),
                 .product(name: "Persistence", package: "Persistence"),
                 .product(name: "GPXKit", package: "GPXKit"),
+                .product(name: "RoutingKit", package: "RoutingKit"),
             ],
             resources: [.copy("Resources")]
         ),

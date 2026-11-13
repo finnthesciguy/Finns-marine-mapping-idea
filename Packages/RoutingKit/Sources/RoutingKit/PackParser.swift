@@ -52,6 +52,22 @@ struct PackParser {
 
     init(file: UnsafeBufferPointer<UInt8>) { self.file = file }
 
+    /// Steps 1–5 of the reader checks (magic, version, header CRC, file size, header fields) without
+    /// decoding any section. Used by ``RoutingPack/header(contentsOf:)``.
+    func parseHeaderOnly() throws(PackError) -> PackHeader {
+        let v = ByteView(file)
+        guard file.count >= 256 else { throw .truncated("file is \(file.count) bytes, shorter than the 256-byte header") }
+        let magic: [UInt8] = Array("GCRTPACK".utf8)
+        for i in 0..<8 where file[i] != magic[i] { throw .badMagic }
+        let major = Int(v.u16(8)!), minor = Int(v.u16(10)!)
+        guard major == 1 else { throw .unsupportedVersion(major: major, minor: minor) }
+        let headerCRC = v.u32(252)!
+        guard CRC32.checksum(UnsafeBufferPointer(rebasing: file[0..<252])) == headerCRC else { throw .headerChecksumMismatch }
+        let fileSize = Int(v.u32(16)!)
+        guard fileSize == file.count else { throw .fileSizeMismatch(header: fileSize, actual: file.count) }
+        return try parseHeader(v, major: major, minor: minor, crc: headerCRC)
+    }
+
     func parse() throws(PackError) -> PackContents {
         let v = ByteView(file)
         guard file.count >= 256 else { throw .truncated("file is \(file.count) bytes, shorter than the 256-byte header") }
