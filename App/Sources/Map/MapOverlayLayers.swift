@@ -24,6 +24,9 @@ enum MapOverlayLayers {
         case routeLegs = "gn-route-legs"
         case routePoints = "gn-route-points"
         case direct = "gn-direct"
+        /// The planned (unsaved) auto-route and the blocked places of a failed plan.
+        case planned = "gn-planned"
+        case blocked = "gn-blocked"
         case waypoints = "gn-waypoints"
     }
 
@@ -77,6 +80,21 @@ enum MapOverlayLayers {
             directLine.lineDashPattern = NSExpression(forConstantValue: [NSNumber(value: 3), NSNumber(value: 2)])
             layers.append(directLine)
         }
+        if let planned = sources[.planned] {
+            // Planned auto-route: a white casing so it stands apart from saved routes, then the grade colour.
+            layers.append(line("gn-planned-casing", planned, predicate: nil, color: UIColor.white, width: 9))
+            layers.append(line("gn-planned-green", planned, predicate: NSPredicate(format: "grade == %@", "green"),
+                               color: UIColor.systemGreen, width: 5))
+            layers.append(line("gn-planned-yellow", planned, predicate: NSPredicate(format: "grade == %@", "yellow"),
+                               color: UIColor.systemYellow, width: 5))
+            // RoutingKit never returns red legs (and such a route cannot be saved); drawn if one ever appears.
+            layers.append(line("gn-planned-red", planned, predicate: NSPredicate(format: "grade == %@", "red"),
+                               color: UIColor.systemRed, width: 5))
+        }
+        if let blocked = sources[.blocked] {
+            layers.append(circle("gn-blocked", blocked, predicate: nil, color: UIColor.systemRed, radius: 9,
+                                 stroke: UIColor.white, strokeWidth: 3))
+        }
         if let waypoints = sources[.waypoints] {
             layers.append(circle("gn-waypoints", waypoints, predicate: nil, color: UIColor.systemOrange, radius: 6,
                                  stroke: UIColor.white, strokeWidth: 2))
@@ -127,6 +145,8 @@ enum MapOverlayLayers {
         case .routeLegs: return overlays.routeLegs
         case .routePoints: return overlays.routePoints
         case .direct: return overlays.direct
+        case .planned: return overlays.planned
+        case .blocked: return overlays.blocked
         case .waypoints: return overlays.waypoints
         }
     }

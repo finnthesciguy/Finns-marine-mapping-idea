@@ -561,11 +561,11 @@ final class OverlayAndLaunchAdditionsTests: XCTestCase {
         let overlays = MapOverlays.make(waypoints: [w], selectedWaypoint: nil, targetWaypoint: w.id, routes: [display],
                                         activeRouteID: display.id, nextPointIndex: 2, editingRouteID: nil,
                                         tracks: [TrackLine(id: UUID(), segments: [line], isLive: true)], directLine: line)
-        XCTAssertEqual(overlays.summary, "waypoints:1,routeLegs:2,routePoints:3,tracks:1,direct:1")
+        XCTAssertEqual(overlays.summary, "waypoints:1,routeLegs:2,routePoints:3,tracks:1,direct:1,plannedLegs:0,blocked:0")
         let legs = try XCTUnwrap(try JSONSerialization.jsonObject(with: overlays.routeLegs) as? [String: Any])
         let states = (legs["features"] as! [[String: Any]]).map { ($0["properties"] as! [String: Any])["state"] as! String }
         XCTAssertEqual(states, ["done", "active"])
-        XCTAssertEqual(MapOverlays.empty.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0")
+        XCTAssertEqual(MapOverlays.empty.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0,plannedLegs:0,blocked:0")
         XCTAssertNotEqual(overlays, MapOverlays.empty)
 
         var d = MapDiagnostics()

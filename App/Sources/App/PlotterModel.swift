@@ -31,6 +31,8 @@ final class PlotterModel {
     var shownTrackIDs: Set<UUID> { shownTracks.ids }
     /// Route being created or edited by tapping the map.
     private(set) var routeDraft: RouteDraft?
+    /// The auto-route planner's unsaved route or blocked places (set by `AutoRouteModel`).
+    private(set) var plannedLayer: PlannedRouteLayer = .empty
 
     /// The import plan waiting for the user's decision (presented as a sheet).
     var importPlan: GPXImportPlan?
@@ -221,6 +223,13 @@ final class PlotterModel {
         refreshOverlays()
     }
 
+    /// Shows the planner's result on the chart (`.empty` clears it).
+    func setPlannedLayer(_ layer: PlannedRouteLayer) {
+        guard layer != plannedLayer else { return }
+        plannedLayer = layer
+        refreshOverlays()
+    }
+
     // MARK: Tracks
 
     func setTrackShown(_ id: UUID, _ shown: Bool) {
@@ -346,7 +355,8 @@ final class PlotterModel {
                                     routes: displays, activeRouteID: guidance.session.activeRouteID,
                                     nextPointIndex: guidance.session.activeRoutePointIndex,
                                     editingRouteID: routeDraft?.route.id, tracks: lines,
-                                    directLine: guidance.session.directToLine(from: position))
+                                    directLine: guidance.session.directToLine(from: position),
+                                    planned: plannedLayer)
         if next != overlays {
             overlays = next
         }

@@ -797,3 +797,101 @@ final class LockedPhases: @unchecked Sendable {
 func XCTUnwrapAsync<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) throws -> T {
     try XCTUnwrap(value, file: file, line: line)
 }
+
+final class AutoRouteDisplayTests: XCTestCase {
+    func testLaunchSwitchForTheRoutingFixture() {
+        XCTAssertFalse(LaunchConfiguration(environment: [:]).preinstallFixtureRouting)
+        XCTAssertTrue(LaunchConfiguration(environment: ["GULFNAV_PREINSTALL_FIXTURE_ROUTING": "1"]).preinstallFixtureRouting)
+    }
+
+    func testPlannedLayerAndBlockedMarkersReachTheOverlays() async throws {
+        let fixture = try PackFixture()
+        let planner = try await fixture.planner()
+        let boat = RoutingFixtures.profile(draftFeet: 4.5, marginFeet: 1.5, airFeet: 20)
+        let ok = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.longboat, goal: RoutingFixtures.marinaJack, profile: boat),
+                                    now: RoutingFixtures.now)
+        let layer = PlannedRouteLayer(outcome: ok)
+        XCTAssertEqual(layer.legs.count, 28)
+        XCTAssertEqual(layer.blocked, [])
+        let overlays = MapOverlays.make(waypoints: [], selectedWaypoint: nil, targetWaypoint: nil, routes: [], activeRouteID: nil,
+                                        nextPointIndex: nil, editingRouteID: nil, tracks: [], directLine: nil, planned: layer)
+        XCTAssertEqual(overlays.counts.plannedLegs, 28)
+        XCTAssertEqual(overlays.counts.blocked, 0)
+        XCTAssertEqual(overlays.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0,plannedLegs:28,blocked:0")
+        let json = String(decoding: overlays.planned, as: UTF8.self)
+        XCTAssertTrue(json.contains("\"grade\":\"green\""))
+        XCTAssertTrue(json.hasPrefix("{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[[-82.603,27.403],"), json)
+
+        let none = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.marinaJack, goal: RoutingFixtures.robertsBay, profile: boat),
+                                      now: RoutingFixtures.now)
+        let blockedLayer = PlannedRouteLayer(outcome: none)
+        XCTAssertEqual(blockedLayer.legs, [])
+        XCTAssertEqual(blockedLayer.blocked.map(\.reasonCode), ["DEPTH"])
+        let o2 = MapOverlays.make(waypoints: [], selectedWaypoint: nil, targetWaypoint: nil, routes: [], activeRouteID: nil,
+                                  nextPointIndex: nil, editingRouteID: nil, tracks: [], directLine: nil, planned: blockedLayer)
+        XCTAssertEqual(o2.counts.blocked, 1)
+        XCTAssertEqual(String(decoding: o2.blocked, as: UTF8.self),
+                       "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[-82.5438497,27.2762785]},\"properties\":{\"index\":0,\"reason\":\"DEPTH\"}}]}")
+        XCTAssertEqual(PlannedRouteLayer.focusCoordinates(none).count, 3)
+        XCTAssertEqual(PlannedRouteLayer(outcome: nil), .empty)
+        XCTAssertEqual(MapOverlays.empty.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0,plannedLegs:0,blocked:0")
+    }
+
+    func testMapFocusFramesCoordinates() throws {
+        XCTAssertNil(MapFocus.framing([]))
+        let one = try XCTUnwrap(MapFocus.framing([Coordinate(latitude: 27.3, longitude: -82.5)]))
+        XCTAssertEqual(one.zoom, 15)
+        let q1 = try XCTUnwrap(MapFocus.framing([RoutingFixtures.longboat.coordinate, RoutingFixtures.marinaJack.coordinate]))
+        XCTAssertEqual(q1.center.latitude, 27.368, accuracy: 1e-9)
+        XCTAssertEqual(q1.center.longitude, -82.57475, accuracy: 1e-9)
+        XCTAssertGreaterThan(q1.zoom, 10)
+        XCTAssertLessThan(q1.zoom, 13)
+        let wide = try XCTUnwrap(MapFocus.framing([Coordinate(latitude: 25, longitude: -97), Coordinate(latitude: 30, longitude: -81)]))
+        XCTAssertLessThan(wide.zoom, 5)
+        XCTAssertGreaterThanOrEqual(wide.zoom, 4)
+    }
+
+    func testRouteCheckLinesOfASavedRoute() async throws {
+        let fixture = try PackFixture(packs: ["synthetic.pack"])
+        let planner = try await fixture.planner()
+        let planned = await planner.plan(AutoRoutePlanRequest(
+            start: RoutingFixtures.synWest, goal: RoutingFixtures.synEast,
+            profile: RoutingFixtures.profile(name: "Sloop", draftFeet: 4, marginFeet: 1, airFeet: 20, maintained: true)), now: RoutingFixtures.now)
+        let proposal = try XCTUnwrap(planned.proposal)
+        let route = try await AutoRouteSaving.save(proposal, name: "Syn", cautionConfirmed: true, store: fixture.store)
+        let lines = RouteCheckPresentation.lines(route, units: UnitPreferences(), now: RoutingFixtures.now)
+        let byID = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.value) })
+        XCTAssertEqual(lines.map(\.id), ["distance", "legs", "shallowest", "clearance", "openings", "worst", "data", "boat"])
+        XCTAssertEqual(byID["distance"], "0.37 nm")
+        XCTAssertEqual(byID["legs"], "1 leg: 0 green, 1 yellow")
+        XCTAssertTrue(byID["shallowest"]?.hasPrefix("3.0 ft at ") ?? false, byID["shallowest"] ?? "")
+        XCTAssertEqual(byID["clearance"], "5.9 ft")
+        XCTAssertEqual(byID["openings"], "1: Test Opening Bridge")
+        XCTAssertEqual(byID["worst"], "yellow")
+        XCTAssertEqual(byID["data"], "1 Nov 2026 (12 days old)")
+        XCTAssertEqual(byID["boat"], "Sloop: draft 4.0 ft + 1.0 ft margin, air draft 20.0 ft")
+        XCTAssertEqual(RouteCheckPresentation.reasonText(["MAINTAINED_DEPTH", "BRIDGE_OPENING"]), "Maintained channel depth, Bridge must open")
+        XCTAssertEqual(RouteCheckPresentation.lines(Route(name: "manual"), units: UnitPreferences()), [])
+    }
+
+    func testFixtureRoutingPackInstallsOnceAndSeedsWaypoints() async throws {
+        let dir = try TempDir()
+        defer { dir.cleanup() }
+        let library = RoutingPackLibrary(sideLoadDirectory: dir.url.appendingPathComponent("RoutingPacks"))
+        let store = try PersistenceStore(inMemoryWith: PersistenceStore.Options())
+        let first = await FixtureRoutingPack.install(packFile: RoutingFixtures.url("sarasota.pack"), library: library, store: store)
+        XCTAssertEqual(first, [])
+        let again = await FixtureRoutingPack.install(packFile: nil, library: library, store: store)
+        XCTAssertEqual(again, [], "already installed: the missing file is not needed")
+        let catalog = await library.catalog()
+        XCTAssertEqual(catalog.entries.map(\.packRegionID), [FixtureRoutingPack.packRegionID])
+        let names = try await store.waypoints().map(\.name).sorted()
+        XCTAssertEqual(names, ["RT Longboat", "RT Marina Jack", "RT Roberts Bay"])
+        for c in FixtureRoutingPack.simulatedTrack {
+            XCTAssertTrue(try XCTUnwrap(catalog.entries.first).coverage.contains(c))
+        }
+        let missing = await FixtureRoutingPack.install(packFile: nil, library: RoutingPackLibrary(sideLoadDirectory: dir.url.appendingPathComponent("none")),
+                                                       store: store)
+        XCTAssertEqual(missing, ["Test routing pack is not in this build."])
+    }
+}

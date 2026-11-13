@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 
 /// The sheets the map screen presents (one at a time).
 enum MapSheet: String, Identifiable {
-    case charts, waypoints, routes, tracks, settings
+    case charts, waypoints, routes, tracks, settings, autoRoute
     var id: String { rawValue }
 }
 
@@ -36,11 +36,20 @@ struct MapScreen: View {
                          onPlanApplied: { revision in map.planApplied(revision: revision) },
                          overlays: plotter.overlays,
                          tapTargets: plotter.data.waypoints.map { MapTapTarget(id: $0.id, coordinate: $0.coordinate) },
-                         onTap: { coordinate, hit in plotter.mapTapped(at: coordinate, waypoint: hit) },
+                         onTap: { coordinate, hit in
+                             if model.autoRoute.picking != nil {
+                                 model.autoRoute.picked(coordinate)
+                                 sheet = .autoRoute
+                                 return
+                             }
+                             plotter.mapTapped(at: coordinate, waypoint: hit)
+                         },
                          onLongPress: { coordinate in
                              Task { await plotter.mapLongPressed(at: coordinate) }
                          },
-                         onCameraChanged: { zoom, latitude in plotter.mapCameraChanged(zoom: zoom, latitude: latitude) })
+                         onCameraChanged: { zoom, latitude in plotter.mapCameraChanged(zoom: zoom, latitude: latitude) },
+                         focus: map.focus,
+                         focusRevision: map.focusRevision)
                 .ignoresSafeArea()
 
             VStack(spacing: 8) {
@@ -73,7 +82,8 @@ struct MapScreen: View {
 
             VStack {
                 HStack {
-                    StatusProbe(identifier: "app.status", value: plotter.statusValue)
+                    StatusProbe(identifier: "app.status",
+                                value: plotter.statusValue + "; " + model.autoRoute.statusValue + "; " + model.profiles.statusValue)
                         .frame(width: 2, height: 2)
                     Spacer()
                 }
@@ -142,11 +152,22 @@ struct MapScreen: View {
         case .waypoints:
             WaypointsScreen(plotter: plotter, boat: boat, onCloseAll: { sheet = nil })
         case .routes:
-            RoutesScreen(plotter: plotter, onCloseAll: { sheet = nil })
+            RoutesScreen(plotter: plotter, onCloseAll: { sheet = nil }, onAutoRoute: {
+                sheet = nil
+                Task {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    sheet = .autoRoute
+                }
+            })
         case .tracks:
             TracksScreen(plotter: plotter, onCloseAll: { sheet = nil })
         case .settings:
-            SettingsScreen(plotter: plotter, installed: model.charts.installedRegions)
+            SettingsScreen(plotter: plotter, profiles: model.profiles, installed: model.charts.installedRegions)
+        case .autoRoute:
+            AutoRouteScreen(model: model.autoRoute, units: plotter.data.settings.units, onClose: {
+                sheet = nil
+                if model.autoRoute.picking != nil { model.map.follow = false }
+            })
         }
     }
 
@@ -188,6 +209,27 @@ struct MapScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("guidance.message")
+        }
+        if let end = model.autoRoute.picking {
+            Button {
+                model.autoRoute.picking = nil
+                sheet = .autoRoute
+            } label: {
+                Banner(text: "Tap the chart to set the \(end == .start ? "start" : "destination"). Tap here to cancel.",
+                       systemImage: "hand.tap")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("autoroute.pickBanner")
+        }
+        if model.autoRoute.outcome?.proposal != nil && sheet == nil {
+            Button {
+                sheet = .autoRoute
+            } label: {
+                Banner(text: "Planned route not saved yet. Tap to review, save or discard it.",
+                       systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("autoroute.pendingBanner")
         }
         if let result = plotter.importResultText {
             Button {
@@ -252,6 +294,9 @@ struct MapScreen: View {
             RoundButton(systemImage: "point.topleft.down.to.point.bottomright.curvepath", label: "Routes",
                         identifier: "map.routesButton") {
                 sheet = .routes
+            }
+            RoundButton(systemImage: "wand.and.stars", label: "Auto-route", identifier: "map.autoRouteButton") {
+                sheet = .autoRoute
             }
             RoundButton(systemImage: "scribble.variable", label: "Tracks", identifier: "map.tracksButton") {
                 sheet = .tracks

@@ -152,7 +152,7 @@ final class GulfNavUITests: XCTestCase {
 
     @MainActor
     static func makeApp(root: String, reset: Bool, simulateGPS: Bool = true, fixtureChart: Bool = false,
-                        speedKnots: Int? = nil, trackBatchSize: Int? = nil) -> XCUIApplication {
+                        speedKnots: Int? = nil, trackBatchSize: Int? = nil, routingFixture: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         var environment: [String: String] = ["GULFNAV_DATA_ROOT": root]
         if reset { environment["GULFNAV_RESET_DATA"] = "1" }
@@ -160,6 +160,7 @@ final class GulfNavUITests: XCTestCase {
         if fixtureChart { environment["GULFNAV_PREINSTALL_FIXTURE_CHART"] = "1" }
         if let speedKnots { environment["GULFNAV_SIM_SPEED_KNOTS"] = String(speedKnots) }
         if let trackBatchSize { environment["GULFNAV_TRACK_BATCH_SIZE"] = String(trackBatchSize) }
+        if routingFixture { environment["GULFNAV_PREINSTALL_FIXTURE_ROUTING"] = "1" }
         app.launchEnvironment = environment
         lastApp = app
         return app

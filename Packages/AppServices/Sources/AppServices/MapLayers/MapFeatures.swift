@@ -232,6 +232,30 @@ public enum MapFeatures {
         return GeoJSON.featureCollection(features)
     }
 
+    /// Legs of the planned auto-route as LineStrings. Properties: `leg` (index), `grade` (`green`/`yellow`/…).
+    public static func plannedLegs(_ layer: PlannedRouteLayer) -> Data {
+        var features: [GeoJSON.Feature] = []
+        for leg in layer.legs {
+            features.append(GeoJSON.Feature(geometry: .lineString([leg.from, leg.to]), properties: [
+                "leg": .number(Double(leg.index)),
+                "grade": .string(leg.grade),
+            ]))
+        }
+        return GeoJSON.featureCollection(features)
+    }
+
+    /// Blocked places of a failed plan as points. Properties: `index`, `reason` (`DEPTH`, `CLEARANCE`, …).
+    public static func blockedPlaces(_ layer: PlannedRouteLayer) -> Data {
+        var features: [GeoJSON.Feature] = []
+        for (index, place) in layer.blocked.enumerated() where place.coordinate.isValid {
+            features.append(GeoJSON.Feature(geometry: .point(place.coordinate), properties: [
+                "index": .number(Double(index)),
+                "reason": .string(place.reasonCode),
+            ]))
+        }
+        return GeoJSON.featureCollection(features)
+    }
+
     /// The direct-to line from the boat to the target (empty collection when not navigating direct-to).
     public static func directTo(_ line: [Coordinate]?) -> Data {
         guard let line, line.count == 2 else { return GeoJSON.featureCollection([]) }
@@ -278,6 +302,10 @@ public struct MapOverlays: Sendable, Equatable {
         public var routePoints: Int = 0
         public var tracks: Int = 0
         public var direct: Int = 0
+        /// Legs of the planned (unsaved) auto-route.
+        public var plannedLegs: Int = 0
+        /// Blocked-place markers of a failed auto-route plan.
+        public var blocked: Int = 0
 
         public init() {}
     }
@@ -287,7 +315,24 @@ public struct MapOverlays: Sendable, Equatable {
     public var routePoints: Data
     public var tracks: Data
     public var direct: Data
+    /// The planned auto-route's legs (`PlannedRouteLayer`).
+    public var planned: Data
+    /// Blocked places of a failed plan.
+    public var blocked: Data
     public var counts: Counts
+
+    public init(waypoints: Data, routeLegs: Data, routePoints: Data, tracks: Data, direct: Data,
+                planned: Data = GeoJSON.featureCollection([]), blocked: Data = GeoJSON.featureCollection([]),
+                counts: Counts) {
+        self.waypoints = waypoints
+        self.routeLegs = routeLegs
+        self.routePoints = routePoints
+        self.tracks = tracks
+        self.direct = direct
+        self.planned = planned
+        self.blocked = blocked
+        self.counts = counts
+    }
 
     public static let empty: MapOverlays = MapOverlays(waypoints: GeoJSON.featureCollection([]),
                                                        routeLegs: GeoJSON.featureCollection([]),
@@ -295,10 +340,11 @@ public struct MapOverlays: Sendable, Equatable {
                                                        tracks: GeoJSON.featureCollection([]),
                                                        direct: GeoJSON.featureCollection([]), counts: Counts())
 
-    /// `waypoints:2,routeLegs:2,routePoints:3,tracks:1,direct:0` (reported in the map's status).
+    /// `waypoints:2,routeLegs:2,routePoints:3,tracks:1,direct:0,plannedLegs:0,blocked:0` (reported in the
+    /// map's status).
     public var summary: String {
         "waypoints:\(counts.waypoints),routeLegs:\(counts.routeLegs),routePoints:\(counts.routePoints),"
-            + "tracks:\(counts.tracks),direct:\(counts.direct)"
+            + "tracks:\(counts.tracks),direct:\(counts.direct),plannedLegs:\(counts.plannedLegs),blocked:\(counts.blocked)"
     }
 
     /// - Parameters:
@@ -307,13 +353,16 @@ public struct MapOverlays: Sendable, Equatable {
     ///   - tracks: saved tracks shown plus the live recording.
     public static func make(waypoints: [Waypoint], selectedWaypoint: UUID?, targetWaypoint: UUID?,
                             routes: [RouteDisplay], activeRouteID: UUID?, nextPointIndex: Int?, editingRouteID: UUID?,
-                            tracks: [TrackLine], directLine: [Coordinate]?) -> MapOverlays {
+                            tracks: [TrackLine], directLine: [Coordinate]?,
+                            planned: PlannedRouteLayer = .empty) -> MapOverlays {
         var counts = Counts()
         counts.waypoints = waypoints.filter { $0.coordinate.isValid }.count
         counts.routeLegs = routes.reduce(0) { $0 + $1.legs.count }
         counts.routePoints = routes.reduce(0) { $0 + $1.points.filter { $0.coordinate.isValid }.count }
         counts.tracks = tracks.filter { line in line.segments.contains { $0.count >= 2 } }.count
         counts.direct = (directLine?.count == 2) ? 1 : 0
+        counts.plannedLegs = planned.legs.count
+        counts.blocked = planned.blocked.filter { $0.coordinate.isValid }.count
         // Leg i runs from point i to point i + 1, so steering to point n means leg n - 1 is active.
         let activeLeg: Int? = nextPointIndex.map { $0 - 1 }
         return MapOverlays(
@@ -323,6 +372,8 @@ public struct MapOverlays: Sendable, Equatable {
             routePoints: MapFeatures.routePoints(routes, activeRouteID: activeRouteID, nextPointIndex: nextPointIndex),
             tracks: MapFeatures.tracks(tracks),
             direct: MapFeatures.directTo(directLine),
+            planned: MapFeatures.plannedLegs(planned),
+            blocked: MapFeatures.blockedPlaces(planned),
             counts: counts)
     }
 }

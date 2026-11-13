@@ -16,6 +16,10 @@ final class ChartsModel {
     private(set) var rows: [RegionRow] = []
     private(set) var freeBytes: Int64?
     private(set) var installedRegions: [InstalledRegion] = []
+    /// Routing packs on the device (with chart regions, and side-loaded ones).
+    private(set) var routingCatalog: RoutingPackCatalog = RoutingPackCatalog(entries: [], problems: [])
+    /// Result of the last debug side-load ("Installed …" or the reason it was refused).
+    private(set) var sideLoadMessage: String?
     let manifestError: String?
 
     /// Set to ask the user to confirm a download (shows the size first).
@@ -29,6 +33,7 @@ final class ChartsModel {
     @ObservationIgnored var prepareForRemoval: (@MainActor (String) async -> Void)?
 
     private let library: ChartLibrary
+    let routingPacks: RoutingPackLibrary
     private let regions: [ChartRegion]
     @ObservationIgnored private var installs: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var preparing: Set<String> = []
@@ -37,8 +42,9 @@ final class ChartsModel {
     @ObservationIgnored private var lastProgressRefresh: [String: Date] = [:]
     @ObservationIgnored private var started = false
 
-    init(library: ChartLibrary, regions: [ChartRegion], manifestError: String?) {
+    init(library: ChartLibrary, routingPacks: RoutingPackLibrary, regions: [ChartRegion], manifestError: String?) {
         self.library = library
+        self.routingPacks = routingPacks
         self.regions = regions
         self.manifestError = manifestError
     }
@@ -113,6 +119,36 @@ final class ChartsModel {
         }
     }
 
+    /// Debug builds: installs a routing pack file picked in the document picker (validated by RoutingKit first).
+    func sideLoadRoutingPack(from url: URL) async {
+        let library: RoutingPackLibrary = routingPacks
+        let result: Result<RoutingPackEntry, any Error> = await Task.detached(priority: .userInitiated) { () -> Result<RoutingPackEntry, any Error> in
+            let scoped: Bool = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                return .success(try library.sideLoad(from: url))
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        switch result {
+        case .success(let entry):
+            sideLoadMessage = "Installed \(entry.descriptionLine)."
+        case .failure(let error):
+            sideLoadMessage = "Not installed: \(error)"
+        }
+        await refresh()
+    }
+
+    func removeSideLoaded(_ entry: RoutingPackEntry) async {
+        do {
+            try routingPacks.removeSideLoaded(entry)
+        } catch {
+            sideLoadMessage = "Could not delete: \(error)"
+        }
+        await refresh()
+    }
+
     // MARK: Internals
 
     private func startInstall(regionID: String) {
@@ -176,6 +212,7 @@ final class ChartsModel {
         let states: [String: InstallState] = await installer.allStates()
         let pending: [ResumeRecord] = await installer.pendingDownloads()
         freeBytes = library.freeBytes()
+        routingCatalog = await routingPacks.catalog()
         rows = RegionCatalog.rows(regions: regions, installed: installed, states: states, pending: pending,
                                   preparing: preparing, messages: messages, now: Date())
         if installed != installedRegions {

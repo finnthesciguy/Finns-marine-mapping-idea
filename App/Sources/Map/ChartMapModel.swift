@@ -1,6 +1,7 @@
 import AppServices
 import ChartKit
 import Foundation
+import NavCore
 import Observation
 
 /// What the chart map draws: one raster layer per installed region (ChartKit's `MapLibreSources.layerPlan`),
@@ -15,6 +16,9 @@ final class ChartMapModel {
     private(set) var hasCharts: Bool = false
     var follow: Bool = true
     var orientation: MapOrientationMode = .northUp
+    /// A camera position to move to once (framing a planned route); applied when `focusRevision` changes.
+    private(set) var focus: MapFocus?
+    private(set) var focusRevision: Int = 0
 
     /// Last revision the map view reported as applied (not observed: it is written from map callbacks).
     @ObservationIgnored private var appliedRevision: Int = -1
@@ -59,6 +63,14 @@ final class ChartMapModel {
         Task {
             _ = await library.releaseSupersededFiles(notReferencedBy: applied)
         }
+    }
+
+    /// Frames `coordinates` on the chart (follow mode off so the camera stays there).
+    func focus(on coordinates: [Coordinate]) {
+        guard let next = MapFocus.framing(coordinates) else { return }
+        follow = false
+        focus = next
+        focusRevision += 1
     }
 
     func toggleOrientation() {

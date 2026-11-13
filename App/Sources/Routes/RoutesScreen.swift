@@ -7,6 +7,8 @@ import SwiftUI
 struct RoutesScreen: View {
     let plotter: PlotterModel
     let onCloseAll: () -> Void
+    /// Opens the auto-route planner (closes this screen first).
+    var onAutoRoute: (() -> Void)? = nil
     @State private var opened: Route?
 
     var body: some View {
@@ -21,6 +23,14 @@ struct RoutesScreen: View {
                         Label("New route on the chart", systemImage: "plus")
                     }
                     .accessibilityIdentifier("routes.new")
+                    if let onAutoRoute {
+                        Button {
+                            onAutoRoute()
+                        } label: {
+                            Label("Plan an auto-route", systemImage: "wand.and.stars")
+                        }
+                        .accessibilityIdentifier("routes.autoRoute")
+                    }
                 } footer: {
                     Text("Tap the chart to add points, then Save. Routes are not checked for depth or hazards: check every leg against the chart.")
                 }
@@ -132,8 +142,8 @@ struct RouteDetailScreen: View {
                     }
                     .accessibilityIdentifier("route.addOnChart")
                 }
-                if let summary = display.summary {
-                    RouteSummarySection(summary: summary, dataDate: display.routingPackDataDate, units: units)
+                if display.summary != nil {
+                    RouteSummarySection(lines: RouteCheckPresentation.lines(route, units: units, now: Date()))
                 }
                 Section {
                     ForEach(Array(route.points.enumerated()), id: \.offset) { item in
@@ -246,7 +256,7 @@ struct LegRow: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Color.secondary)
                 if !leg.reasonCodes.isEmpty {
-                    Text(leg.reasonCodes.joined(separator: ", "))
+                    Text(RouteCheckPresentation.reasonText(leg.reasonCodes))
                         .font(.caption)
                         .foregroundStyle(Color.orange)
                 }
@@ -269,29 +279,23 @@ enum LegGradeStyle {
     }
 }
 
-/// The auto-route summary (distance, shallowest depth, lowest clearance, worst grade, data date). Shown
-/// only for routes that carry `AutoRouteInfo`; manual routes have none.
+/// The auto-route "Route check" (distance, legs by grade, shallowest depth, lowest clearance, bridges that must
+/// open, worst grade, chart data date and age, boat), from `AppServices.RouteCheckPresentation`. Shown only for
+/// routes that carry `AutoRouteInfo`; manual routes have none.
 struct RouteSummarySection: View {
-    let summary: AutoRouteInfo.Summary
-    let dataDate: Date?
-    let units: UnitPreferences
+    let lines: [AutoRouteSummaryLine]
 
     var body: some View {
         Section("Route check") {
-            if let distance = summary.distanceMeters {
-                LabeledContent("Distance", value: NavFormat.distance(distance, unit: units.distance))
-            }
-            if let depth = summary.shallowestDepthMeters {
-                LabeledContent("Shallowest charted depth", value: NavFormat.depth(depth, unit: units.depth))
-            }
-            if let clearance = summary.lowestClearanceMeters {
-                LabeledContent("Lowest clearance", value: NavFormat.depth(clearance, unit: units.depth))
-            }
-            if let worst = summary.worstGrade {
-                LabeledContent("Worst leg", value: worst.rawValue)
-            }
-            if let dataDate {
-                LabeledContent("Chart data", value: DataDateFormat.string(dataDate))
+            ForEach(lines) { line in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(line.label)
+                    Spacer(minLength: 12)
+                    Text(line.value)
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(line.isWarning ? Color.orange : Color.secondary)
+                        .accessibilityIdentifier("route.check.\(line.id)")
+                }
             }
         }
     }

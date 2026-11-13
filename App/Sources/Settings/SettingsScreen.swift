@@ -7,6 +7,7 @@ import SwiftUI
 /// (disclaimer, NOAA attribution, chart data dates). Changes are saved immediately.
 struct SettingsScreen: View {
     let plotter: PlotterModel
+    let profiles: BoatProfilesModel
     let installed: [InstalledRegion]
     @Environment(\.dismiss) private var dismiss
 
@@ -14,6 +15,14 @@ struct SettingsScreen: View {
         let settings: AppSettings = plotter.data.settings
         NavigationStack {
             Form {
+                Section("Boat") {
+                    NavigationLink {
+                        BoatProfilesScreen(profiles: profiles, units: settings.units)
+                    } label: {
+                        LabeledContent("Boat profiles", value: profiles.defaultProfile?.name ?? "None")
+                    }
+                    .accessibilityIdentifier("settings.boatProfiles")
+                }
                 Section("Units") {
                     Picker("Distance", selection: binding(\.distanceUnit)) {
                         Text("nm").tag(DistanceUnit.nauticalMiles)

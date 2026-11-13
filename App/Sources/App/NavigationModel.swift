@@ -14,6 +14,8 @@ final class NavigationModel {
 
     private let makeDeviceService: @MainActor () -> any LocationService
     private let simulatedSpeedKnots: Double
+    /// The polyline the simulated GPS follows (Tampa Bay by default).
+    private let simulatedRoute: [Coordinate]
     /// Called with every fix after the readout is updated (navigation session, track recorder).
     @ObservationIgnored var onFix: (@MainActor (Fix) -> Void)?
     /// A track recording wants background location (see `LocationPolicy`).
@@ -24,10 +26,11 @@ final class NavigationModel {
 
     /// - Parameter startSimulating: begin with the simulated track instead of the device (UI tests, simulator).
     init(makeDeviceService: @escaping @MainActor () -> any LocationService, startSimulating: Bool = false,
-         simulatedSpeedKnots: Double = 6) {
+         simulatedSpeedKnots: Double = 6, simulatedRoute: [Coordinate] = SimulatedTrack.tampaBayWaypoints) {
         self.makeDeviceService = makeDeviceService
         self.isSimulating = startSimulating
         self.simulatedSpeedKnots = simulatedSpeedKnots
+        self.simulatedRoute = simulatedRoute
     }
 
     /// Turns the background-recording configuration on or off on the current (and any later) service.
@@ -54,7 +57,8 @@ final class NavigationModel {
     }
 
     private func makeSimulatedService() -> any LocationService {
-        SimulatedLocationService(track: SimulatedTrack.tampaBay(speedKnots: simulatedSpeedKnots),
+        SimulatedLocationService(track: SimulatedTrack.make(waypoints: simulatedRoute, speedKnots: simulatedSpeedKnots,
+                                                            interval: 1, start: Date()),
                                  options: SimulatedLocationService.Options(interval: .seconds(1), loops: true,
                                                                            restampsToNow: true))
     }

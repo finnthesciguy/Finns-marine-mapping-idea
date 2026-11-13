@@ -2,8 +2,8 @@
 
 SwiftUI app for iPhone and iPad, iOS 17.0+. The Xcode project is generated from `project.yml` with
 [XcodeGen](https://github.com/yonaskolb/XcodeGen); no `.xcodeproj` is committed. Logic lives in the Swift
-packages under `../Packages` (NavCore, ChartKit, GPXKit, Persistence, AppServices); this target is views and
-thin view models.
+packages under `../Packages` (NavCore, ChartKit, GPXKit, Persistence, RoutingKit, AppServices); this target is
+views and thin view models.
 
 What the app does so far:
 
@@ -66,10 +66,67 @@ What the app does so far:
 - **Settings** (`Sources/Settings`): distance, speed and depth units (used throughout), map orientation at
   launch, track recording interval, keep the screen on (default on), the disclaimer text, NOAA attribution
   and the data date of each installed chart. Saved immediately in Persistence.
+- **Boat profiles** (`Sources/AutoRoute/BoatProfilesScreen.swift`, from Settings > Boat profiles and from the
+  planner's Boat row): list (default first), add, edit, delete, make default. Name, draft, safety margin, air
+  draft, beam, cruising speed (in the Settings depth and speed units), "use maintained channels", "accept
+  unknown clearance" (both off by default). A new profile starts at 4.5 ft draft, 1.5 ft margin, 20 ft air draft,
+  6 kn; air draft is required for routing. Parsing and checks: `AppServices.BoatProfileForm`; the store keeps
+  exactly one default.
+- **Auto-routing** (`Sources/AutoRoute`, map button `map.autoRouteButton` or Routes > "Plan an auto-route"):
+  choose the start (boat position, a waypoint, or a point picked on the chart), the destination (a waypoint or a
+  picked point) and the boat; the screen shows which routing pack (and data date) will be used. Plan shows
+  progress and can be cancelled (30 s limit). A result shows the planned route on the chart in grade colours
+  (white casing, green/yellow), a summary (distance, time at the cruising speed, legs by grade, shallowest charted
+  depth and where, lowest overhead clearance, bridges that must open, clearances not charted, how far start and
+  end were moved onto water, chart data date and age, pack, boat), the legs with their reasons, and Save, Save and
+  follow, Show on the chart, Discard. "Options for this plan" (maintained channels, unknown clearance, inside
+  route only) change the next plan only. A failure shows the explanation; for "no route", the blocked places are
+  red dots on the chart and listed, and each option that would give a route is a button ("Allow maintained
+  channels and plan again"). Snap failures say which end, why and how far the nearest suitable water is. Saved
+  auto-routes appear in Routes with their "Route check" section and per-leg colours and are followed like any
+  route. All planning, wording and the safety rules are in `AppServices` (`AutoRoutePlanner`,
+  `AutoRoutePresenter`, `AutoRouteSafety`, `AutoRouteSaving`; tested on Linux against `testdata/routing`).
+- **Routing packs** (Charts screen): each region row says whether it has a routing pack (data date, size); a
+  "Routing packs" section lists every pack on the device (chart-region and side-loaded), and debug builds have
+  "Install a routing pack file…" (document picker; the file is fully validated by RoutingKit before it is copied
+  in). See "Routing packs" below.
 - **Chart overlays**: MapLibre shape sources and line/circle layers for tracks, routes, route points, the
   direct-to line and waypoints, above the chart rasters (`Sources/Map/MapOverlayLayers.swift`; GeoJSON from
   `AppServices.MapOverlays`). No text labels on the chart: the offline style has no glyphs; names appear in
   the selection card and lists.
+
+## Auto-route safety behaviour (PLAN.md D5)
+
+- **Notice before the first plan**: "Auto-routes are suggestions" (a suggestion from chart data, not a safe route;
+  review every leg; charted depths at chart datum with no tide allowance; the chart data date is shown) must be
+  acknowledged before planning, and again whenever `AutoRouteNotice.version` is bumped. Stored in Persistence
+  (`autoroute.noticeAcknowledgement`); `AutoRoutePlanner` itself refuses to plan without it.
+- **Only green and yellow legs** can be saved or followed (`AutoRouteSafety`); RoutingKit never returns a red leg
+  (a would-be red leg makes the query fail with an explanation instead), and any other grade in the stored legs is
+  refused. Every yellow leg must state at least one reason, or the route is refused.
+- **Yellow legs need confirmation**: Save and Save and follow on a route with yellow legs first show an alert
+  listing each distinct reason with its leg count ("Maintained channel depth (14 legs)"); only "I have reviewed the
+  yellow legs" saves. The check runs again on the stored legs immediately before writing.
+- **Hints are never applied silently**: a "no route" answer offers the option that would help as a button; it
+  applies to that re-plan only and the boat profile is not changed. The options used are stored with the route.
+- Depth requirement = draft + safety margin, rounded up to whole feet as RoutingKit specifies (spec B.2); NOAA
+  depths are compared truncated to 0.1 m.
+
+## Routing packs
+
+Routing packs are not published yet. When the chart build service publishes them, each region in `manifest.json`
+carries a `routingPack` entry and `ChartInstaller.install(_:)` downloads it with the chart package (size and
+SHA-256), then `AppEnvironment` runs RoutingKit's full pack check as ChartKit's `routingPackValidator`, so a
+corrupt pack is rejected and nothing is installed. The planner finds it through `RoutingPackLibrary`, which lists
+packs by reading only their 256-byte headers and opens one pack at a time (a region pack is about 80 MB loaded;
+opening another or validating at install time releases the one held). Start and destination must lie in the same
+pack; otherwise the planner says which end is outside or that they are in different regions.
+
+Side-loading the pilot pack in a debug build (Tampa Bay to Charlotte Harbor, 4.3 MB, not in the repository):
+copy the `.pack` file into the simulator or device (drag it onto the simulator to put it in Files, or AirDrop
+it), open Charts > Routing packs > "Install a routing pack file…" and pick it. It is validated, copied to
+`Library/RoutingPacks/<region id>.pack` and listed with its data date and size; swipe to delete it. The UI tests
+use the same folder through `GULFNAV_PREINSTALL_FIXTURE_ROUTING` with the bundled 216 KB `sarasota.pack`.
 
 ## Background recording and battery
 
@@ -112,6 +169,7 @@ The UI tests drive the app through launch environment variables, read by debug b
 | `GULFNAV_RESET_DATA=1` | delete that directory first (clean state) |
 | `GULFNAV_SIMULATE_GPS=1` | start on the simulated Tampa Bay track (CoreLocation never asks for permission) |
 | `GULFNAV_PREINSTALL_FIXTURE_CHART=1` | install the bundled 16 KB test chart (`FixtureChart`, AppServices' `tiny-a.mbtiles`, debug builds only) through `LocalFileChartTransport`, no network |
+| `GULFNAV_PREINSTALL_FIXTURE_ROUTING=1` | side-load the bundled routing test pack (`testdata/routing/sarasota.pack`, debug builds only, `AppServices.FixtureRoutingPack`), add waypoints "RT Longboat", "RT Marina Jack", "RT Roberts Bay" at points from `sarasota.vectors.json`, and run the simulated GPS in Sarasota Bay |
 | `GULFNAV_SIM_SPEED_KNOTS=<n>` | speed of the simulated track (default 6; the route-following test uses 240 to reach route points within a couple of minutes) |
 | `GULFNAV_TRACK_BATCH_SIZE=<n>` | track points per database write (default 10; the recording test uses 2) |
 
@@ -123,12 +181,21 @@ bearing, rename, go to with guidance values and the direct-to line, stop, long-p
 created by tapping the chart, saved, drawn and followed; the debug GPX sample's route followed at 240 kn
 until legs advance and arrival is announced; a recording killed mid-way, resumed on relaunch, stopped,
 listed and drawn; GPX import plan, duplicate re-import and export; the speed unit setting applied and kept
-across a relaunch. App state is read from a second debug-only element, `app.status`
+across a relaunch. In `AutoRouteUITests.swift`: the auto-route notice gates planning and is remembered after a
+relaunch; RT Longboat → RT Marina Jack (vectors q1) plans 28 green legs, is drawn (`plannedLegs:28`), saved, shown
+in Routes with its Route check, and followed; RT Marina Jack → RT Roberts Bay (q4) has no route with one blocked
+place on the chart (`blocked:1`) and the "use maintained channels" hint, which plans 55 legs (39 green, 16 yellow,
+as q3) that are saved and followed after the yellow-leg confirmation; boat profiles are added, edited, made
+default and deleted, and kept across a relaunch. App state is read from a second debug-only element, `app.status`
 (`PlotterModel.statusValue`: `waypoints=… routes=… tracks=… recording=… trackPoints=… trackStored=… nav=…
 navTarget=… navAdvances=… navArrivals=… editPoints=… selected=… shownRoutes=… shownTracks=… speedUnit=…
-lastExport=… lastImport=…`), and what reached the map from `map.status`'s
-`overlayFeatures=waypoints:N,routeLegs:N,routePoints:N,tracks:N,direct:N` (counted when the GeoJSON is set
-on the style's shape sources). The map state is
+lastExport=… lastImport=…`, then from `AutoRouteModel.statusValue`: `notice=unknown|needed|ok`
+`planState=idle|planning|proposal|noRoute|snapFailed|<failure kind>` `planLegs=` `planGreen=` `planYellow=`
+`planBlocked=` `planHints=useMaintainedChannels,acceptUnknownClearance|none` `planPack=<pack region id>|none`
+`routingPacks=N` `planSaved=<route name>|none` `picking=start|goal|none`, and from `BoatProfilesModel`:
+`profiles=N defaultProfile=<name>|none`), and what reached the map from `map.status`'s
+`overlayFeatures=waypoints:N,routeLegs:N,routePoints:N,tracks:N,direct:N,plannedLegs:N,blocked:N` (counted when
+the GeoJSON is set on the style's shape sources). The map state is
 read from a debug-only invisible accessibility element `map.status` (value from
 `AppServices.MapDiagnostics`: `style=loaded; chartLayers=N; overlayLayers=N; styleVia=…;` then counts of the
 MapLibre delegate callbacks `willStartLoading`, `didFinishLoadingMap`, `didFinishLoadingStyle`,
@@ -146,7 +213,14 @@ for a rendered frame. `styleVia` in `map.status` shows which path found the styl
 `map.chartsButton`, `map.noChartsBanner`, `map.orientationButton`, `map.followButton`, `map.debugMenu`,
 `map.chartAgeBadge`, `chart-map` (the `MLNMapView`), `map.status`, `instrument.strip`, `instrument.sog`,
 `instrument.cog`, `instrument.latitude`, `instrument.longitude`, `notice.<kind>`, `charts.done`,
-`region.title.<id>`, `region.status.<id>`, `region.dataDate.<id>`.
+`region.title.<id>`, `region.status.<id>`, `region.dataDate.<id>`, `region.routingPack.<id>`,
+`routingPack.row.<pack region>`, `charts.sideLoadPack`; auto-route: `map.autoRouteButton`, `autoroute.notice.accept`,
+`autoroute.start`, `autoroute.goal`, `autoroute.profile`, `autoroute.choice.boat|chart|wp.<name>`, `autoroute.plan`,
+`autoroute.cancel`, `autoroute.save`, `autoroute.saveFollow`, `autoroute.discard`, `autoroute.hint.<kind>`,
+`autoroute.confirmCaution`, `autoroute.summary.<line id>`, `autoroute.leg.<n>`, `autoroute.noRoute.message`,
+`autoroute.blocked.<n>`, `autoroute.done`; Route check `route.check.<line id>`; profiles `settings.boatProfiles`,
+`profiles.add`, `profile.name|detail|default|use.<name>`, `profile.edit.name|draft|margin|airDraft|beam|speed|save`,
+`profile.makeDefault`, `profile.delete`, `profile.confirmDelete`.
 
 To run locally: `xcodegen generate`, then in Xcode Product > Test (or `xcodebuild test -scheme GulfNav
 -destination 'platform=iOS Simulator,name=<an iPhone you have>'`).
@@ -242,12 +316,15 @@ Every API the app uses was checked against the headers and Swift examples at tag
 | `MLNLineStyleLayer(identifier:source:)` with `lineColor`, `lineWidth`, `lineCap`, `lineJoin`, `lineOpacity`, `lineDashPattern`; `MLNCircleStyleLayer(identifier:source:)` with `circleColor`, `circleRadius`, `circleStrokeColor`, `circleStrokeWidth`; `MLNVectorStyleLayer.predicate`; `NSExpression(forConstantValue:)` | the layer headers are generated: template `platform/darwin/src/MLNStyleLayer.h.ejs`, names from the style spec camel-cased with the renames in `platform/darwin/scripts/style-spec-cocoa-conventions-v8.json` (`line-dasharray` → `lineDashPattern`); Swift usage of the initializers, colours, widths, `lineCap`, `predicate` (including `cluster == YES`) in `MLNDocumentationExampleTests.swift`, `app-swift/Sources/AnimatedLineExample.swift`, `ClusteringExample.swift` |
 | `MLNStyle.insertLayer(_:below:)`, `source(withIdentifier:)`, `layer(withIdentifier:)`; `MLNSource.identifier`, `MLNStyleLayer.identifier` | `MLNStyle.h`, `MLNSource.h`, `MLNStyleLayer.h`; `style.insertLayer(layer, below: symbolLayer)` in `MLNDocumentationGuideTests.swift`, `layer(withIdentifier:)` in `MLNDocumentationExampleTests.swift` |
 | Map gestures: `gestureRecognizers` (our tap requires MapLibre's taps to fail), `convert(_:toCoordinateFrom:)`, `convert(_:toPointTo:)` (`-convertCoordinate:toPointToView:`), `centerCoordinate` | `MLNMapView.h`; the tap pattern and `convert(tapPoint, toCoordinateFrom: nil)` from `app-swift/Sources/LineTapMapView.swift`; MapLibre's own single-tap recognizer refuses to begin unless an annotation is hit (`gestureRecognizerShouldBegin:` in `MLNMapView.mm`), so ours fires |
+| Auto-route overlays and framing: no new API. Sources `gn-planned` and `gn-blocked` are `MLNShapeSource`s like the others; layers `gn-planned-casing`, `gn-planned-green`, `gn-planned-yellow`, `gn-planned-red` (`MLNLineStyleLayer`) and `gn-blocked` (`MLNCircleStyleLayer`) use only the `grade == %@` predicate form already used for route legs; the camera move is `setCenter(_:zoomLevel:animated:)` | as the rows above |
 | `mbtiles://` URLs | `platform/default/src/mln/storage/mbtiles_file_source.cpp`: registered in `file_source_manager.cpp`, tried before the cache and network in `main_resource_loader.cpp`; the path after `mbtiles://` is **percent-decoded** and cut at `?`; tile requests use the tile address, not the URL; the TileJSON it generates uses `<url>?file={x}/{y}/{z}.<format>` |
 
 Overlay layers, bottom to top (all above the chart rasters, which are inserted below the first overlay
 layer): saved tracks, live track, active-leg casing, route legs by grade (`none` blue, `green`, `yellow`,
 `red`), completed legs (grey), the route being edited (orange dashes), route points, the next point,
-the direct-to line (dashed), waypoints, the direct-to target, the selected waypoint (ring). Shapes are
+the direct-to line (dashed), the planned auto-route (white casing, then green / yellow / red), blocked places
+(red dots), waypoints, the direct-to target, the selected waypoint (ring). A plan's result is framed on the chart
+with `setCenter(_:zoomLevel:animated:)` (zoom from `AppServices.MapFocus`), switching follow mode off. Shapes are
 replaced only when their GeoJSON changed.
 
 How charts are wired: each region becomes an `MLNRasterTileSource` with the inline template
@@ -294,7 +371,8 @@ When the chart build service publishes `manifest.json` with real checksums:
   integrity) automatically; delete the NOAA-host rule in `InstallStrategy.choose` once NOAA's packages are no
   longer offered;
 - updates come from the manifest diff rather than `checkRemote` HEAD checks;
-- routing packs arrive through the same install call when `routingPack` is present.
+- routing packs arrive through the same install call when `routingPack` is present (validated by RoutingKit at
+  install time; see "Routing packs").
 
 ## Known gaps
 
@@ -322,7 +400,11 @@ When the chart build service publishes `manifest.json` with real checksums:
   them). The app removes the layer before ChartKit deletes or supersedes a file, so the handle is not read
   again, but the disk space of a deleted package may only be returned when the app restarts.
 - The chart-age badge shows the oldest installed region, not the one under the viewport.
-- Not handled yet: auto-routing, boat profiles, anchor watch, manifest fetching, retina (512 px) packages
+- Auto-routing: one region at a time (no routes across packs); the 30 s limit is fixed; "inside route only" is a
+  per-plan option because Persistence's boat profile has no field for it (it is recorded in the saved route's
+  planner record); a saved auto-route's GPX export has no grades; routes are not re-checked when a newer pack
+  arrives. Picking a chart point closes the planner while you tap.
+- Not handled yet: anchor watch, manifest fetching, retina (512 px) packages
   (the manifest has no tile-size field yet). Depth units are in Settings but no depth is shown yet.
 - `URLSessionChartTransport` integration tests (real HTTP with Range/If-Range, drops, cancellation) run only
   when `APPSERVICES_TEST_SERVER` points at `Packages/AppServices/Scripts/range_server.py`; they passed on

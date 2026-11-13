@@ -23,6 +23,9 @@ final class AppModel {
     let navigation: NavigationModel
     /// Waypoints, routes, tracks, navigation and recording.
     let plotter: PlotterModel
+    /// Boat profiles and the auto-route planner.
+    let profiles: BoatProfilesModel
+    let autoRoute: AutoRouteModel
     /// A GPX file opened in the app from elsewhere ("Open in…"), waiting for the map screen to plan it.
     var pendingOpenURL: URL?
 
@@ -34,13 +37,24 @@ final class AppModel {
         self.navigation = navigation
         self.notices = notices
         let mapModel = ChartMapModel(library: environment.charts)
-        let chartsModel = ChartsModel(library: environment.charts, regions: manifest.regions,
-                                      manifestError: manifest.error)
+        let chartsModel = ChartsModel(library: environment.charts, routingPacks: environment.routingPacks,
+                                      regions: manifest.regions, manifestError: manifest.error)
         self.map = mapModel
         self.charts = chartsModel
         let plotterModel = PlotterModel(store: environment.store,
                                         trackBatchSize: environment.launch.trackBatchSize ?? 10)
         self.plotter = plotterModel
+        let profilesModel = BoatProfilesModel(store: environment.store)
+        self.profiles = profilesModel
+        let autoRouteModel = AutoRouteModel(planner: environment.planner, store: environment.store, plotter: plotterModel,
+                                            profiles: profilesModel)
+        self.autoRoute = autoRouteModel
+        autoRouteModel.currentPosition = { [weak navigation] in
+            navigation?.readout.lastFix?.coordinate
+        }
+        autoRouteModel.focusMap = { [weak mapModel] coordinates in
+            mapModel?.focus(on: coordinates)
+        }
         plotterModel.currentPosition = { [weak navigation] in
             navigation?.readout.lastFix?.coordinate
         }
@@ -65,7 +79,9 @@ final class AppModel {
         let launch: LaunchConfiguration = AppModel.launchConfiguration()
         let navigation = NavigationModel(makeDeviceService: { CoreLocationService() },
                                          startSimulating: launch.simulateGPS,
-                                         simulatedSpeedKnots: launch.simulatedSpeedKnots ?? 6)
+                                         simulatedSpeedKnots: launch.simulatedSpeedKnots ?? 6,
+                                         simulatedRoute: launch.preinstallFixtureRouting
+                                             ? FixtureRoutingPack.simulatedTrack : SimulatedTrack.tampaBayWaypoints)
         var manifest: ManifestLoader.Loaded = ManifestLoader.loadBundled()
         var transport: any ChartTransport = URLSessionChartTransport()
         if launch.preinstallFixtureChart, let fixture = FixtureChart.bundledFile(in: Bundle.main) {
@@ -110,7 +126,11 @@ final class AppModel {
         // A recording interrupted less than two hours ago is resumed (new segment); older ones are closed.
         let recovery: RecordingRecovery.Outcome = await RecordingRecovery.recover(store: environment.store, now: Date())
         notices.append(contentsOf: recovery.notices)
+        if environment.launch.preinstallFixtureRouting {
+            await installFixtureRouting()
+        }
         await plotter.start(resumedRecording: recovery.resumed)
+        await profiles.start()
         map.orientation = plotter.data.settings.orientationMode
         var record: DisclaimerRecord? = nil
         do {
@@ -128,6 +148,16 @@ final class AppModel {
             await installFixtureChart()
         }
         await charts.start()
+        await autoRoute.refreshPacks()
+    }
+
+    /// UI tests: side-load the bundled Sarasota routing pack and add its test waypoints (debug builds bundle it).
+    private func installFixtureRouting() async {
+        let problems: [String] = await FixtureRoutingPack.install(packFile: FixtureRoutingPack.bundledFile(in: Bundle.main),
+                                                                  library: environment.routingPacks, store: environment.store)
+        for problem in problems {
+            notices.append(StartupNotice(kind: .storageFallback, message: problem))
+        }
     }
 
     /// UI tests: install the bundled 16 KB chart through the local transport (no network).

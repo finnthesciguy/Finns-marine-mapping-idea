@@ -24,7 +24,7 @@ cases=$(grep -E "^Test [Cc]ase '.*' (passed|failed|skipped)" "$log" \
   | awk '!seen[$0]++')
 if [ -n "$cases" ]; then
   echo "--- test cases ($(printf '%s\n' "$cases" | grep -c '^PASS') passed, $(printf '%s\n' "$cases" | grep -c '^FAIL') failed) ---"
-  printf '%s\n' "$cases" | head -n 24
+  printf '%s\n' "$cases" | head -n 30
 else
   echo "--- no test case results in the log ---"
 fi

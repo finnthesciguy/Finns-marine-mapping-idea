@@ -42,6 +42,9 @@ struct ChartMapView: UIViewRepresentable {
     let onLongPress: (Coordinate) -> Void
     /// Zoom level and centre latitude after the camera settled.
     let onCameraChanged: (Double, Double) -> Void
+    /// Move the camera here once, when `focusRevision` changes (framing a planned auto-route).
+    var focus: MapFocus? = nil
+    var focusRevision: Int = 0
 
     func makeCoordinator() -> ChartMapCoordinator {
         ChartMapCoordinator()
@@ -155,6 +158,7 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
     private var arrowSymbol = ""
 
     private var lastCenteredFix: Fix?
+    private var appliedFocusRevision: Int = 0
     private var lastOrientation: MapOrientationMode = .northUp
     private var lastFollow = true
 
@@ -381,6 +385,14 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         lastOrientation = view.orientation
         lastFollow = view.follow
 
+        if view.focusRevision != appliedFocusRevision {
+            appliedFocusRevision = view.focusRevision
+            if let focus = view.focus {
+                let center = CLLocationCoordinate2D(latitude: focus.center.latitude, longitude: focus.center.longitude)
+                mapView.setCenter(center, zoomLevel: focus.zoom, animated: true)
+                return
+            }
+        }
         if view.follow, let fix = view.readout.lastFix {
             if fix != lastCenteredFix || orientationChanged || followTurnedOn {
                 lastCenteredFix = fix

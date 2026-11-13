@@ -59,6 +59,11 @@ targets:
       - path: ../Packages/AppServices/Tests/AppServicesTests/Resources/tiny-a.mbtiles
         buildPhase: resources
         group: TestSupport
+      # The 216 KB Sarasota routing test pack the UI tests side-load (AppServices.FixtureRoutingPack). Also
+      # excluded from Release builds by EXCLUDED_SOURCE_FILE_NAMES below.
+      - path: ../testdata/routing/sarasota.pack
+        buildPhase: resources
+        group: TestSupport
     info:
       path: Info.plist
       properties:
@@ -118,7 +123,7 @@ targets:
         ENABLE_PREVIEWS: YES
       configs:
         Release:
-          EXCLUDED_SOURCE_FILE_NAMES: tiny-a.mbtiles
+          EXCLUDED_SOURCE_FILE_NAMES: "tiny-a.mbtiles sarasota.pack"
     dependencies:
       - package: MapLibre
         product: MapLibre
