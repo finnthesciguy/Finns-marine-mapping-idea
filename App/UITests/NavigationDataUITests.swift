@@ -434,9 +434,22 @@ extension GulfNavUITests {
     /// Taps a confirmation dialog's button by identifier, falling back to its label.
     @MainActor
     func tapConfirmation(_ app: XCUIApplication, identifier: String, label: String) {
-        let byIdentifier: XCUIElement = app.buttons[identifier]
-        if byIdentifier.waitForExistence(timeout: 5) {
-            byIdentifier.tap()
+        // A confirmation dialog can expose its button more than once in the accessibility tree,
+        // so never use a query that requires a single match here.
+        let matches: XCUIElementQuery = app.buttons.matching(identifier: identifier)
+        let first: XCUIElement = matches.firstMatch
+        if first.waitForExistence(timeout: 5) {
+            let count: Int = matches.count
+            var index: Int = 0
+            while index < count {
+                let candidate: XCUIElement = matches.element(boundBy: index)
+                if candidate.isHittable {
+                    candidate.tap()
+                    return
+                }
+                index += 1
+            }
+            first.tap()
             return
         }
         let byLabel: XCUIElement = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
