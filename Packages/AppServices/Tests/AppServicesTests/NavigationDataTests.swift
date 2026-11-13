@@ -685,3 +685,37 @@ final class WaypointNumberingTests: XCTestCase {
         XCTAssertEqual(WaypointNumbering.name(for: 1234), "WP 1234")
     }
 }
+
+final class RetainedIDsTests: XCTestCase {
+    func testAStaleReloadDoesNotDropANewChoiceButAFreshOneDoes() {
+        let a = UUID()
+        var selection = RetainedIDs()
+        // Reload 1 starts (a settings write) ...
+        let staleReloadStart = 1
+        // ... meanwhile the waypoint is saved and selected (revision is still 1).
+        selection.set(a, revision: 1)
+        // Reload 1 finishes without the new waypoint: the selection stays.
+        XCTAssertFalse(selection.reconcile(present: [], reloadStartedAt: staleReloadStart))
+        XCTAssertEqual(selection.single, a)
+        // Reload 2 (started after the selection) has it: stays.
+        XCTAssertFalse(selection.reconcile(present: [a], reloadStartedAt: 2))
+        XCTAssertEqual(selection.single, a)
+        // Reload 3, after a delete, does not have it: dropped.
+        XCTAssertTrue(selection.reconcile(present: [], reloadStartedAt: 3))
+        XCTAssertNil(selection.single)
+        XCTAssertTrue(selection.isEmpty)
+    }
+
+    func testSetsOfShownItems() {
+        let a = UUID(), b = UUID()
+        var shown = RetainedIDs()
+        shown.insert(a, revision: 1)
+        shown.insert(b, revision: 4)
+        XCTAssertEqual(shown.count, 2)
+        XCTAssertNil(shown.single)
+        shown.reconcile(present: [], reloadStartedAt: 3)
+        XCTAssertEqual(shown.ids, [b], "a dropped (added before reload 3), b kept (added after)")
+        shown.set(nil, revision: 5)
+        XCTAssertTrue(shown.isEmpty)
+    }
+}

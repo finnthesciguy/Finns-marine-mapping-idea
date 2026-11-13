@@ -22,9 +22,13 @@ final class PlotterModel {
 
     /// GeoJSON for the map's overlay sources, rebuilt by `refreshOverlays()`.
     private(set) var overlays: MapOverlays = MapOverlays.empty
-    private(set) var selectedWaypointID: UUID?
-    private(set) var shownRouteIDs: Set<UUID> = []
-    private(set) var shownTrackIDs: Set<UUID> = []
+    /// The selected waypoint and the routes and tracks shown, kept across stale list reloads (`RetainedIDs`).
+    private var selection: RetainedIDs = RetainedIDs()
+    private var shownRoutes: RetainedIDs = RetainedIDs()
+    private var shownTracks: RetainedIDs = RetainedIDs()
+    var selectedWaypointID: UUID? { selection.single }
+    var shownRouteIDs: Set<UUID> { shownRoutes.ids }
+    var shownTrackIDs: Set<UUID> { shownTracks.ids }
     /// Route being created or edited by tapping the map.
     private(set) var routeDraft: RouteDraft?
 
@@ -53,7 +57,7 @@ final class PlotterModel {
         self.data = dataModel
         self.guidance = GuidanceModel()
         self.recording = RecordingModel(store: store, filter: TrackPointFilter(), batchSize: trackBatchSize)
-        dataModel.onChange = { [weak self] in self?.dataChanged() }
+        dataModel.onChange = { [weak self] kind, startedAt in self?.dataChanged(kind, startedAt: startedAt) }
         guidance.onChange = { [weak self] in self?.refreshOverlays() }
         recording.onSnapshot = { [weak self] in self?.refreshOverlays() }
     }
@@ -77,20 +81,26 @@ final class PlotterModel {
         }
     }
 
-    private func dataChanged() {
-        recording.setFilter(data.settings.trackFilter)
-        let waypointIDs: Set<UUID> = Set(data.waypoints.map(\.id))
-        let routeIDs: Set<UUID> = Set(data.routes.map(\.id))
-        let trackIDs: Set<UUID> = Set(data.tracks.map(\.id))
-        guidance.stopIfMissing(waypointIDs: waypointIDs, routeIDs: routeIDs)
-        if let selected = selectedWaypointID, !waypointIDs.contains(selected) {
-            selectedWaypointID = nil
-        }
-        shownRouteIDs = shownRouteIDs.intersection(routeIDs)
-        let keptTracks: Set<UUID> = shownTrackIDs.intersection(trackIDs)
-        if keptTracks != shownTrackIDs {
-            shownTrackIDs = keptTracks
-            trackGeometry = trackGeometry.filter { keptTracks.contains($0.key) }
+    /// A list was reloaded (by a reload that started at revision `startedAt`) or changed locally.
+    private func dataChanged(_ kind: EntityKind, startedAt: Int) {
+        switch kind {
+        case .setting:
+            recording.setFilter(data.settings.trackFilter)
+        case .waypoint:
+            let waypointIDs: Set<UUID> = Set(data.waypoints.map(\.id))
+            selection.reconcile(present: waypointIDs, reloadStartedAt: startedAt)
+            guidance.stopIfMissing(waypointIDs: waypointIDs, routeIDs: Set(data.routes.map(\.id)))
+        case .route:
+            let routeIDs: Set<UUID> = Set(data.routes.map(\.id))
+            shownRoutes.reconcile(present: routeIDs, reloadStartedAt: startedAt)
+            guidance.stopIfMissing(waypointIDs: Set(data.waypoints.map(\.id)), routeIDs: routeIDs)
+        case .track:
+            let trackIDs: Set<UUID> = Set(data.tracks.map(\.id))
+            if shownTracks.reconcile(present: trackIDs, reloadStartedAt: startedAt) {
+                trackGeometry = trackGeometry.filter { trackIDs.contains($0.key) }
+            }
+        case .boatProfile, .anchorWatch:
+            break
         }
         refreshOverlays()
     }
@@ -99,7 +109,7 @@ final class PlotterModel {
 
     func select(_ waypointID: UUID?) {
         guard waypointID != selectedWaypointID else { return }
-        selectedWaypointID = waypointID
+        selection.set(waypointID, revision: data.reloadRevision)
         refreshOverlays()
     }
 
@@ -195,18 +205,18 @@ final class PlotterModel {
         }
         guard let saved = await data.save(draft.route) else { return false }
         routeDraft = nil
-        shownRouteIDs.insert(saved.id)
+        shownRoutes.insert(saved.id, revision: data.reloadRevision)
         refreshOverlays()
         return true
     }
 
     func setRouteShown(_ id: UUID, _ shown: Bool) {
-        if shown { shownRouteIDs.insert(id) } else { shownRouteIDs.remove(id) }
+        if shown { shownRoutes.insert(id, revision: data.reloadRevision) } else { shownRoutes.remove(id) }
         refreshOverlays()
     }
 
     func follow(_ route: Route) {
-        shownRouteIDs.insert(route.id)
+        shownRoutes.insert(route.id, revision: data.reloadRevision)
         guidance.follow(route, from: currentPosition())
         refreshOverlays()
     }
@@ -215,10 +225,10 @@ final class PlotterModel {
 
     func setTrackShown(_ id: UUID, _ shown: Bool) {
         if shown {
-            shownTrackIDs.insert(id)
+            shownTracks.insert(id, revision: data.reloadRevision)
             Task { await reloadTrackGeometry() }
         } else {
-            shownTrackIDs.remove(id)
+            shownTracks.remove(id)
             trackGeometry[id] = nil
             refreshOverlays()
         }
@@ -286,7 +296,9 @@ final class PlotterModel {
             let text: String = GPXImportPresentation.resultText(result)
             importResultText = text
             lastImportSummary = text
-            for id in result.insertedRoutes + result.replacedRoutes { shownRouteIDs.insert(id) }
+            for id in result.insertedRoutes + result.replacedRoutes {
+                shownRoutes.insert(id, revision: data.reloadRevision)
+            }
             importPlan = nil
         } catch {
             data.errorText = "The import failed: \(error)"

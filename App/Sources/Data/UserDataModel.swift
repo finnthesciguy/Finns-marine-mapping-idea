@@ -16,8 +16,11 @@ final class UserDataModel {
     /// Last failure of a store operation, shown as a banner.
     var errorText: String?
 
-    /// Called after any of the lists or the settings changed.
-    @ObservationIgnored var onChange: (@MainActor () -> Void)?
+    /// Called after any of the lists or the settings changed, with the kind reloaded and the revision at
+    /// which that reload started (see `RetainedIDs`; local saves report the current revision).
+    @ObservationIgnored var onChange: (@MainActor (EntityKind, Int) -> Void)?
+    /// Number of reloads started so far. A choice made now is newer than every reload started before.
+    @ObservationIgnored private(set) var reloadRevision: Int = 0
 
     let store: PersistenceStore
     @ObservationIgnored private var feedTask: Task<Void, Never>?
@@ -44,6 +47,8 @@ final class UserDataModel {
     }
 
     private func reload(_ kind: EntityKind) async {
+        reloadRevision += 1
+        let startedAt: Int = reloadRevision
         do {
             switch kind {
             case .waypoint:
@@ -60,7 +65,33 @@ final class UserDataModel {
         } catch {
             errorText = "Saved data could not be read: \(error)"
         }
-        onChange?()
+        onChange?(kind, startedAt)
+    }
+
+    /// Puts a just-saved waypoint into the list at once (in the store's name order), so the UI does not
+    /// depend on when the change feed's reload arrives.
+    private func upsertLocally(_ waypoint: Waypoint) {
+        var next: [Waypoint] = waypoints.filter { $0.id != waypoint.id }
+        next.append(waypoint)
+        next.sort { a, b in
+            let order = a.name.localizedCaseInsensitiveCompare(b.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return a.createdAt < b.createdAt
+        }
+        waypoints = next
+        onChange?(.waypoint, reloadRevision)
+    }
+
+    private func upsertLocally(_ route: Route) {
+        var next: [Route] = routes.filter { $0.id != route.id }
+        next.append(route)
+        next.sort { a, b in
+            let order = a.name.localizedCaseInsensitiveCompare(b.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return a.createdAt < b.createdAt
+        }
+        routes = next
+        onChange?(.route, reloadRevision)
     }
 
     func waypoint(_ id: UUID?) -> Waypoint? {
@@ -83,7 +114,9 @@ final class UserDataModel {
     @discardableResult
     func save(_ waypoint: Waypoint) async -> Waypoint? {
         do {
-            return try await store.save(waypoint)
+            let saved: Waypoint = try await store.save(waypoint)
+            upsertLocally(saved)
+            return saved
         } catch {
             errorText = "The waypoint could not be saved: \(error)"
             return nil
@@ -109,7 +142,9 @@ final class UserDataModel {
     @discardableResult
     func save(_ route: Route) async -> Route? {
         do {
-            return try await store.save(route)
+            let saved: Route = try await store.save(route)
+            upsertLocally(saved)
+            return saved
         } catch {
             errorText = "The route could not be saved: \(error)"
             return nil
@@ -152,7 +187,7 @@ final class UserDataModel {
         } catch {
             errorText = "Settings could not be saved: \(error)"
         }
-        onChange?()
+        onChange?(.setting, reloadRevision)
     }
 
     /// Simplified geometry of a saved track for the map (see `TrackDetailPolicy`).
