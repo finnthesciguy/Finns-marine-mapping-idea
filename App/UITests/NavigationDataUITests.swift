@@ -381,7 +381,7 @@ extension GulfNavUITests {
     @MainActor
     func waitForStatus(_ app: XCUIApplication, _ key: String, _ expected: String,
                        timeout: TimeInterval = GulfNavUITests.stepTimeout) {
-        waitUntil(timeout, "app.status \(key)=\(expected), status: \(GulfNavUITests.appStatusValue(app))") {
+        waitUntil(timeout, "app.status \(key)=\(expected) (now \(key)=\(GulfNavUITests.statusField(app, key) ?? "missing")), status: \(GulfNavUITests.appStatusValue(app))") {
             GulfNavUITests.statusField(app, key) == expected
         }
     }
@@ -423,7 +423,9 @@ extension GulfNavUITests {
 
     @MainActor
     func replaceText(in field: XCUIElement, with text: String) {
-        field.tap()
+        // Tap at the right-hand end so the cursor lands after the existing text (a centre tap in a short or
+        // right-aligned field, such as the boat profile's numbers, puts it in front of the text).
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         let current: String = (field.value as? String) ?? ""
         if !current.isEmpty {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count + 2))

@@ -269,9 +269,13 @@ final class AutoRouteModel {
         }
     }
 
-    /// The user confirmed the yellow legs.
-    func confirmCaution() async {
-        guard let pending = pendingCaution, let proposal = outcome?.proposal else { return }
+    /// The user confirmed the yellow legs. `pending` is the confirmation the alert showed: SwiftUI clears the
+    /// alert's binding (and so `pendingCaution`) as the button is tapped, before this runs, so it must be passed in.
+    func confirmCaution(_ pending: PendingCaution) async {
+        guard let proposal = outcome?.proposal else {
+            message = "The planned route is no longer there; plan again."
+            return
+        }
         pendingCaution = nil
         await save(proposal, follow: pending.follow, confirmed: true)
     }

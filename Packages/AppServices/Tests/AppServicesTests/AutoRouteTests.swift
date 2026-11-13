@@ -895,3 +895,19 @@ final class AutoRouteDisplayTests: XCTestCase {
         XCTAssertEqual(missing, ["Test routing pack is not in this build."])
     }
 }
+
+final class BoatProfileLimitTests: XCTestCase {
+    /// A draft typed in front of the default value ("3" + "4.5") is refused, not saved as 34.5 ft.
+    func testImplausibleDraftIsRefused() {
+        var form = BoatProfileForm(profile: nil, units: UnitPreferences())
+        form.draft = "34.5"
+        XCTAssertEqual(form.problems, [BoatProfileProblem(field: .draft, message: "Draft looks too large (at most 25 ft). Check the unit.")])
+        form.draft = "25"
+        XCTAssertEqual(form.problems, [])
+        form.lengthUnit = .meters
+        form.draft = "7.62"
+        form.safetyMargin = "0.3"
+        form.airDraft = "6"
+        XCTAssertEqual(form.problems, [], "7.62 m = 25 ft")
+    }
+}

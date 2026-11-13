@@ -14,7 +14,9 @@ public enum BoatProfileDefaults {
 
     /// Upper limits accepted by the form (generous, but they catch a unit mix-up such as metres typed as feet
     /// the other way round, and stay well inside RoutingKit's 1000 ft limit).
-    public static let maximumDraft: Distance = .feet(40)
+    /// 25 ft: deeper than any recreational boat that would use the Gulf ICW or its bays, so a slip such as
+    /// "34.5" for "4.5" is caught.
+    public static let maximumDraft: Distance = .feet(25)
     public static let maximumSafetyMargin: Distance = .feet(20)
     public static let maximumAirDraft: Distance = .feet(250)
     public static let maximumBeam: Distance = .feet(100)

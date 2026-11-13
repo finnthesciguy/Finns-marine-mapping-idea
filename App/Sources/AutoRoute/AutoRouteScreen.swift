@@ -39,10 +39,10 @@ struct AutoRouteScreen: View {
         .alert(model.pendingCaution?.confirmation.title ?? "Caution", isPresented: cautionShown,
                presenting: model.pendingCaution) { pending in
             Button(pending.confirmation.confirmLabel) {
-                let follow: Bool = pending.follow
+                let confirmed: AutoRouteModel.PendingCaution = pending
                 Task {
-                    await model.confirmCaution()
-                    if follow { onClose() }
+                    await model.confirmCaution(confirmed)
+                    if confirmed.follow && model.outcome == nil { onClose() }
                 }
             }
             .accessibilityIdentifier("autoroute.confirmCaution")

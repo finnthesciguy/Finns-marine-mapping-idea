@@ -83,7 +83,7 @@ struct MapScreen: View {
             VStack {
                 HStack {
                     StatusProbe(identifier: "app.status",
-                                value: plotter.statusValue + "; " + model.autoRoute.statusValue + "; " + model.profiles.statusValue)
+                                value: model.autoRoute.statusValue + "; " + model.profiles.statusValue + "; " + plotter.statusValue)
                         .frame(width: 2, height: 2)
                     Spacer()
                 }

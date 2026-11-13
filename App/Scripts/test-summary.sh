@@ -2,7 +2,8 @@
 # Compact summary of an `xcodebuild test` log, at most ~60 lines, for the end of the CI step:
 #   - one line per test case: PASS/FAIL/SKIP, name, duration;
 #   - each failure's file:line and assertion message (trimmed);
-#   - the last map.status values the UI tests printed (GULFNAV-MAP-STATUS lines);
+#   - map.status / app.status values the UI tests printed (GULFNAV-MAP-STATUS / GULFNAV-APP-STATUS lines):
+#     those printed at a timeout (failing waits) first, then the last ones; long lines are wrapped, never cut;
 #   - if no test case ran at all, the last error-looking lines instead.
 # Usage: test-summary.sh <xcodebuild-test-log> [exit-status]
 set -u
@@ -32,22 +33,26 @@ fi
 # /path/GulfNavUITests.swift:83: error: -[GulfNavUITests.GulfNavUITests testX] : XCTAssertTrue failed - message
 failures=$(grep -E "^[^ ].*\.swift:[0-9]+: error: " "$log" \
   | sed -E 's#^.*/([^/]+\.swift:[0-9]+): error: (-\[[^]]*\] : )?#\1: #' \
-  | cut -c1-400 | awk '!seen[$0]++' | head -n 10)
+  | cut -c1-2000 | awk '!seen[$0]++' | head -n 10)
 if [ -n "$failures" ]; then
   echo "--- failures ---"
-  printf '%s\n' "$failures"
+  printf '%s\n' "$failures" | fold -w 200
 fi
 
-statuses=$(grep -o "GULFNAV-MAP-STATUS .*" "$log" | cut -c1-420 | tail -n 4)
-if [ -n "$statuses" ]; then
-  echo "--- last map.status values ---"
-  printf '%s\n' "$statuses"
-fi
-appstatuses=$(grep -o "GULFNAV-APP-STATUS .*" "$log" | cut -c1-420 | tail -n 4)
-if [ -n "$appstatuses" ]; then
-  echo "--- last app.status values ---"
-  printf '%s\n' "$appstatuses"
-fi
+# Status lines printed at a timeout belong to failing waits: show those first (up to 4), then the last ones.
+for kind in MAP APP; do
+  name=$( [ "$kind" = MAP ] && echo map.status || echo app.status )
+  timeouts=$(grep -o "GULFNAV-$kind-STATUS \[timeout\].*" "$log" | awk '!seen[$0]++' | tail -n 4)
+  last=$(grep -o "GULFNAV-$kind-STATUS .*" "$log" | grep -v "\[timeout\]" | tail -n 2)
+  if [ -n "$timeouts" ]; then
+    echo "--- $name at timeouts (failing waits) ---"
+    printf '%s\n' "$timeouts" | cut -c1-2000 | fold -w 200
+  fi
+  if [ -n "$last" ]; then
+    echo "--- last $name values ---"
+    printf '%s\n' "$last" | cut -c1-2000 | fold -w 200
+  fi
+done
 
 if [ -z "$cases" ]; then
   echo "--- last error lines ---"
