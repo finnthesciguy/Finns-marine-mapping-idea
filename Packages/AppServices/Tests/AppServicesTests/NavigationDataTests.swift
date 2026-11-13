@@ -621,3 +621,47 @@ final class GPXFileFlowTests: XCTestCase {
         } catch {}
     }
 }
+
+final class DirectToRearmTests: XCTestCase {
+    func testGoToAMarkTheBoatIsAtArrivesThenRearmsWhenTheBoatLeaves() {
+        let mark = Coordinate(latitude: 27.6, longitude: -82.7)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var session = NavigationSession()
+        session.startDirectTo(NavigationTarget(name: "Mark", coordinate: mark), from: mark)
+        XCTAssertEqual(session.update(position: mark, speedOverGround: 3, now: now), [.arrived(name: "Mark")],
+                       "already there: arrival at once")
+        XCTAssertNil(session.guidance?.eta, "no ETA while arrived")
+
+        // 150 m away (inside twice the 92.6 m radius): still arrived, distance and bearing live.
+        let near = Geodesy.destination(from: mark, bearing: 90, distance: 150)
+        XCTAssertEqual(session.update(position: near, speedOverGround: 3, now: now), [])
+        XCTAssertEqual(session.guidance?.arrived, true)
+        XCTAssertEqual(session.guidance!.distanceToTarget, 150, accuracy: 1)
+        XCTAssertEqual(session.guidance!.bearingToTarget, 270, accuracy: 1)
+
+        // 300 m away: re-armed, ETA back, still direct-to.
+        let away = Geodesy.destination(from: mark, bearing: 90, distance: 300)
+        XCTAssertEqual(session.update(position: away, speedOverGround: 3, now: now), [])
+        XCTAssertEqual(session.guidance?.arrived, false)
+        XCTAssertNotNil(session.guidance?.eta)
+        XCTAssertEqual(session.directToTarget?.name, "Mark")
+
+        // Coming back in: a second arrival is announced.
+        XCTAssertEqual(session.update(position: Geodesy.destination(from: mark, bearing: 90, distance: 20),
+                                      speedOverGround: 3, now: now), [.arrived(name: "Mark")])
+    }
+
+    func testFinishedRouteDoesNotRearm() {
+        let a = Coordinate(latitude: 27.6, longitude: -82.7)
+        let b = Coordinate(latitude: 27.61, longitude: -82.7)
+        var session = NavigationSession()
+        session.startRoute(id: UUID(), name: "R", points: [NavigationTarget(name: "A", coordinate: a),
+                                                           NavigationTarget(name: "B", coordinate: b)], from: a)
+        let now = Date()
+        _ = session.update(position: a, speedOverGround: 3, now: now)
+        XCTAssertEqual(session.update(position: b, speedOverGround: 3, now: now), [.arrived(name: "B")])
+        let away = Geodesy.destination(from: b, bearing: 0, distance: 1000)
+        XCTAssertEqual(session.update(position: away, speedOverGround: 3, now: now), [])
+        XCTAssertEqual(session.guidance?.arrived, true)
+    }
+}

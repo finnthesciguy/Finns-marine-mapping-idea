@@ -57,6 +57,14 @@ public enum NavigationEvent: Sendable, Equatable {
 /// direct-to point, or the route's first point), so guidance is meaningful from wherever the boat is; the
 /// route's own legs follow. Leg advance uses NavCore's arrival circle and perpendicular rule; the final
 /// point uses the arrival circle only (passing abeam of the destination is not arriving).
+///
+/// After arrival:
+/// - **Direct-to** stays active and keeps showing bearing and distance to the mark (no XTE, time to go or
+///   ETA while inside). Once the boat is more than `rearmFactor` × the arrival radius away again, the
+///   session re-arms: a new leg starts from the boat, ETA and XTE return, and a later arrival is announced
+///   again. So "Go to" a mark the boat is already at (or has just left) is useful for returning to it.
+/// - **Route following** finishes at the final point and stays finished (the skipper stops or picks another
+///   route); it does not re-arm.
 public struct NavigationSession: Sendable, Equatable {
     public enum State: Sendable, Equatable {
         case idle
@@ -69,6 +77,8 @@ public struct NavigationSession: Sendable, Equatable {
     /// Route points (or the single direct-to target), with names.
     public private(set) var targets: [NavigationTarget] = []
     public var policy: LegAdvancePolicy
+    /// Direct-to re-arms after arrival once the boat is this many arrival radii from the mark.
+    public static let rearmFactor: Double = 2
     /// Index in the original route of `targets[0]` (non-zero after starting later or skipping).
     public private(set) var routeIndexOffset: Int = 0
     /// Number of points in the original route (1 for direct-to).
@@ -181,6 +191,10 @@ public struct NavigationSession: Sendable, Equatable {
     @discardableResult
     public mutating func update(position: Coordinate, speedOverGround: Double?, now: Date) -> [NavigationEvent] {
         guard isActive, position.isValid, !targets.isEmpty else { return [] }
+        if case .directTo(let target) = state, arrivedAnnounced,
+           Geodesy.distance(from: position, to: target.coordinate) > NavigationSession.rearmFactor * policy.arrivalRadius {
+            begin(at: position)
+        }
         if navigator == nil {
             navigator = RouteNavigator(waypoints: [position] + targets.map(\.coordinate), policy: policy)
         }

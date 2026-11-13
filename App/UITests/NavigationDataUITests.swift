@@ -47,7 +47,8 @@ extension GulfNavUITests {
         XCTAssertTrue(app.staticTexts["waypoint.name.Egmont"].waitForExistence(timeout: GulfNavUITests.stepTimeout),
                       "renamed waypoint listed")
 
-        // Go to.
+        // Go to the waypoint just dropped at the boat: the boat is at (or near) it, so arrival may be
+        // announced at once (ETA "—" is then correct); bearing and distance are shown either way.
         app.staticTexts["waypoint.name.Egmont"].tap()
         let goTo: XCUIElement = app.buttons["waypoint.edit.goTo"]
         XCTAssertTrue(goTo.waitForExistence(timeout: GulfNavUITests.stepTimeout))
@@ -59,9 +60,31 @@ extension GulfNavUITests {
         XCTAssertEqual(target.label, "Egmont")
         let dtw: XCUIElement = app.staticTexts["guidance.distance"]
         let brg: XCUIElement = app.staticTexts["guidance.bearing"]
+        waitUntil(GulfNavUITests.stepTimeout, "distance and bearing, got '\(dtw.label)' '\(brg.label)'") {
+            GulfNavUITests.matches(dtw.label, GulfNavUITests.ddmDistancePattern)
+                && GulfNavUITests.matches(brg.label, GulfNavUITests.bearingPattern)
+        }
+        GulfNavUITests.logMapStatus(app, "goto-near")
+        app.buttons["guidance.stop"].tap()
+        waitForStatus(app, "nav", "idle")
+        waitForOverlay(app, "direct", equals: 0)
+
+        // Long-press the chart well north of the boat (the chart follows the boat, so its centre is the
+        // boat; a quarter of the screen up at zoom 9 is tens of miles) to drop a second waypoint.
+        let arrivalsBefore: String = GulfNavUITests.statusField(app, "navArrivals") ?? "0"
+        GulfNavUITests.chartMap(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).press(forDuration: 1.2)
+        waitForStatus(app, "waypoints", "2")
+        waitForStatus(app, "selected", "WP 002")
+        waitForOverlay(app, "waypoints", atLeast: 2)
+
+        // Go to it from the selection card: full guidance, including XTE and ETA, and the direct-to line.
+        let cardGoTo: XCUIElement = app.buttons["selection.goTo"]
+        XCTAssertTrue(cardGoTo.waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        cardGoTo.tap()
+        waitForStatus(app, "navTarget", "WP 002")
         let xte: XCUIElement = app.staticTexts["guidance.xte"]
         let eta: XCUIElement = app.staticTexts["guidance.eta"]
-        waitUntil(GulfNavUITests.stepTimeout, "guidance values, got '\(dtw.label)' '\(brg.label)' '\(xte.label)' '\(eta.label)'") {
+        waitUntil(GulfNavUITests.stepTimeout, "guidance values, got '\(dtw.label)' '\(brg.label)' '\(xte.label)'") {
             GulfNavUITests.matches(dtw.label, GulfNavUITests.ddmDistancePattern)
                 && GulfNavUITests.matches(brg.label, GulfNavUITests.bearingPattern)
                 && (xte.label.hasSuffix(" nm") || xte.label.hasSuffix(" R") || xte.label.hasSuffix(" L"))
@@ -69,18 +92,12 @@ extension GulfNavUITests {
         waitUntil(GulfNavUITests.stepTimeout, "ETA shown, got '\(eta.label)'") {
             GulfNavUITests.matches(eta.label, GulfNavUITests.clockPattern)
         }
+        XCTAssertEqual(GulfNavUITests.statusField(app, "navArrivals"), arrivalsBefore, "no arrival at a distant mark")
         waitForOverlay(app, "direct", atLeast: 1)
-        GulfNavUITests.logMapStatus(app, "goto")
+        GulfNavUITests.logMapStatus(app, "goto-far")
         attachScreenshot(app, "go-to")
-
         app.buttons["guidance.stop"].tap()
         waitForStatus(app, "nav", "idle")
-        waitForOverlay(app, "direct", equals: 0)
-
-        // Long-press the chart to drop a second waypoint.
-        GulfNavUITests.chartMap(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)).press(forDuration: 1.2)
-        waitForStatus(app, "waypoints", "2")
-        waitForOverlay(app, "waypoints", atLeast: 2)
 
         // Delete it from the list.
         app.buttons["map.waypointsButton"].tap()
@@ -115,7 +132,9 @@ extension GulfNavUITests {
         waitForStatus(app, "editPoints", "0")
 
         let map: XCUIElement = GulfNavUITests.chartMap(app)
-        let offsets: [CGVector] = [CGVector(dx: 0.35, dy: 0.30), CGVector(dx: 0.60, dy: 0.36), CGVector(dx: 0.45, dy: 0.46)]
+        // Upper half of the chart: the route edit bar, the map buttons and the instruments fill the lower
+        // half on a phone (the first run's third point at 46 % landed on the edit bar), and banners the top.
+        let offsets: [CGVector] = [CGVector(dx: 0.35, dy: 0.22), CGVector(dx: 0.62, dy: 0.28), CGVector(dx: 0.45, dy: 0.35)]
         for (index, offset) in offsets.enumerated() {
             map.coordinate(withNormalizedOffset: offset).tap()
             waitForStatus(app, "editPoints", String(index + 1))
@@ -296,8 +315,15 @@ extension GulfNavUITests {
         XCTAssertTrue(kmh.waitForExistence(timeout: GulfNavUITests.stepTimeout), "km/h choice shown")
         kmh.tap()
         waitForStatus(app, "speedUnit", "kilometersPerHour")
-        XCTAssertTrue(app.staticTexts["settings.attribution"].exists || app.descendants(matching: .any)["settings.attribution"].exists,
-                      "NOAA attribution shown")
+        // The About section is below the fold; rows off screen are not in the accessibility tree until scrolled.
+        let attribution: XCUIElement = app.descendants(matching: .any).matching(identifier: "settings.attribution").firstMatch
+        var swipes: Int = 0
+        while !attribution.exists && swipes < 6 {
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(attribution.exists, "NOAA attribution shown (after \(swipes) swipes)")
+        XCTAssertTrue(attribution.label.contains("NOAA"), attribution.label)
         attachScreenshot(app, "settings")
         app.buttons["settings.done"].tap()
         waitUntil(GulfNavUITests.stepTimeout, "speed in km/h, got '\(sog.label)'") { sog.label.hasSuffix(" km/h") }

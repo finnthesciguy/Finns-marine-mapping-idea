@@ -113,8 +113,12 @@ struct MapScreen: View {
                 await plotter.planImport(fileAt: url)
             }
         }
+        .onChange(of: model.plotter.routeDraft != nil) { _, editing in
+            // While points are being tapped in, the chart must not move under the finger with every fix.
+            if editing { model.map.follow = false }
+        }
         .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = plotter.data.settings.keepScreenOn
+            UIApplication.shared.isIdleTimerDisabled = model.plotter.data.settings.keepScreenOn
         }
         .onChange(of: plotter.data.settings.keepScreenOn) { _, keepOn in
             UIApplication.shared.isIdleTimerDisabled = keepOn

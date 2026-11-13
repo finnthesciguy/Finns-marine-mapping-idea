@@ -34,9 +34,14 @@ What the app does so far:
   symbol (GPX `<sym>` names) and notes; delete; tap a waypoint on the chart to select it (card with range and
   bearing, Go to, Edit). **Go to** starts direct-to navigation (`AppServices.NavigationSession` on NavCore's
   `RouteNavigator`): the guidance panel shows bearing, distance, cross-track error, time to go and ETA, a
-  dashed line runs from the boat to the waypoint, and arrival (inside 0.05 nm) is announced.
+  dashed line runs from the boat to the waypoint, and arrival (inside 0.05 nm) is announced. After arrival
+  go-to stays on, showing bearing and distance back to the mark (no XTE, time to go or ETA while arrived);
+  once the boat is more than twice the arrival radius away it re-arms (ETA returns, a later arrival is
+  announced again), so "Go to" a mark the boat is at or has just left is useful for returning to it. A
+  followed route finishes at its last point and does not re-arm.
 - **Routes** (`Sources/Routes`): "New route on the chart" then tap the chart to add points (Undo, Cancel,
-  Save in the edit bar; tapping near a waypoint uses its position and name); list with point count and
+  Save in the edit bar; tapping near a waypoint uses its position and name; follow mode is switched off
+  while editing so the chart does not move under the finger); list with point count and
   length; detail screen with name, points (reorder and delete with Edit), legs with length and bearing, show
   on the chart, add points on the chart, export, delete. **Follow** joins the route at the leg the boat is on
   (`NavigationSession.bestStartIndex`), shows the next point (`2/5`), bearing, distance, XTE, time to go and
