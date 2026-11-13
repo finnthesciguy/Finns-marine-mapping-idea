@@ -35,8 +35,12 @@ What this first piece does:
 target `GulfNavTests`) run on a booted iPhone simulator. The job picks the simulator by parsing
 `xcrun simctl list devices available -j` (newest iOS runtime, plain "iPhone NN" preferred, one is created if
 none exists), builds with ad hoc signing (`CODE_SIGN_IDENTITY=-`, falling back to `CODE_SIGNING_ALLOWED=NO`
-on a signing error), runs `xcodebuild test-without-building`, prints test cases and failures compactly and
-uploads the logs, the `.xcresult` bundle and the screenshots (exported with `xcresulttool export attachments`).
+on a signing error) and runs `xcodebuild test-without-building`. All output goes to files uploaded as
+artifacts (`ios-app-test-logs`: full test log, simulator log, crash reports; `ios-app-test-results`: the
+`.xcresult`; `ios-app-test-screenshots`: attachments exported with `xcresulttool export attachments`). Only a
+compact summary from `Scripts/test-summary.sh` is printed, at the end of the test step and again as the
+job's last step: one line per test case with result and duration, each failure's file:line and message,
+and the last `map.status` values the UI tests printed (`GULFNAV-MAP-STATUS` lines).
 
 The UI tests drive the app through launch environment variables, read by debug builds only
 (`AppServices.LaunchConfiguration`):
@@ -51,9 +55,19 @@ The UI tests drive the app through launch environment variables, read by debug b
 Tests: (a) the disclaimer gates the app and is not shown again after relaunch; (b) the map style loads and
 the instrument strip shows speed, course and a DDM position from simulated GPS; (c) the pre-installed test
 chart is listed as installed with its data date, and the map reports a chart layer applied. The map state is
-read from a debug-only invisible accessibility element `map.status` with the value
-`style=loaded; chartLayers=N` (set by the map coordinator when the style loads and after each layer plan is
-applied), not from pixels. Accessibility identifiers used: `disclaimer.title`, `disclaimer.accept`,
+read from a debug-only invisible accessibility element `map.status` (value from
+`AppServices.MapDiagnostics`: `style=loaded; chartLayers=N; overlayLayers=N; styleVia=…;` then counts of the
+MapLibre delegate callbacks `willStartLoading`, `didFinishLoadingMap`, `didFinishLoadingStyle`,
+`didFailLoading=<error>`, `frames`, `fullFrames`, `idle`, `rendererErrors`), not from pixels.
+
+**Style loading.** The first CI run showed `style=pending`: `MLNMapView(frame:styleJSON:)` hands the inline
+style to mbgl's `loadJSON` inside the initializer, which (as far as the iOS sources at `ios-v7.0.0` show:
+`-setStyleJSON:` → `getStyle().loadJSON(...)`, and the style object is created in
+`-mapViewDidFinishLoadingStyle`) reports the style loaded before the initializer returns, so the delegate set
+afterwards never receives `mapView(_:didFinishLoading:)`. The coordinator now checks `mapView.style` when
+it attaches and on every update, and applies chart layers as soon as the style object exists; nothing waits
+for a rendered frame. `styleVia` in `map.status` shows which path found the style (`attach`, `update`,
+`delegate`). Accessibility identifiers used: `disclaimer.title`, `disclaimer.accept`,
 `map.chartsButton`, `map.noChartsBanner`, `map.orientationButton`, `map.followButton`, `map.debugMenu`,
 `map.chartAgeBadge`, `chart-map` (the `MLNMapView`), `map.status`, `instrument.strip`, `instrument.sog`,
 `instrument.cog`, `instrument.latitude`, `instrument.longitude`, `notice.<kind>`, `charts.done`,

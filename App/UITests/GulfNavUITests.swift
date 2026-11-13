@@ -7,7 +7,9 @@ import XCTest
 ///
 /// Each test attaches named screenshots, the last one at its end; on failure the test action also captures
 /// screenshots automatically (scheme setting). Elements are found by accessibility identifier; the map's state is read from the debug-only
-/// `map.status` element (`style=loaded; chartLayers=N`) rather than from pixels.
+/// `map.status` element (`style=loaded; chartLayers=N; ...` plus which MapLibre delegate callbacks fired,
+/// see `AppServices.MapDiagnostics`) rather than from pixels. Each read is also printed as a
+/// `GULFNAV-MAP-STATUS` line, which CI's summary picks up.
 final class GulfNavUITests: XCTestCase {
     /// Generous: the first launch of a freshly booted CI simulator can take a long time.
     static let launchTimeout: TimeInterval = 120
@@ -73,6 +75,7 @@ final class GulfNavUITests: XCTestCase {
         waitUntil(GulfNavUITests.stepTimeout, "map style loaded, status: \(GulfNavUITests.value(of: status))") {
             GulfNavUITests.value(of: status).contains("style=loaded")
         }
+        GulfNavUITests.logMapStatus(app, "instruments")
         let mapView: XCUIElement = app.descendants(matching: .any).matching(identifier: "chart-map").firstMatch
         if !mapView.exists {
             // Informational only: MapLibre's view is its own accessibility container, so whether its
@@ -116,6 +119,7 @@ final class GulfNavUITests: XCTestCase {
         waitUntil(GulfNavUITests.stepTimeout, "a chart layer applied, status: \(GulfNavUITests.value(of: status))") {
             GulfNavUITests.chartLayerCount(GulfNavUITests.value(of: status)) >= 1
         }
+        GulfNavUITests.logMapStatus(app, "charts")
         XCTAssertFalse(app.buttons["map.noChartsBanner"].exists, "no 'no charts' banner once a chart is installed")
         attachScreenshot(app, "map-with-chart")
 
@@ -140,6 +144,12 @@ final class GulfNavUITests: XCTestCase {
         prefix + "-" + String(UUID().uuidString.prefix(8))
     }
 
+    /// The app most recently created by `makeApp`, for status logging on timeouts.
+    @MainActor static var lastApp: XCUIApplication?
+
+    @MainActor
+    var currentApp: XCUIApplication? { GulfNavUITests.lastApp }
+
     @MainActor
     static func makeApp(root: String, reset: Bool, simulateGPS: Bool = true, fixtureChart: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
@@ -148,6 +158,7 @@ final class GulfNavUITests: XCTestCase {
         if simulateGPS { environment["GULFNAV_SIMULATE_GPS"] = "1" }
         if fixtureChart { environment["GULFNAV_PREINSTALL_FIXTURE_CHART"] = "1" }
         app.launchEnvironment = environment
+        lastApp = app
         return app
     }
 
@@ -161,6 +172,12 @@ final class GulfNavUITests: XCTestCase {
         guard element.exists else { return "(missing)" }
         if let text = element.value as? String { return text }
         return "(no value)"
+    }
+
+    /// Prints the current `map.status` value on a line CI's summary collects.
+    @MainActor
+    static func logMapStatus(_ app: XCUIApplication, _ label: String) {
+        print("GULFNAV-MAP-STATUS [\(label)] \(value(of: mapStatus(app)))")
     }
 
     /// N from `... chartLayers=N`, or -1.
@@ -193,6 +210,9 @@ final class GulfNavUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         }
         if condition() { return true }
+        if let app = currentApp {
+            GulfNavUITests.logMapStatus(app, "timeout")
+        }
         XCTFail("Timed out after \(Int(timeout)) s waiting for: \(message())")
         return false
     }

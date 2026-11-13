@@ -217,11 +217,11 @@ RoutingKit (the on-device engine), what is proven and what is open:
 
 | Piece | Status |
 |---|---|
-| `AppServices` (location, chart downloads, display helpers, launch switches, store opening and recovery) | built; 67 tests pass on Linux |
+| `AppServices` (location, chart downloads, display helpers, launch switches, store opening and recovery; navigation session, track recorder, map GeoJSON, GPX import presentation, settings, unit formatting) | built; 90 tests pass on Linux |
 | App skeleton (`App/`): disclaimer, offline chart map, charts screen | compiles for the simulator on CI; first runtime check is the new UI-test job |
-| App on Persistence (store opened with corrupt-file and newer-schema handling, disclaimer in the store, UserDefaults migration, interrupted recordings closed) | written; not yet compiled for iOS |
-| Runtime tests on CI (XCUITest: disclaimer gate and relaunch, instruments from simulated GPS, offline test chart drawn; hosted unit tests) | written; first run pending |
-| GPS tracks, waypoints, routes, GPX, settings screens | not started |
+| App on Persistence (store opened with corrupt-file and newer-schema handling, disclaimer in the store, UserDefaults migration, interrupted recordings closed) | compiles and launches in the simulator on CI |
+| Runtime tests on CI (XCUITest: disclaimer gate and relaunch, instruments from simulated GPS, offline test chart drawn; hosted unit tests) | running on CI; first run found the map style never reported loaded (fixed, awaiting re-run) |
+| GPS tracks, waypoints, routes, GPX, settings screens | logic in AppServices built and tested; screens and map layers not written yet |
 | Auto-route screen | not started |
 
 Known gaps in the app so far: chart downloads run in the foreground only; the app installs NOAA's dated 2024 packages until our own are published; bundle id, name and icon are placeholders.

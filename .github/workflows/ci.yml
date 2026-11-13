@@ -375,6 +375,7 @@ jobs:
           set -o pipefail
           read -r -a signing <<<"$SIGNING"
           rm -rf "$RUNNER_TEMP/GulfNavTests.xcresult"
+          # Everything goes to files (uploaded as artifacts); stdout gets only the compact summary at the end.
           xcodebuild test-without-building -project GulfNav.xcodeproj -scheme GulfNav \
             -destination "id=$UDID" \
             -derivedDataPath "$RUNNER_TEMP/TestDerivedData" \
@@ -382,34 +383,30 @@ jobs:
             -parallel-testing-enabled NO \
             "${signing[@]}" > "$RUNNER_TEMP/test-run.log" 2>&1
           status=$?
-          echo "xcodebuild test-without-building exit status: $status"
-          echo "----- test cases -----"
-          grep -E "^Test Case '.*' (passed|failed|skipped)" "$RUNNER_TEMP/test-run.log" || echo "(no test case lines)"
-          echo "----- failures and errors (3 lines of context) -----"
-          grep -n -B 3 -A 3 -E 'error:|: failed|XCTAssert|Timed out|crash|Crash|Failed to|failed to' "$RUNNER_TEMP/test-run.log" | head -n 400 || echo "(none)"
-          echo "----- last 40 log lines -----"
-          tail -n 40 "$RUNNER_TEMP/test-run.log"
-          echo "----- result bundle summary -----"
-          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/GulfNavTests.xcresult" --compact 2>&1 | head -c 20000 || true
-          echo
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/GulfNavTests.xcresult" --compact \
+            > "$RUNNER_TEMP/test-results-summary.json" 2>&1 || true
+          bash Scripts/test-summary.sh "$RUNNER_TEMP/test-run.log" "$status" > "$RUNNER_TEMP/test-summary.txt"
+          echo "Full log, result bundle summary and simulator log are in the artifacts."
+          cat "$RUNNER_TEMP/test-summary.txt"
           exit $status
       - name: Collect screenshots and simulator logs
         if: ${{ always() && steps.sim.outputs.udid != '' }}
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
+          # Output stays in files; only counts are printed.
           mkdir -p "$RUNNER_TEMP/screenshots" "$RUNNER_TEMP/sim-logs"
           if [ -d "$RUNNER_TEMP/GulfNavTests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/GulfNavTests.xcresult" \
-              --output-path "$RUNNER_TEMP/screenshots" || echo "attachment export failed"
-            ls -la "$RUNNER_TEMP/screenshots" || true
+              --output-path "$RUNNER_TEMP/screenshots" > "$RUNNER_TEMP/sim-logs/attachments-export.log" 2>&1 || true
           fi
           xcrun simctl spawn "$UDID" log show --last 60m --style compact \
             --predicate 'process == "GulfNav" OR process == "GulfNavUITests-Runner"' \
-            > "$RUNNER_TEMP/sim-logs/simulator.log" 2>&1 || echo "log show failed"
-          tail -n 60 "$RUNNER_TEMP/sim-logs/simulator.log" || true
+            > "$RUNNER_TEMP/sim-logs/simulator.log" 2>&1 || true
           find "$HOME/Library/Logs/DiagnosticReports" -name '*GulfNav*' -exec cp {} "$RUNNER_TEMP/sim-logs/" \; 2>/dev/null || true
-          ls -la "$RUNNER_TEMP/sim-logs"
+          echo "screenshots/attachments: $(find "$RUNNER_TEMP/screenshots" -type f | wc -l | tr -d ' ') files"
+          echo "simulator log: $(wc -l < "$RUNNER_TEMP/sim-logs/simulator.log" | tr -d ' ') lines"
+          echo "crash reports: $(find "$RUNNER_TEMP/sim-logs" -name '*GulfNav*' | wc -l | tr -d ' ')"
       - name: Upload test logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -420,6 +417,8 @@ jobs:
             ${{ runner.temp }}/test-build.log
             ${{ runner.temp }}/test-build-adhoc.log
             ${{ runner.temp }}/test-run.log
+            ${{ runner.temp }}/test-summary.txt
+            ${{ runner.temp }}/test-results-summary.json
             ${{ runner.temp }}/sim-logs
           if-no-files-found: ignore
       - name: Upload result bundle
@@ -447,3 +446,16 @@ jobs:
             echo "| Build for testing (${{ steps.build.outputs.signing }}) | ${{ steps.build.outcome }} |"
             echo "| UI + unit tests on ${{ steps.sim.outputs.udid }} | ${{ steps.test.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Test summary (repeated as the last lines of the job)
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          if [ -f "$RUNNER_TEMP/test-summary.txt" ]; then
+            cat "$RUNNER_TEMP/test-summary.txt"
+          else
+            echo "No test summary: the job stopped before the tests ran (see the failing step above)."
+            if [ -f "$RUNNER_TEMP/test-build.log" ]; then
+              echo "--- build-for-testing errors ---"
+              grep -E "error:" "$RUNNER_TEMP/test-build.log" | cut -c1-300 | head -n 20
+            fi
+          fi

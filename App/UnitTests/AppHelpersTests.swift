@@ -30,8 +30,8 @@ final class AppHelpersTests: XCTestCase {
     }
 
     func testMapStatusValueFormat() {
-        XCTAssertEqual(MapAccessibility.statusValue(styleLoaded: true, chartLayers: 2), "style=loaded; chartLayers=2")
-        XCTAssertEqual(MapAccessibility.statusValue(styleLoaded: false, chartLayers: 0), "style=pending; chartLayers=0")
+        let value: String = MapAccessibility.initialStatusValue
+        XCTAssertTrue(value.hasPrefix("style=pending; chartLayers=0;"), value)
     }
 
     @MainActor

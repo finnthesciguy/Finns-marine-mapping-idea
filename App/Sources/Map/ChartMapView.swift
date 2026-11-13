@@ -62,9 +62,15 @@ enum MapAccessibility {
     static let mapIdentifier = "chart-map"
     static let statusIdentifier = "map.status"
 
-    /// Machine-readable map state for the UI tests: `style=loaded; chartLayers=1`.
-    static func statusValue(styleLoaded: Bool, chartLayers: Int) -> String {
-        "style=\(styleLoaded ? "loaded" : "pending"); chartLayers=\(chartLayers)"
+    /// Machine-readable map state for the UI tests (`AppServices.MapDiagnostics.statusValue`), e.g.
+    /// `style=loaded; chartLayers=1; overlayLayers=0; styleVia=attach; willStartLoading=0; ...`.
+    static func statusValue(_ diagnostics: MapDiagnostics) -> String {
+        diagnostics.statusValue
+    }
+
+    /// The value before anything has happened.
+    static var initialStatusValue: String {
+        statusValue(MapDiagnostics())
     }
 }
 
@@ -85,7 +91,7 @@ final class ChartMapContainerView: UIView {
         probe.accessibilityIdentifier = MapAccessibility.statusIdentifier
         probe.accessibilityLabel = "Chart map status"
         probe.accessibilityTraits = UIAccessibilityTraits.staticText
-        probe.accessibilityValue = MapAccessibility.statusValue(styleLoaded: false, chartLayers: 0)
+        probe.accessibilityValue = MapAccessibility.statusValue(MapDiagnostics())
         self.statusProbe = probe
         #else
         self.statusProbe = nil
@@ -112,6 +118,8 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
     private weak var statusProbe: UIView?
     private var latest: ChartMapView?
     private var styleLoaded = false
+    /// Which delegate callbacks have fired and how the style object was found (shown in `map.status`).
+    private var diagnostics = MapDiagnostics()
     private var appliedRevision = -1
     private var addedLayers: [MLNStyleLayer] = []
     private var addedSources: [MLNSource] = []
@@ -139,19 +147,41 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         super.init()
     }
 
+    /// Called right after the delegate is set. `MLNMapView(frame:styleJSON:)` parses an inline style
+    /// synchronously inside the initializer (`-setStyleJSON:` calls mbgl's `loadJSON`, which reports the
+    /// style loaded before returning), so `mapView(_:didFinishLoading:)` has already happened, with no
+    /// delegate, by the time one can be set. The style object is therefore picked up here, and again on
+    /// each update if it was still missing, rather than waiting for a callback that never comes.
     func attach(_ mapView: MLNMapView, probe: UIView?) {
         self.mapView = mapView
         self.statusProbe = probe
+        if mapView.style != nil {
+            styleBecameAvailable(via: .attach)
+        }
+        updateStatusProbe()
+    }
+
+    /// Marks the style usable; layers are (re)applied on the next `update(with:)`. Does not depend on a
+    /// frame having been rendered.
+    private func styleBecameAvailable(via source: MapDiagnostics.StyleSource) {
+        if !styleLoaded {
+            diagnostics.styleVia = source
+        }
+        styleLoaded = true
     }
 
     private func updateStatusProbe() {
-        statusProbe?.accessibilityValue = MapAccessibility.statusValue(styleLoaded: styleLoaded,
-                                                                       chartLayers: addedLayers.count)
+        diagnostics.chartLayers = addedLayers.count
+        statusProbe?.accessibilityValue = MapAccessibility.statusValue(diagnostics)
     }
 
     func update(with view: ChartMapView) {
         latest = view
         guard let mapView else { return }
+        if !styleLoaded, mapView.style != nil {
+            styleBecameAvailable(via: .update)
+            updateStatusProbe()
+        }
         applyPlanIfNeeded(view, on: mapView)
         updateMarker(view, on: mapView)
         updateCamera(view, on: mapView)
@@ -257,14 +287,64 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
     // MARK: MLNMapViewDelegate
 
     func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
-        styleLoaded = true
-        appliedRevision = -1
-        addedLayers = []
-        addedSources = []
+        diagnostics.didFinishLoadingStyle += 1
+        styleBecameAvailable(via: .delegate)
+        // A newly loaded style object has none of our layers: forget them so they are added again. If our
+        // layers are still in this style (the callback for a style already picked up at attach), keep them;
+        // adding a source with an existing identifier would raise.
+        var ourLayersPresent: Bool = false
+        if let first = addedLayers.first, style.layer(withIdentifier: first.identifier) != nil {
+            ourLayersPresent = true
+        }
+        if !ourLayersPresent {
+            appliedRevision = -1
+            addedLayers = []
+            addedSources = []
+        }
         updateStatusProbe()
         if let latest {
             update(with: latest)
         }
+    }
+
+    func mapViewWillStartLoadingMap(_ mapView: MLNMapView) {
+        diagnostics.willStartLoading += 1
+        updateStatusProbe()
+    }
+
+    func mapViewDidFinishLoadingMap(_ mapView: MLNMapView) {
+        diagnostics.didFinishLoadingMap += 1
+        if !styleLoaded, mapView.style != nil {
+            styleBecameAvailable(via: .update)
+            if let latest {
+                update(with: latest)
+            }
+        }
+        updateStatusProbe()
+    }
+
+    func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {
+        diagnostics.failure = error.localizedDescription
+        updateStatusProbe()
+    }
+
+    func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+        diagnostics.frames += 1
+        if fullyRendered { diagnostics.fullyRenderedFrames += 1 }
+        // Every frame would be wasteful; the first few and then every 30th are enough to see progress.
+        if diagnostics.frames <= 5 || diagnostics.frames % 30 == 0 {
+            updateStatusProbe()
+        }
+    }
+
+    func mapViewDidBecomeIdle(_ mapView: MLNMapView) {
+        diagnostics.idle += 1
+        updateStatusProbe()
+    }
+
+    func mapViewRendererDidError(_ mapView: MLNMapView) {
+        diagnostics.rendererErrors += 1
+        updateStatusProbe()
     }
 
     func mapView(_ mapView: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
