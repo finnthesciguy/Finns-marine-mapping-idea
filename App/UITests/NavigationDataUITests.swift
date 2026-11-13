@@ -74,14 +74,21 @@ extension GulfNavUITests {
         let arrivalsBefore: String = GulfNavUITests.statusField(app, "navArrivals") ?? "0"
         GulfNavUITests.chartMap(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).press(forDuration: 1.2)
         waitForStatus(app, "waypoints", "2")
-        waitForStatus(app, "selected", "WP 002")
+        // The new waypoint is selected. Its default number never repeats: WP 001 was renamed, so this is
+        // WP 002 (AppServices.WaypointNumbering). Read the name rather than assume it, then check it.
+        waitUntil(GulfNavUITests.stepTimeout, "the new waypoint selected, status: \(GulfNavUITests.appStatusValue(app))") {
+            let selected: String = GulfNavUITests.statusField(app, "selected") ?? "none"
+            return selected != "none" && selected != "Egmont"
+        }
+        let farName: String = GulfNavUITests.statusField(app, "selected") ?? "?"
+        XCTAssertEqual(farName, "WP 002", "waypoint numbers are not reused after a rename")
         waitForOverlay(app, "waypoints", atLeast: 2)
 
         // Go to it from the selection card: full guidance, including XTE and ETA, and the direct-to line.
         let cardGoTo: XCUIElement = app.buttons["selection.goTo"]
         XCTAssertTrue(cardGoTo.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         cardGoTo.tap()
-        waitForStatus(app, "navTarget", "WP 002")
+        waitForStatus(app, "navTarget", farName)
         let xte: XCUIElement = app.staticTexts["guidance.xte"]
         let eta: XCUIElement = app.staticTexts["guidance.eta"]
         waitUntil(GulfNavUITests.stepTimeout, "guidance values, got '\(dtw.label)' '\(brg.label)' '\(xte.label)'") {
@@ -101,7 +108,7 @@ extension GulfNavUITests {
 
         // Delete it from the list.
         app.buttons["map.waypointsButton"].tap()
-        let second: XCUIElement = app.staticTexts["waypoint.name.WP 002"]
+        let second: XCUIElement = app.staticTexts["waypoint.name.\(farName)"]
         XCTAssertTrue(second.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         second.tap()
         let delete: XCUIElement = app.buttons["waypoint.edit.delete"]

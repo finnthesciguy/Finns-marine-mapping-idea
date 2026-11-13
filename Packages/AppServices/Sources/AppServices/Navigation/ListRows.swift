@@ -126,3 +126,36 @@ public enum WaypointSymbols {
         return "mappin"
     }
 }
+
+/// Waypoint numbers that never repeat in a store: "WP 001", "WP 002", … even after a waypoint is renamed
+/// or deleted (a reused number is confusing in lists and in GPX files shared with others). The next number
+/// is kept in Persistence (`nextNumberKey`) and is never lower than one more than the highest "WP n"
+/// already present (so stores from earlier builds, or imported files, are respected).
+public enum WaypointNumbering {
+    public static let nextNumberKey = SettingKey<Int>("waypoints.nextNumber", default: 1)
+
+    /// Returns the next name and advances the stored counter. If the counter cannot be written the name
+    /// is still unique among `existing`.
+    public static func takeNextName(store: PersistenceStore, existing: [String]) async -> String {
+        let stored: Int = (try? await store.setting(nextNumberKey)) ?? 1
+        let fromNames: Int = highestNumber(in: existing) + 1
+        let number: Int = max(stored, fromNames, 1)
+        try? await store.setSetting(nextNumberKey, to: number + 1)
+        return name(for: number)
+    }
+
+    public static func name(for number: Int) -> String {
+        let digits: String = String(number)
+        return "WP " + String(repeating: "0", count: max(0, 3 - digits.count)) + digits
+    }
+
+    static func highestNumber(in names: [String]) -> Int {
+        var highest: Int = 0
+        for name in names {
+            let trimmed: String = name.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("WP ") else { continue }
+            if let n = Int(trimmed.dropFirst(3)) { highest = max(highest, n) }
+        }
+        return highest
+    }
+}

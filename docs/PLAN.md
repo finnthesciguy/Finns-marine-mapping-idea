@@ -217,10 +217,10 @@ RoutingKit (the on-device engine), what is proven and what is open:
 
 | Piece | Status |
 |---|---|
-| `AppServices` (location, chart downloads, display helpers, launch switches, store opening and recovery; navigation session, track recorder, map GeoJSON, GPX import presentation, settings, unit formatting) | built; 97 tests pass on Linux (8 opt-in HTTP tests skipped), iOS build and macOS tests green on CI before the latest additions |
+| `AppServices` (location, chart downloads, display helpers, launch switches, store opening and recovery; navigation session, track recorder, map GeoJSON, GPX import presentation, settings, unit formatting) | built; 98 tests pass on Linux (8 opt-in HTTP tests skipped), iOS build and macOS tests green on CI before the latest additions |
 | App skeleton (`App/`): disclaimer, offline chart map, charts screen | runs in the simulator on CI; UI tests pass (disclaimer gate and relaunch, instruments from simulated GPS, offline test chart drawn) |
 | App on Persistence (store opened with corrupt-file and newer-schema handling, disclaimer in the store, UserDefaults migration, interrupted recordings resumed or closed) | runs on CI |
-| Waypoints, manual routes (create on the chart, follow with leg advance), tracks (record, background mode, relaunch recovery), GPX import/export, settings, chart overlays | compiles on CI; route following, tracks and GPX UI tests pass; fixes for the waypoint, route-drawing and settings tests awaiting re-run |
+| Waypoints, manual routes (create on the chart, follow with leg advance), tracks (record, background mode, relaunch recovery), GPX import/export, settings, chart overlays | compiles on CI; 13 of 14 UI tests pass; fix for the waypoints test awaiting re-run |
 | Auto-route screen | not started; the route model and map layers already carry per-leg grades and the `AutoRouteInfo` summary |
 
 Known gaps in the app so far: chart downloads run in the foreground only; the app installs NOAA's dated 2024 packages until our own are published; bundle id, name and icon are placeholders; background recording is untested on a device; no text labels on the chart (no offline glyphs).

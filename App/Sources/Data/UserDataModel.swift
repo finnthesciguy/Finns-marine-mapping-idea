@@ -90,10 +90,11 @@ final class UserDataModel {
         }
     }
 
-    /// A new waypoint at `coordinate` with the next free "WP nnn" name.
+    /// A new waypoint at `coordinate` named with the next "WP nnn" number, which never repeats in this
+    /// store (`WaypointNumbering`), even after a rename or delete.
     @discardableResult
     func addWaypoint(at coordinate: Coordinate) async -> Waypoint? {
-        let name: String = DefaultNames.nextWaypointName(existing: waypoints.map(\.name))
+        let name: String = await WaypointNumbering.takeNextName(store: store, existing: waypoints.map(\.name))
         return await save(Waypoint(name: name, coordinate: coordinate))
     }
 

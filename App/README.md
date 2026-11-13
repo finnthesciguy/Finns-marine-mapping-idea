@@ -30,7 +30,8 @@ What the app does so far:
   A recording interrupted by termination less than two hours ago is resumed at startup (with a new segment,
   so the gap is not counted), older ones are closed (`RecordingRecovery`); a banner says which.
 - **Waypoints** (`Sources/Waypoints`, map button `map.waypointsButton`): drop at the boat (`map.dropWaypoint`
-  or the list) or by long-pressing the chart; list sorted by distance from the boat with bearing; edit name,
+  or the list) or by long-pressing the chart, named "WP 001", "WP 002", … with numbers that never repeat in
+  the store even after a rename or delete (`AppServices.WaypointNumbering`, counter kept in Persistence); list sorted by distance from the boat with bearing; edit name,
   symbol (GPX `<sym>` names) and notes; delete; tap a waypoint on the chart to select it (card with range and
   bearing, Go to, Edit). **Go to** starts direct-to navigation (`AppServices.NavigationSession` on NavCore's
   `RouteNavigator`): the guidance panel shows bearing, distance, cross-track error, time to go and ETA, a

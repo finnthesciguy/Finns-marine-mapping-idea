@@ -665,3 +665,23 @@ final class DirectToRearmTests: XCTestCase {
         XCTAssertEqual(session.guidance?.arrived, true)
     }
 }
+
+final class WaypointNumberingTests: XCTestCase {
+    func testNumbersNeverRepeatAfterRenameOrDelete() async throws {
+        let store = try PersistenceStore(inMemoryWith: .init())
+        let first = await WaypointNumbering.takeNextName(store: store, existing: [])
+        XCTAssertEqual(first, "WP 001")
+        // WP 001 renamed to "Egmont": the next one is still WP 002, not WP 001 again.
+        let second = await WaypointNumbering.takeNextName(store: store, existing: ["Egmont"])
+        XCTAssertEqual(second, "WP 002")
+        // Everything deleted: still counting on.
+        let third = await WaypointNumbering.takeNextName(store: store, existing: [])
+        XCTAssertEqual(third, "WP 003")
+        // An imported "WP 041" moves the counter past it.
+        let fourth = await WaypointNumbering.takeNextName(store: store, existing: ["WP 041", "Other"])
+        XCTAssertEqual(fourth, "WP 042")
+        let stored = try await store.setting(WaypointNumbering.nextNumberKey)
+        XCTAssertEqual(stored, 43)
+        XCTAssertEqual(WaypointNumbering.name(for: 1234), "WP 1234")
+    }
+}
