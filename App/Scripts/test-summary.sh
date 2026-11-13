@@ -24,7 +24,7 @@ cases=$(grep -E "^Test [Cc]ase '.*' (passed|failed|skipped)" "$log" \
   | awk '!seen[$0]++')
 if [ -n "$cases" ]; then
   echo "--- test cases ($(printf '%s\n' "$cases" | grep -c '^PASS') passed, $(printf '%s\n' "$cases" | grep -c '^FAIL') failed) ---"
-  printf '%s\n' "$cases" | head -n 30
+  printf '%s\n' "$cases" | head -n 24
 else
   echo "--- no test case results in the log ---"
 fi
@@ -32,16 +32,21 @@ fi
 # /path/GulfNavUITests.swift:83: error: -[GulfNavUITests.GulfNavUITests testX] : XCTAssertTrue failed - message
 failures=$(grep -E "^[^ ].*\.swift:[0-9]+: error: " "$log" \
   | sed -E 's#^.*/([^/]+\.swift:[0-9]+): error: (-\[[^]]*\] : )?#\1: #' \
-  | cut -c1-400 | awk '!seen[$0]++' | head -n 15)
+  | cut -c1-400 | awk '!seen[$0]++' | head -n 10)
 if [ -n "$failures" ]; then
   echo "--- failures ---"
   printf '%s\n' "$failures"
 fi
 
-statuses=$(grep -o "GULFNAV-MAP-STATUS .*" "$log" | cut -c1-500 | tail -n 4)
+statuses=$(grep -o "GULFNAV-MAP-STATUS .*" "$log" | cut -c1-420 | tail -n 4)
 if [ -n "$statuses" ]; then
   echo "--- last map.status values ---"
   printf '%s\n' "$statuses"
+fi
+appstatuses=$(grep -o "GULFNAV-APP-STATUS .*" "$log" | cut -c1-420 | tail -n 4)
+if [ -n "$appstatuses" ]; then
+  echo "--- last app.status values ---"
+  printf '%s\n' "$appstatuses"
 fi
 
 if [ -z "$cases" ]; then

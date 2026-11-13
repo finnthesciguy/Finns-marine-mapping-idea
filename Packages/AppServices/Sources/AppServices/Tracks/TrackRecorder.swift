@@ -88,6 +88,8 @@ public actor TrackRecorder {
         public var name: String?
         /// Points stored plus points waiting to be written.
         public var pointCount: Int
+        /// Points already written to the store.
+        public var storedPointCount: Int
         /// Distance of the stored track plus the unsaved points, metres.
         public var distance: Double
         public var startDate: Date?
@@ -96,7 +98,7 @@ public actor TrackRecorder {
         /// The last write error, if the latest write failed.
         public var lastError: String?
 
-        public static let idle = Snapshot(state: .idle, trackID: nil, name: nil, pointCount: 0, distance: 0,
+        public static let idle = Snapshot(state: .idle, trackID: nil, name: nil, pointCount: 0, storedPointCount: 0, distance: 0,
                                           startDate: nil, segments: [], lastError: nil)
     }
 
@@ -131,6 +133,7 @@ public actor TrackRecorder {
         let stored: Int = track?.statistics.pointCount ?? 0
         let storedDistance: Double = track?.statistics.distance.meters ?? 0
         return Snapshot(state: state, trackID: track?.id, name: track?.name, pointCount: stored + pending.count,
+                        storedPointCount: stored,
                         distance: storedDistance + pendingDistances.reduce(0, +),
                         startDate: track?.startDate ?? track?.createdAt, segments: segments, lastError: lastError)
     }

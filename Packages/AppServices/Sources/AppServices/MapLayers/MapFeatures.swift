@@ -268,3 +268,61 @@ public enum TrackDetailPolicy {
         return Double(Int(max(0, min(zoom, 22)).rounded(.down)))
     }
 }
+
+/// Everything the map's overlay sources show, as GeoJSON per source plus feature counts. Equatable, so the
+/// map view only replaces a source's shape when its data changed.
+public struct MapOverlays: Sendable, Equatable {
+    public struct Counts: Sendable, Equatable {
+        public var waypoints: Int = 0
+        public var routeLegs: Int = 0
+        public var routePoints: Int = 0
+        public var tracks: Int = 0
+        public var direct: Int = 0
+
+        public init() {}
+    }
+
+    public var waypoints: Data
+    public var routeLegs: Data
+    public var routePoints: Data
+    public var tracks: Data
+    public var direct: Data
+    public var counts: Counts
+
+    public static let empty: MapOverlays = MapOverlays(waypoints: GeoJSON.featureCollection([]),
+                                                       routeLegs: GeoJSON.featureCollection([]),
+                                                       routePoints: GeoJSON.featureCollection([]),
+                                                       tracks: GeoJSON.featureCollection([]),
+                                                       direct: GeoJSON.featureCollection([]), counts: Counts())
+
+    /// `waypoints:2,routeLegs:2,routePoints:3,tracks:1,direct:0` (reported in the map's status).
+    public var summary: String {
+        "waypoints:\(counts.waypoints),routeLegs:\(counts.routeLegs),routePoints:\(counts.routePoints),"
+            + "tracks:\(counts.tracks),direct:\(counts.direct)"
+    }
+
+    /// - Parameters:
+    ///   - routes: routes to draw (the one being followed, the one being edited, and any the user chose to show).
+    ///   - nextPointIndex: index in the followed route of the point being steered to.
+    ///   - tracks: saved tracks shown plus the live recording.
+    public static func make(waypoints: [Waypoint], selectedWaypoint: UUID?, targetWaypoint: UUID?,
+                            routes: [RouteDisplay], activeRouteID: UUID?, nextPointIndex: Int?, editingRouteID: UUID?,
+                            tracks: [TrackLine], directLine: [Coordinate]?) -> MapOverlays {
+        var counts = Counts()
+        counts.waypoints = waypoints.filter { $0.coordinate.isValid }.count
+        counts.routeLegs = routes.reduce(0) { $0 + $1.legs.count }
+        counts.routePoints = routes.reduce(0) { $0 + $1.points.filter { $0.coordinate.isValid }.count }
+        counts.tracks = tracks.filter { line in line.segments.contains { $0.count >= 2 } }.count
+        counts.direct = (directLine?.count == 2) ? 1 : 0
+        // Leg i runs from point i to point i + 1, so steering to point n means leg n - 1 is active.
+        let activeLeg: Int? = nextPointIndex.map { $0 - 1 }
+        return MapOverlays(
+            waypoints: MapFeatures.waypoints(waypoints, selected: selectedWaypoint, target: targetWaypoint),
+            routeLegs: MapFeatures.routeLegs(routes, activeRouteID: activeRouteID, activeLeg: activeLeg,
+                                             editingRouteID: editingRouteID),
+            routePoints: MapFeatures.routePoints(routes, activeRouteID: activeRouteID, nextPointIndex: nextPointIndex),
+            tracks: MapFeatures.tracks(tracks),
+            direct: MapFeatures.directTo(directLine),
+            counts: counts)
+    }
+}

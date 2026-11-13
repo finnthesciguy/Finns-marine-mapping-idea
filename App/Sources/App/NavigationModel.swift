@@ -13,21 +13,34 @@ final class NavigationModel {
     private(set) var isSimulating: Bool = false
 
     private let makeDeviceService: @MainActor () -> any LocationService
+    private let simulatedSpeedKnots: Double
+    /// Called with every fix after the readout is updated (navigation session, track recorder).
+    @ObservationIgnored var onFix: (@MainActor (Fix) -> Void)?
+    /// A track recording wants background location (see `LocationPolicy`).
+    @ObservationIgnored private var recording = false
     @ObservationIgnored private var service: (any LocationService)?
     @ObservationIgnored private var streamTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var running = false
 
     /// - Parameter startSimulating: begin with the simulated track instead of the device (UI tests, simulator).
-    init(makeDeviceService: @escaping @MainActor () -> any LocationService, startSimulating: Bool = false) {
+    init(makeDeviceService: @escaping @MainActor () -> any LocationService, startSimulating: Bool = false,
+         simulatedSpeedKnots: Double = 6) {
         self.makeDeviceService = makeDeviceService
         self.isSimulating = startSimulating
+        self.simulatedSpeedKnots = simulatedSpeedKnots
+    }
+
+    /// Turns the background-recording configuration on or off on the current (and any later) service.
+    func setRecording(_ on: Bool) {
+        recording = on
+        service?.setRecording(on)
     }
 
     /// Starts location updates after the disclaimer has been accepted (asks for when-in-use permission).
     func start() {
         guard !running else { return }
         running = true
-        let next: any LocationService = isSimulating ? NavigationModel.makeSimulatedService() : makeDeviceService()
+        let next: any LocationService = isSimulating ? makeSimulatedService() : makeDeviceService()
         attach(next)
     }
 
@@ -36,12 +49,12 @@ final class NavigationModel {
         guard simulate != isSimulating else { return }
         isSimulating = simulate
         guard running else { return }
-        let next: any LocationService = simulate ? NavigationModel.makeSimulatedService() : makeDeviceService()
+        let next: any LocationService = simulate ? makeSimulatedService() : makeDeviceService()
         attach(next)
     }
 
-    private static func makeSimulatedService() -> any LocationService {
-        SimulatedLocationService(track: SimulatedTrack.tampaBay(),
+    private func makeSimulatedService() -> any LocationService {
+        SimulatedLocationService(track: SimulatedTrack.tampaBay(speedKnots: simulatedSpeedKnots),
                                  options: SimulatedLocationService.Options(interval: .seconds(1), loops: true,
                                                                            restampsToNow: true))
     }
@@ -59,7 +72,9 @@ final class NavigationModel {
 
         let fixTask = Task { [weak self] in
             for await fix in fixes {
-                self?.readout.update(with: fix)
+                guard let self else { return }
+                self.readout.update(with: fix)
+                self.onFix?(fix)
             }
         }
         let headingTask = Task { [weak self] in
@@ -75,6 +90,7 @@ final class NavigationModel {
         streamTasks = [fixTask, headingTask, authorizationTask]
 
         authorization = next.authorization
+        next.setRecording(recording)
         next.requestWhenInUseAuthorization()
         next.startUpdates()
     }

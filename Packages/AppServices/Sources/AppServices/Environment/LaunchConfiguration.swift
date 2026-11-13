@@ -9,11 +9,15 @@ import Foundation
 /// | `GULFNAV_RESET_DATA=1` | delete that directory first (clean state); only together with `GULFNAV_DATA_ROOT` |
 /// | `GULFNAV_SIMULATE_GPS=1` | start with the simulated Tampa Bay track instead of CoreLocation |
 /// | `GULFNAV_PREINSTALL_FIXTURE_CHART=1` | install the bundled 16 KB test chart (`FixtureChart`) at startup, no network |
+/// | `GULFNAV_SIM_SPEED_KNOTS=<n>` | speed of the simulated track (default 6 kn; UI tests use a high speed to reach route points quickly) |
+/// | `GULFNAV_TRACK_BATCH_SIZE=<n>` | track points per database write (default 10; UI tests use 2 so points are stored quickly) |
 public struct LaunchConfiguration: Sendable, Equatable {
     public static let dataRootKey = "GULFNAV_DATA_ROOT"
     public static let resetDataKey = "GULFNAV_RESET_DATA"
     public static let simulateGPSKey = "GULFNAV_SIMULATE_GPS"
     public static let preinstallFixtureChartKey = "GULFNAV_PREINSTALL_FIXTURE_CHART"
+    public static let simulatedSpeedKey = "GULFNAV_SIM_SPEED_KNOTS"
+    public static let trackBatchSizeKey = "GULFNAV_TRACK_BATCH_SIZE"
     /// Directory under the temporary directory that holds isolated data roots.
     public static let testDataDirectoryName = "GulfNavTestData"
 
@@ -22,13 +26,19 @@ public struct LaunchConfiguration: Sendable, Equatable {
     public var resetData: Bool
     public var simulateGPS: Bool
     public var preinstallFixtureChart: Bool
+    /// Simulated track speed in knots (1...1000), nil for the default.
+    public var simulatedSpeedKnots: Double?
+    /// Track points per write (1...100), nil for the default.
+    public var trackBatchSize: Int?
 
     public init(dataRootName: String? = nil, resetData: Bool = false, simulateGPS: Bool = false,
-                preinstallFixtureChart: Bool = false) {
+                preinstallFixtureChart: Bool = false, simulatedSpeedKnots: Double? = nil, trackBatchSize: Int? = nil) {
         self.dataRootName = dataRootName.flatMap(LaunchConfiguration.sanitize)
         self.resetData = resetData && self.dataRootName != nil
         self.simulateGPS = simulateGPS
         self.preinstallFixtureChart = preinstallFixtureChart
+        self.simulatedSpeedKnots = simulatedSpeedKnots.flatMap { $0.isFinite && $0 >= 1 && $0 <= 1000 ? $0 : nil }
+        self.trackBatchSize = trackBatchSize.flatMap { $0 >= 1 && $0 <= 100 ? $0 : nil }
     }
 
     /// Parses a process environment (`ProcessInfo.processInfo.environment`).
@@ -36,7 +46,9 @@ public struct LaunchConfiguration: Sendable, Equatable {
         self.init(dataRootName: environment[LaunchConfiguration.dataRootKey],
                   resetData: LaunchConfiguration.flag(environment[LaunchConfiguration.resetDataKey]),
                   simulateGPS: LaunchConfiguration.flag(environment[LaunchConfiguration.simulateGPSKey]),
-                  preinstallFixtureChart: LaunchConfiguration.flag(environment[LaunchConfiguration.preinstallFixtureChartKey]))
+                  preinstallFixtureChart: LaunchConfiguration.flag(environment[LaunchConfiguration.preinstallFixtureChartKey]),
+                  simulatedSpeedKnots: environment[LaunchConfiguration.simulatedSpeedKey].flatMap { Double($0) },
+                  trackBatchSize: environment[LaunchConfiguration.trackBatchSizeKey].flatMap { Int($0) })
     }
 
     /// True when data is kept in an isolated directory (UI tests): UserDefaults are then neither read nor written.

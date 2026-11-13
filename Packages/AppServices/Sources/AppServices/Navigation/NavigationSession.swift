@@ -129,6 +129,27 @@ public struct NavigationSession: Sendable, Equatable {
         begin(at: position)
     }
 
+    /// Where to join a route from `position`: the index of the point to steer to first. 0 (the route's
+    /// start) unless the boat is alongside a later leg, closer to it than to the start; then the end of
+    /// that leg, so a boat already under way on the route is not sent back to the beginning.
+    public static func bestStartIndex(points: [Coordinate], position: Coordinate?) -> Int {
+        guard let position, position.isValid, points.count >= 2 else { return 0 }
+        var bestIndex: Int = 0
+        var bestDistance: Double = Geodesy.distance(from: position, to: points[0])
+        for i in 0..<(points.count - 1) {
+            let projection = Geodesy.project(position, legStart: points[i], legEnd: points[i + 1])
+            guard projection.legLength > 0, projection.alongTrack > 0, projection.alongTrack < projection.legLength else {
+                continue
+            }
+            let offTrack: Double = abs(projection.crossTrack)
+            if offTrack < bestDistance {
+                bestDistance = offTrack
+                bestIndex = i + 1
+            }
+        }
+        return bestIndex
+    }
+
     public mutating func stop() {
         state = .idle
         targets = []

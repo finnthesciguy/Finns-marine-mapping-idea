@@ -75,8 +75,33 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSLocationWhenInUseUsageDescription: Gulf Nav shows your boat's position, speed and course on the chart. Your location stays on this device.
-        # Background modes are deliberately not declared yet (track recording in the background comes later).
+        NSLocationWhenInUseUsageDescription: Gulf Nav shows your boat's position, speed and course on the chart, and records your track when you ask it to. Your location stays on this device.
+        # Gulf Nav only asks for when-in-use permission; this string is required alongside the background mode
+        # and is shown if the user grants "Always" in Settings.
+        NSLocationAlwaysAndWhenInUseUsageDescription: While you record a track, Gulf Nav keeps recording your boat's position with the screen locked or another app open, so the track has no gaps. Recording stops when you stop it. Your location stays on this device.
+        # Background location is used only while a track is being recorded (LocationPolicy turns
+        # allowsBackgroundLocationUpdates on only then). See README.md, "Background recording".
+        UIBackgroundModes:
+          - location
+        # GPX files: "Open in Gulf Nav" from Files, Mail, AirDrop and other apps.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: GPX file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.topografix.gpx
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.topografix.gpx
+            UTTypeDescription: GPS Exchange Format (GPX)
+            UTTypeConformsTo:
+              - public.xml
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - gpx
+              public.mime-type:
+                - application/gpx+xml
+        LSSupportsOpeningDocumentsInPlace: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav

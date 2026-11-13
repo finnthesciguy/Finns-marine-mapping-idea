@@ -19,7 +19,10 @@ import UIKit
 /// `NSValue(mlnCoordinateBounds:)`, `MLNCoordinateBounds(sw:ne:)`; `MLNRasterStyleLayer(identifier:source:)`;
 /// `MLNPointAnnotation`, `MLNAnnotationView(reuseIdentifier:)`; delegate methods
 /// `mapView(_:didFinishLoading:)`, `mapView(_:viewFor:)`, `mapView(_:regionWillChangeWith:animated:)`,
-/// `mapView(_:regionIsChangingWith:)`, `mapView(_:regionDidChangeWith:animated:)`.
+/// `mapView(_:regionIsChangingWith:)`, `mapView(_:regionDidChangeWith:animated:)`; for map taps
+/// `gestureRecognizers`, `convert(_:toCoordinateFrom:)` (from `LineTapMapView.swift` in app-swift) and
+/// `convert(_:toPointTo:)` (`-convertCoordinate:toPointToView:`), `centerCoordinate`. Overlay layers: see
+/// `MapOverlayLayers`.
 struct ChartMapView: UIViewRepresentable {
     let plan: [ChartLayerPlan]
     let planRevision: Int
@@ -30,6 +33,15 @@ struct ChartMapView: UIViewRepresentable {
     let onUserPannedMap: () -> Void
     /// The layers for this revision are now in the style.
     let onPlanApplied: (Int) -> Void
+    /// Waypoints, routes, tracks and the direct-to line.
+    let overlays: MapOverlays
+    /// Waypoints a tap can select.
+    let tapTargets: [MapTapTarget]
+    /// A single tap: the coordinate and the waypoint within reach of the finger, if any.
+    let onTap: (Coordinate, UUID?) -> Void
+    let onLongPress: (Coordinate) -> Void
+    /// Zoom level and centre latitude after the camera settled.
+    let onCameraChanged: (Double, Double) -> Void
 
     func makeCoordinator() -> ChartMapCoordinator {
         ChartMapCoordinator()
@@ -49,12 +61,19 @@ struct ChartMapView: UIViewRepresentable {
         mapView.setCenter(CLLocationCoordinate2D(latitude: 27.62, longitude: -82.70), zoomLevel: 9, animated: false)
         let container = ChartMapContainerView(mapView: mapView)
         context.coordinator.attach(mapView, probe: container.statusProbe)
+        context.coordinator.installGestures(on: mapView)
         return container
     }
 
     func updateUIView(_ container: ChartMapContainerView, context: Context) {
         context.coordinator.update(with: self)
     }
+}
+
+/// A waypoint a tap can hit.
+struct MapTapTarget: Equatable {
+    var id: UUID
+    var coordinate: Coordinate
 }
 
 /// Accessibility identifiers the UI tests rely on.
@@ -123,6 +142,11 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
     private var appliedRevision = -1
     private var addedLayers: [MLNStyleLayer] = []
     private var addedSources: [MLNSource] = []
+    /// Overlay sources and layers in the current style (empty until the style is available).
+    private var overlaySources: [MapOverlayLayers.SourceID: MLNShapeSource] = [:]
+    private var overlayLayers: [MLNStyleLayer] = []
+    private var overlayStyle: ObjectIdentifier?
+    private var appliedOverlays: [MapOverlayLayers.SourceID: Data] = [:]
 
     private let marker = MLNPointAnnotation()
     private var markerOnMap = false
@@ -182,7 +206,9 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
             styleBecameAvailable(via: .update)
             updateStatusProbe()
         }
+        installOverlaysIfNeeded(on: mapView)
         applyPlanIfNeeded(view, on: mapView)
+        applyOverlays(view)
         updateMarker(view, on: mapView)
         updateCamera(view, on: mapView)
     }
@@ -200,12 +226,17 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         }
         addedLayers = []
         addedSources = []
-        // Plan order is bottom to top; addLayer appends above everything already there.
+        // Plan order is bottom to top. Charts go below the overlay layers (waypoints, routes, tracks).
+        let firstOverlay: MLNStyleLayer? = overlayLayers.first
         for entry in view.plan {
             let source: MLNRasterTileSource = ChartMapLayers.makeSource(for: entry, revision: view.planRevision)
             style.addSource(source)
             let layer: MLNRasterStyleLayer = ChartMapLayers.makeLayer(for: entry, source: source, revision: view.planRevision)
-            style.addLayer(layer)
+            if let firstOverlay {
+                style.insertLayer(layer, below: firstOverlay)
+            } else {
+                style.addLayer(layer)
+            }
             addedSources.append(source)
             addedLayers.append(layer)
         }
@@ -216,6 +247,92 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         DispatchQueue.main.async {
             callback(revision)
         }
+    }
+
+    // MARK: Overlays
+
+    /// Adds the overlay sources and layers once per style object.
+    private func installOverlaysIfNeeded(on mapView: MLNMapView) {
+        guard styleLoaded, let style = mapView.style else { return }
+        let identity = ObjectIdentifier(style)
+        if overlayStyle == identity, style.source(withIdentifier: MapOverlayLayers.SourceID.waypoints.rawValue) != nil {
+            return
+        }
+        let built: MapOverlayLayers.Built = MapOverlayLayers.build()
+        for id in MapOverlayLayers.SourceID.allCases {
+            if let source = built.sources[id], style.source(withIdentifier: id.rawValue) == nil {
+                style.addSource(source)
+            }
+        }
+        for layer in built.layers where style.layer(withIdentifier: layer.identifier) == nil {
+            style.addLayer(layer)
+        }
+        overlaySources = built.sources
+        overlayLayers = built.layers
+        overlayStyle = identity
+        appliedOverlays = [:]
+        diagnostics.overlayLayers = overlayLayers.count
+        updateStatusProbe()
+    }
+
+    /// Replaces the shape of each overlay source whose GeoJSON changed.
+    private func applyOverlays(_ view: ChartMapView) {
+        guard !overlaySources.isEmpty else { return }
+        var changed = false
+        for id in MapOverlayLayers.SourceID.allCases {
+            let data: Data = MapOverlayLayers.data(for: id, in: view.overlays)
+            guard appliedOverlays[id] != data, let source = overlaySources[id] else { continue }
+            if let failure = MapOverlayLayers.setShape(data, on: source) {
+                diagnostics.failure = failure
+            } else {
+                appliedOverlays[id] = data
+            }
+            changed = true
+        }
+        if changed {
+            diagnostics.overlayFeatures = view.overlays.summary
+            updateStatusProbe()
+        }
+    }
+
+    // MARK: Gestures
+
+    func installGestures(on mapView: MLNMapView) {
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.6
+        mapView.addGestureRecognizer(longPress)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        // Let the map's own double-tap (zoom) win, as in MapLibre's LineTapMapView example.
+        for recognizer in mapView.gestureRecognizers ?? [] where recognizer is UITapGestureRecognizer {
+            tap.require(toFail: recognizer)
+        }
+        mapView.addGestureRecognizer(tap)
+    }
+
+    @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began, let mapView, let view = latest else { return }
+        let point: CGPoint = recognizer.location(in: mapView)
+        let coordinate: CLLocationCoordinate2D = mapView.convert(point, toCoordinateFrom: mapView)
+        view.onLongPress(Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude))
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, let mapView, let view = latest else { return }
+        let point: CGPoint = recognizer.location(in: mapView)
+        let coordinate: CLLocationCoordinate2D = mapView.convert(point, toCoordinateFrom: mapView)
+        // The nearest waypoint within 30 points of the finger.
+        var hit: UUID? = nil
+        var best: CGFloat = 30
+        for target in view.tapTargets {
+            let location = CLLocationCoordinate2D(latitude: target.coordinate.latitude, longitude: target.coordinate.longitude)
+            let screen: CGPoint = mapView.convert(location, toPointTo: mapView)
+            let distance: CGFloat = hypot(screen.x - point.x, screen.y - point.y)
+            if distance < best {
+                best = distance
+                hit = target.id
+            }
+        }
+        view.onTap(Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude), hit)
     }
 
     // MARK: Marker
@@ -301,6 +418,11 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
             addedLayers = []
             addedSources = []
         }
+        if style.source(withIdentifier: MapOverlayLayers.SourceID.waypoints.rawValue) == nil {
+            overlayStyle = nil
+            overlaySources = [:]
+            overlayLayers = []
+        }
         updateStatusProbe()
         if let latest {
             update(with: latest)
@@ -368,6 +490,13 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
 
     func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) {
         updateArrow(mapDirection: mapView.direction)
+        if let callback = latest?.onCameraChanged {
+            let zoom: Double = mapView.zoomLevel
+            let latitude: Double = mapView.centerCoordinate.latitude
+            DispatchQueue.main.async {
+                callback(zoom, latitude)
+            }
+        }
     }
 }
 

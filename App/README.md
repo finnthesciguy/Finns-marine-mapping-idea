@@ -1,10 +1,11 @@
-# Gulf Nav — iOS app (first piece)
+# Gulf Nav — iOS app
 
 SwiftUI app for iPhone and iPad, iOS 17.0+. The Xcode project is generated from `project.yml` with
 [XcodeGen](https://github.com/yonaskolb/XcodeGen); no `.xcodeproj` is committed. Logic lives in the Swift
-packages under `../Packages` (NavCore, ChartKit, AppServices); this target is views and thin view models.
+packages under `../Packages` (NavCore, ChartKit, GPXKit, Persistence, AppServices); this target is views and
+thin view models.
 
-What this first piece does:
+What the app does so far:
 
 - **Disclaimer** on first launch, which must be accepted: not certified for navigation, not a substitute for
   official charts, NOAA data as-is, routes are suggestions, no NOAA endorsement (`AppServices.Disclaimer`).
@@ -26,8 +27,62 @@ What this first piece does:
   saying changes will not be kept, and the file is left untouched. The disclaimer acceptance lives in the
   store (`PersistenceAcknowledgementStore`); an acceptance stored in UserDefaults by earlier builds is copied
   in once at startup and then removed (`AcknowledgementMigration`, kept if the store is in memory).
-  Recordings interrupted by termination are closed at startup (`RecordingRecovery`; resuming comes with the
-  track recorder).
+  A recording interrupted by termination less than two hours ago is resumed at startup (with a new segment,
+  so the gap is not counted), older ones are closed (`RecordingRecovery`); a banner says which.
+- **Waypoints** (`Sources/Waypoints`, map button `map.waypointsButton`): drop at the boat (`map.dropWaypoint`
+  or the list) or by long-pressing the chart; list sorted by distance from the boat with bearing; edit name,
+  symbol (GPX `<sym>` names) and notes; delete; tap a waypoint on the chart to select it (card with range and
+  bearing, Go to, Edit). **Go to** starts direct-to navigation (`AppServices.NavigationSession` on NavCore's
+  `RouteNavigator`): the guidance panel shows bearing, distance, cross-track error, time to go and ETA, a
+  dashed line runs from the boat to the waypoint, and arrival (inside 0.05 nm) is announced.
+- **Routes** (`Sources/Routes`): "New route on the chart" then tap the chart to add points (Undo, Cancel,
+  Save in the edit bar; tapping near a waypoint uses its position and name); list with point count and
+  length; detail screen with name, points (reorder and delete with Edit), legs with length and bearing, show
+  on the chart, add points on the chart, export, delete. **Follow** joins the route at the leg the boat is on
+  (`NavigationSession.bestStartIndex`), shows the next point (`2/5`), bearing, distance, XTE, time to go and
+  ETA to the end, advances legs automatically (arrival circle or passing the perpendicular; the final point
+  needs the arrival circle) and announces each advance and the arrival; Skip and Stop. Prepared for
+  auto-routes: legs carry a `grade` (from Persistence's `AutoRouteInfo`, `none` for manual routes) drawn by
+  separate green/yellow/red line layers, the leg list shows the grade colour and reason codes, and a "Route
+  check" section shows the `AutoRouteInfo` summary (distance, shallowest depth, lowest clearance, worst
+  grade, chart data date) when present.
+- **Tracks** (`Sources/Tracks`): record/stop from the map (`map.recordButton`) or the Tracks screen, pause
+  and resume (new segment), live track line on the chart; points are filtered (interval from Settings,
+  10 m minimum movement, accuracy better than 50 m, one point every 5 minutes when stopped) and written in
+  batches of 10 or every 30 s, and on going to the background (`AppServices.TrackRecorder`). List with date,
+  distance, duration and average speed; show on the chart (geometry simplified for the zoom with
+  Persistence's `trackGeometry(_:detail:)`, reloaded per whole zoom level); rename, export, delete.
+- **GPX**: export one waypoint, route or track, or everything (Waypoints screen toolbar), through the share
+  sheet; import with the document picker (`map.importButton`) or "Open in Gulf Nav" (the app declares the
+  `com.topografix.gpx` document type). Before anything is written, the import screen shows Persistence's
+  import plan: what the file contains, which items are already saved or repeated in the file, and a
+  per-item decision (import as new / skip / replace the saved copy) with "all duplicates" shortcuts.
+- **Settings** (`Sources/Settings`): distance, speed and depth units (used throughout), map orientation at
+  launch, track recording interval, keep the screen on (default on), the disclaimer text, NOAA attribution
+  and the data date of each installed chart. Saved immediately in Persistence.
+- **Chart overlays**: MapLibre shape sources and line/circle layers for tracks, routes, route points, the
+  direct-to line and waypoints, above the chart rasters (`Sources/Map/MapOverlayLayers.swift`; GeoJSON from
+  `AppServices.MapOverlays`). No text labels on the chart: the offline style has no glyphs; names appear in
+  the selection card and lists.
+
+## Background recording and battery
+
+`UIBackgroundModes` contains `location`, and `LocationPolicy` switches `allowsBackgroundLocationUpdates`
+(and the blue background indicator) on **only while a track is being recorded**; otherwise the app stops
+receiving locations when it leaves the foreground, as before. Gulf Nav only asks for when-in-use permission:
+updates started in the foreground continue in the background with the indicator, which is the pattern Apple
+documents for navigation and fitness recording. `NSLocationAlwaysAndWhenInUseUsageDescription` is present
+because the background mode requires it and it is shown if the user grants "Always" in Settings.
+
+Battery: recording keeps GPS on at best accuracy for as long as it runs, screen on or off. Expect a few per
+cent of battery per hour on a recent iPhone with the screen off, and much more with the screen on (keep
+screen on is a setting, default on, because the chart is the point of the app underway). The recording
+interval setting changes how many points are stored, not how often GPS runs. The Tracks screen says so.
+
+App Store review: the justification to give is "Gulf Nav records the user's boat track while the user has
+started a recording, so a passage is recorded without gaps with the screen locked; background location is
+used only during a recording the user started and is stopped when they stop it; location never leaves the
+device." The privacy answers stay "location used on device only, not collected".
 
 ## Runtime tests (CI job `iOS app (Simulator UI tests)`)
 
@@ -51,14 +106,28 @@ The UI tests drive the app through launch environment variables, read by debug b
 | `GULFNAV_RESET_DATA=1` | delete that directory first (clean state) |
 | `GULFNAV_SIMULATE_GPS=1` | start on the simulated Tampa Bay track (CoreLocation never asks for permission) |
 | `GULFNAV_PREINSTALL_FIXTURE_CHART=1` | install the bundled 16 KB test chart (`FixtureChart`, AppServices' `tiny-a.mbtiles`, debug builds only) through `LocalFileChartTransport`, no network |
+| `GULFNAV_SIM_SPEED_KNOTS=<n>` | speed of the simulated track (default 6; the route-following test uses 240 to reach route points within a couple of minutes) |
+| `GULFNAV_TRACK_BATCH_SIZE=<n>` | track points per database write (default 10; the recording test uses 2) |
 
 Tests: (a) the disclaimer gates the app and is not shown again after relaunch; (b) the map style loads and
 the instrument strip shows speed, course and a DDM position from simulated GPS; (c) the pre-installed test
-chart is listed as installed with its data date, and the map reports a chart layer applied. The map state is
+chart is listed as installed with its data date, and the map reports a chart layer applied
+(`GulfNavUITests.swift`). In `NavigationDataUITests.swift`: waypoints (drop at the boat, list distance and
+bearing, rename, go to with guidance values and the direct-to line, stop, long-press drop, delete); a route
+created by tapping the chart, saved, drawn and followed; the debug GPX sample's route followed at 240 kn
+until legs advance and arrival is announced; a recording killed mid-way, resumed on relaunch, stopped,
+listed and drawn; GPX import plan, duplicate re-import and export; the speed unit setting applied and kept
+across a relaunch. App state is read from a second debug-only element, `app.status`
+(`PlotterModel.statusValue`: `waypoints=… routes=… tracks=… recording=… trackPoints=… trackStored=… nav=…
+navTarget=… navAdvances=… navArrivals=… editPoints=… selected=… shownRoutes=… shownTracks=… speedUnit=…
+lastExport=… lastImport=…`), and what reached the map from `map.status`'s
+`overlayFeatures=waypoints:N,routeLegs:N,routePoints:N,tracks:N,direct:N` (counted when the GeoJSON is set
+on the style's shape sources). The map state is
 read from a debug-only invisible accessibility element `map.status` (value from
 `AppServices.MapDiagnostics`: `style=loaded; chartLayers=N; overlayLayers=N; styleVia=…;` then counts of the
 MapLibre delegate callbacks `willStartLoading`, `didFinishLoadingMap`, `didFinishLoadingStyle`,
-`didFailLoading=<error>`, `frames`, `fullFrames`, `idle`, `rendererErrors`), not from pixels.
+`didFailLoading=<error>`, `frames`, `fullFrames`, `idle`, `rendererErrors`, then `overlayFeatures`), not
+from pixels.
 
 **Style loading.** The first CI run showed `style=pending`: `MLNMapView(frame:styleJSON:)` hands the inline
 style to mbgl's `loadJSON` inside the initializer, which (as far as the iOS sources at `ios-v7.0.0` show:
@@ -130,8 +199,11 @@ covers Tampa Bay; it is 621 MB).
   findings are warnings, so a first build is not blocked by them. Switch to `SWIFT_VERSION: "6.0"` once the
   warning list from CI is clean.
 - **Info.plist** (generated from `project.yml`): display name, `NSLocationWhenInUseUsageDescription`,
-  launch screen, orientations, `ITSAppUsesNonExemptEncryption = NO`. `UIBackgroundModes` is deliberately
-  absent; `LocationPolicy` will not set `allowsBackgroundLocationUpdates` without it.
+  `NSLocationAlwaysAndWhenInUseUsageDescription`, `UIBackgroundModes = [location]` (used only while
+  recording, see above), the GPX document type (`CFBundleDocumentTypes` with `com.topografix.gpx`, declared
+  in `UTImportedTypeDeclarations` as conforming to `public.xml`, extension `gpx`, MIME
+  `application/gpx+xml`), `LSSupportsOpeningDocumentsInPlace = NO` (opened files are copied in), launch
+  screen, orientations, `ITSAppUsesNonExemptEncryption = NO`.
 - **Privacy manifest** (`Resources/PrivacyInfo.xcprivacy`): no tracking, no collected data; required-reason
   APIs: UserDefaults `CA92.1` (read once to migrate an older disclaimer acceptance), file timestamp `C617.1` (ChartKit reads file
   attributes of its own packages), disk space `85F4.1` (shown on the Charts screen) and `E174.1` (free-space
@@ -159,7 +231,18 @@ Every API the app uses was checked against the headers and Swift examples at tag
 | `NSValue(mlnCoordinateBounds:)`, `MLNCoordinateBounds(sw:ne:)` | `platform/darwin/src/NSValue+MLNAdditions.h`, `MLNGeometry.h`; Swift pattern `NSValue(mlnSphericalPosition:)` in the doc example tests |
 | `MLNRasterStyleLayer(identifier:source:)`, `minimumZoomLevel`, `maximumZoomLevel` | `MLNStyleLayer.h`; Swift usage in `MLNDocumentationExampleTests.swift` |
 | `MLNPointAnnotation.coordinate` (settable), `MLNAnnotationView(reuseIdentifier:)`, `isEnabled` | `platform/darwin/src/MLNPointAnnotation.h`, `platform/ios/src/MLNAnnotationView.h`, `app-swift/Sources/AnnotationViewExample.swift` |
+| `MLNMapViewDelegate` (diagnostics): `mapViewWillStartLoadingMap(_:)`, `mapViewDidFinishLoadingMap(_:)`, `mapViewDidFailLoadingMap(_:withError:)`, `mapViewDidFinishRenderingFrame(_:fullyRendered:)`, `mapViewDidBecomeIdle(_:)`, `mapViewRendererDidError(_:)` | `MLNMapViewDelegate.h`; Swift names in `MLNMapViewDelegateIntegrationTests.swift` |
+| `MLNShapeSource(identifier:shape:options:)` (shape `nil` at first), `shape` (settable), `MLNShape(data:encoding:)` (throws; GeoJSON) | `platform/darwin/src/MLNShapeSource.h`, `MLNShape.h`; Swift usage `MLNShape(data: data, encoding: String.Encoding.utf8.rawValue)` and `MLNShapeSource(identifier: "circles", shape: nil, options: nil)` in `MLNDocumentationExampleTests.swift` / `MLNDocumentationGuideTests.swift`; `polylineSource?.shape = polyline` in `app-swift/Sources/AnimatedLineExample.swift` |
+| `MLNLineStyleLayer(identifier:source:)` with `lineColor`, `lineWidth`, `lineCap`, `lineJoin`, `lineOpacity`, `lineDashPattern`; `MLNCircleStyleLayer(identifier:source:)` with `circleColor`, `circleRadius`, `circleStrokeColor`, `circleStrokeWidth`; `MLNVectorStyleLayer.predicate`; `NSExpression(forConstantValue:)` | the layer headers are generated: template `platform/darwin/src/MLNStyleLayer.h.ejs`, names from the style spec camel-cased with the renames in `platform/darwin/scripts/style-spec-cocoa-conventions-v8.json` (`line-dasharray` → `lineDashPattern`); Swift usage of the initializers, colours, widths, `lineCap`, `predicate` (including `cluster == YES`) in `MLNDocumentationExampleTests.swift`, `app-swift/Sources/AnimatedLineExample.swift`, `ClusteringExample.swift` |
+| `MLNStyle.insertLayer(_:below:)`, `source(withIdentifier:)`, `layer(withIdentifier:)`; `MLNSource.identifier`, `MLNStyleLayer.identifier` | `MLNStyle.h`, `MLNSource.h`, `MLNStyleLayer.h`; `style.insertLayer(layer, below: symbolLayer)` in `MLNDocumentationGuideTests.swift`, `layer(withIdentifier:)` in `MLNDocumentationExampleTests.swift` |
+| Map gestures: `gestureRecognizers` (our tap requires MapLibre's taps to fail), `convert(_:toCoordinateFrom:)`, `convert(_:toPointTo:)` (`-convertCoordinate:toPointToView:`), `centerCoordinate` | `MLNMapView.h`; the tap pattern and `convert(tapPoint, toCoordinateFrom: nil)` from `app-swift/Sources/LineTapMapView.swift`; MapLibre's own single-tap recognizer refuses to begin unless an annotation is hit (`gestureRecognizerShouldBegin:` in `MLNMapView.mm`), so ours fires |
 | `mbtiles://` URLs | `platform/default/src/mln/storage/mbtiles_file_source.cpp`: registered in `file_source_manager.cpp`, tried before the cache and network in `main_resource_loader.cpp`; the path after `mbtiles://` is **percent-decoded** and cut at `?`; tile requests use the tile address, not the URL; the TileJSON it generates uses `<url>?file={x}/{y}/{z}.<format>` |
+
+Overlay layers, bottom to top (all above the chart rasters, which are inserted below the first overlay
+layer): saved tracks, live track, active-leg casing, route legs by grade (`none` blue, `green`, `yellow`,
+`red`), completed legs (grey), the route being edited (orange dashes), route points, the next point,
+the direct-to line (dashed), waypoints, the direct-to target, the selected waypoint (ring). Shapes are
+replaced only when their GeoJSON changed.
 
 How charts are wired: each region becomes an `MLNRasterTileSource` with the inline template
 `mbtiles:///…/chart-….mbtiles?file={x}/{y}/{z}.png` (the form MapLibre itself generates), the region's box
@@ -223,13 +306,18 @@ When the chart build service publishes `manifest.json` with real checksums:
   `UIApplicationDelegateAdaptor`; and report progress from `didWriteData`. ChartKit's `download` call is
   `async`, so the background variant must also survive the app being relaunched mid-download (re-enter
   `install` after relaunch; the partial file and resume record are already persisted).
-- No background location: `UIBackgroundModes` is not declared, so recording keeps the background pieces off.
+- Background recording has only run in the simulator with simulated GPS (CoreLocation's background
+  behaviour is untested until a device run); the battery figures above are estimates, not measurements.
+- No text labels on the chart (no glyphs offline). Bundling a glyph range (PBF) for one font would allow
+  waypoint and route-point names on the chart.
+- GPX export of everything is offered from the Waypoints screen toolbar only; a route's points are exported
+  as `<rtept>` without the auto-route metadata.
 - MapLibre keeps an open SQLite handle for every `.mbtiles` path it has read (its file source never closes
   them). The app removes the layer before ChartKit deletes or supersedes a file, so the handle is not read
   again, but the disk space of a deleted package may only be returned when the app restarts.
 - The chart-age badge shows the oldest installed region, not the one under the viewport.
-- Not handled yet: tracks, waypoints, routes, GPX, settings screen, auto-routing, manifest fetching, retina
-  (512 px) packages (the manifest has no tile-size field yet), units other than knots/degrees.
+- Not handled yet: auto-routing, boat profiles, anchor watch, manifest fetching, retina (512 px) packages
+  (the manifest has no tile-size field yet). Depth units are in Settings but no depth is shown yet.
 - `URLSessionChartTransport` integration tests (real HTTP with Range/If-Range, drops, cancellation) run only
   when `APPSERVICES_TEST_SERVER` points at `Packages/AppServices/Scripts/range_server.py`; they passed on
   Linux (FoundationNetworking) but have not run on Apple's URLSession.

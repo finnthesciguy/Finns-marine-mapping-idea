@@ -28,6 +28,9 @@ public struct MapDiagnostics: Sendable, Equatable {
     public var fullyRenderedFrames: Int = 0
     public var idle: Int = 0
     public var rendererErrors: Int = 0
+    /// Feature counts of the overlay sources as last applied (`MapOverlays.summary`), e.g.
+    /// `waypoints:2,routeLegs:2,routePoints:3,tracks:1,direct:0`.
+    public var overlayFeatures: String = "none"
 
     public init() {}
 
@@ -47,6 +50,7 @@ public struct MapDiagnostics: Sendable, Equatable {
         parts.append("fullFrames=\(fullyRenderedFrames)")
         parts.append("idle=\(idle)")
         parts.append("rendererErrors=\(rendererErrors)")
+        parts.append("overlayFeatures=\(MapDiagnostics.sanitize(overlayFeatures))")
         return parts.joined(separator: "; ")
     }
 
@@ -61,6 +65,13 @@ public struct MapDiagnostics: Sendable, Equatable {
             }
         }
         return String(out.prefix(160))
+    }
+
+    /// Reads a count from the `overlayFeatures` field (`name:N`). -1 when absent.
+    public static func overlayCount(_ name: String, in value: String) -> Int {
+        guard let range = value.range(of: name + ":") else { return -1 }
+        let digits: String = String(value[range.upperBound...].prefix(while: { $0.isNumber }))
+        return Int(digits) ?? -1
     }
 
     /// Reads one integer field back (used by tests and the UI tests' parser). -1 when absent.

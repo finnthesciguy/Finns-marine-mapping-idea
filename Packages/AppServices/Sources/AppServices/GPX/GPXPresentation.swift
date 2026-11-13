@@ -170,3 +170,45 @@ public enum GPXImportPresentation {
         return parts.dropLast().joined(separator: ", ") + " and " + (parts.last ?? "")
     }
 }
+
+extension GPXFiles {
+    /// Parses GPX bytes and plans their import against `store` (nothing is written).
+    public static func plan(data: Data, store: PersistenceStore) async throws -> GPXImportPlan {
+        let document: GPXDocument = try parse(data)
+        return try await store.planGPXImport(document)
+    }
+
+    /// Reads a file the user picked or opened in the app (security-scoped when it comes from outside the
+    /// sandbox) and plans its import.
+    public static func plan(fileAt url: URL, store: PersistenceStore) async throws -> GPXImportPlan {
+        let scoped: Bool = url.startAccessingSecurityScopedResourceIfAvailable()
+        defer { if scoped { url.stopAccessingSecurityScopedResourceIfAvailable() } }
+        let data: Data = try Data(contentsOf: url)
+        return try await plan(data: data, store: store)
+    }
+
+    /// Exports stored items to a GPX file in `directory` for the share sheet. `nil` selects all of a kind,
+    /// `[]` none (as `PersistenceStore.exportGPX`).
+    public static func export(store: PersistenceStore, waypoints: [UUID]?, routes: [UUID]?, tracks: [UUID]?,
+                              title: String, date: Date, directory: URL) async throws -> URL {
+        let document: GPXDocument = try await store.exportGPX(waypoints: waypoints, routes: routes, tracks: tracks)
+        return try writeTemporary(document, title: title, date: date, directory: directory)
+    }
+}
+
+extension URL {
+    /// `startAccessingSecurityScopedResource()` where it exists (Apple platforms); false elsewhere.
+    func startAccessingSecurityScopedResourceIfAvailable() -> Bool {
+        #if canImport(Darwin)
+        return startAccessingSecurityScopedResource()
+        #else
+        return false
+        #endif
+    }
+
+    func stopAccessingSecurityScopedResourceIfAvailable() {
+        #if canImport(Darwin)
+        stopAccessingSecurityScopedResource()
+        #endif
+    }
+}

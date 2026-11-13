@@ -534,3 +534,90 @@ final class ListRowsAndSettingsTests: XCTestCase {
         XCTAssertEqual(loaded.units, UnitPreferences(distance: .kilometers, depth: .feet, speed: .kilometersPerHour))
     }
 }
+
+final class OverlayAndLaunchAdditionsTests: XCTestCase {
+    func testBestStartIndexJoinsTheLegTheBoatIsOn() {
+        let a = Coordinate(latitude: 27.60, longitude: -82.75)
+        let b = Coordinate(latitude: 27.62, longitude: -82.75)
+        let c = Coordinate(latitude: 27.62, longitude: -82.70)
+        XCTAssertEqual(NavigationSession.bestStartIndex(points: [a, b, c], position: nil), 0)
+        XCTAssertEqual(NavigationSession.bestStartIndex(points: [a, b, c], position: Coordinate(latitude: 27.59, longitude: -82.75)), 0,
+                       "before the start: go to the start")
+        XCTAssertEqual(NavigationSession.bestStartIndex(points: [a, b, c], position: Coordinate(latitude: 27.61, longitude: -82.7501)), 1,
+                       "on the first leg: steer to its end")
+        XCTAssertEqual(NavigationSession.bestStartIndex(points: [a, b, c], position: Coordinate(latitude: 27.6201, longitude: -82.72)), 2)
+        XCTAssertEqual(NavigationSession.bestStartIndex(points: [a], position: a), 0)
+    }
+
+    func testMapOverlaysCountsAndActiveLeg() throws {
+        let route = Route(name: "R", points: [
+            RoutePoint(coordinate: Coordinate(latitude: 27.6, longitude: -82.7)),
+            RoutePoint(coordinate: Coordinate(latitude: 27.7, longitude: -82.7)),
+            RoutePoint(coordinate: Coordinate(latitude: 27.7, longitude: -82.6)),
+        ])
+        let display = RouteDisplay(route: route)
+        let w = Waypoint(name: "W", coordinate: Coordinate(latitude: 27.5, longitude: -82.5))
+        let line = [Coordinate(latitude: 27.6, longitude: -82.7), Coordinate(latitude: 27.61, longitude: -82.7)]
+        let overlays = MapOverlays.make(waypoints: [w], selectedWaypoint: nil, targetWaypoint: w.id, routes: [display],
+                                        activeRouteID: display.id, nextPointIndex: 2, editingRouteID: nil,
+                                        tracks: [TrackLine(id: UUID(), segments: [line], isLive: true)], directLine: line)
+        XCTAssertEqual(overlays.summary, "waypoints:1,routeLegs:2,routePoints:3,tracks:1,direct:1")
+        let legs = try XCTUnwrap(try JSONSerialization.jsonObject(with: overlays.routeLegs) as? [String: Any])
+        let states = (legs["features"] as! [[String: Any]]).map { ($0["properties"] as! [String: Any])["state"] as! String }
+        XCTAssertEqual(states, ["done", "active"])
+        XCTAssertEqual(MapOverlays.empty.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0")
+        XCTAssertNotEqual(overlays, MapOverlays.empty)
+
+        var d = MapDiagnostics()
+        d.overlayFeatures = overlays.summary
+        XCTAssertEqual(MapDiagnostics.overlayCount("routePoints", in: d.statusValue), 3)
+        XCTAssertEqual(MapDiagnostics.overlayCount("waypoints", in: d.statusValue), 1)
+        XCTAssertEqual(MapDiagnostics.overlayCount("tracks", in: d.statusValue), 1)
+    }
+
+    func testLaunchSpeedAndBatch() {
+        let launch = LaunchConfiguration(environment: ["GULFNAV_SIM_SPEED_KNOTS": "240", "GULFNAV_TRACK_BATCH_SIZE": "2"])
+        XCTAssertEqual(launch.simulatedSpeedKnots, 240)
+        XCTAssertEqual(launch.trackBatchSize, 2)
+        let bad = LaunchConfiguration(environment: ["GULFNAV_SIM_SPEED_KNOTS": "-3", "GULFNAV_TRACK_BATCH_SIZE": "0"])
+        XCTAssertNil(bad.simulatedSpeedKnots)
+        XCTAssertNil(bad.trackBatchSize)
+    }
+
+    func testSnapshotReportsStoredPoints() async throws {
+        let store = FakeTrackStore()
+        let recorder = TrackRecorder(store: store, filter: TrackPointFilter(minimumInterval: 1, minimumDistance: 1), batchSize: 2)
+        _ = try await recorder.start(name: "S")
+        let base = Coordinate(latitude: 27.6, longitude: -82.7)
+        for i in 0..<3 {
+            await recorder.record(Fix(coordinate: Geodesy.destination(from: base, bearing: 0, distance: Double(i) * 50),
+                                      timestamp: Date(timeIntervalSince1970: Double(i) * 10), speed: 2, course: 0,
+                                      horizontalAccuracy: 5))
+        }
+        let snap = await recorder.snapshot
+        XCTAssertEqual(snap.pointCount, 3)
+        XCTAssertEqual(snap.storedPointCount, 2)
+    }
+}
+
+final class GPXFileFlowTests: XCTestCase {
+    func testPlanFromFileAndExportAll() async throws {
+        let dir = try TempDir()
+        defer { dir.cleanup() }
+        let file = dir.url.appendingPathComponent("in.gpx")
+        try Data(GPXSamples.tampaBay.utf8).write(to: file)
+        let store = try PersistenceStore(inMemoryWith: .init())
+        let plan = try await GPXFiles.plan(fileAt: file, store: store)
+        _ = try await store.applyGPXImport(plan)
+        let url = try await GPXFiles.export(store: store, waypoints: nil, routes: [], tracks: [], title: "Waypoints",
+                                            date: Date(timeIntervalSince1970: 1_800_000_000), directory: dir.url)
+        let back = try GPXFiles.parse(try Data(contentsOf: url))
+        XCTAssertEqual(back.waypoints.count, 2)
+        XCTAssertEqual(back.routes.count, 0)
+        XCTAssertTrue(url.lastPathComponent.hasPrefix("Gulf Nav - Waypoints"))
+        do {
+            _ = try await GPXFiles.plan(data: Data("not xml".utf8), store: store)
+            XCTFail("expected a parse error")
+        } catch {}
+    }
+}

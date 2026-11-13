@@ -21,6 +21,10 @@ final class AppModel {
     let charts: ChartsModel
     let map: ChartMapModel
     let navigation: NavigationModel
+    /// Waypoints, routes, tracks, navigation and recording.
+    let plotter: PlotterModel
+    /// A GPX file opened in the app from elsewhere ("Open in…"), waiting for the map screen to plan it.
+    var pendingOpenURL: URL?
 
     @ObservationIgnored private var started = false
 
@@ -34,6 +38,18 @@ final class AppModel {
                                       manifestError: manifest.error)
         self.map = mapModel
         self.charts = chartsModel
+        let plotterModel = PlotterModel(store: environment.store,
+                                        trackBatchSize: environment.launch.trackBatchSize ?? 10)
+        self.plotter = plotterModel
+        plotterModel.currentPosition = { [weak navigation] in
+            navigation?.readout.lastFix?.coordinate
+        }
+        navigation.onFix = { [weak plotterModel, weak navigation] fix in
+            plotterModel?.handle(fix, speedOverGround: navigation?.readout.speedOverGround)
+        }
+        plotterModel.recording.onRecordingChange = { [weak navigation] recording in
+            navigation?.setRecording(recording)
+        }
         chartsModel.onInstalledChange = { [weak mapModel] regions in
             mapModel?.update(installed: regions)
         }
@@ -48,7 +64,8 @@ final class AppModel {
     static func live() -> AppModel {
         let launch: LaunchConfiguration = AppModel.launchConfiguration()
         let navigation = NavigationModel(makeDeviceService: { CoreLocationService() },
-                                         startSimulating: launch.simulateGPS)
+                                         startSimulating: launch.simulateGPS,
+                                         simulatedSpeedKnots: launch.simulatedSpeedKnots ?? 6)
         var manifest: ManifestLoader.Loaded = ManifestLoader.loadBundled()
         var transport: any ChartTransport = URLSessionChartTransport()
         if launch.preinstallFixtureChart, let fixture = FixtureChart.bundledFile(in: Bundle.main) {
@@ -90,11 +107,11 @@ final class AppModel {
         guard !started else { return }
         started = true
         await environment.migrateLegacyAcknowledgement()
-        // Track recording arrives in the next step of this build; until then interrupted recordings are
-        // closed (kept, not resumed).
-        let recovery: RecordingRecovery.Outcome = await RecordingRecovery.recover(store: environment.store, now: Date(),
-                                                                                  allowResume: false)
+        // A recording interrupted less than two hours ago is resumed (new segment); older ones are closed.
+        let recovery: RecordingRecovery.Outcome = await RecordingRecovery.recover(store: environment.store, now: Date())
         notices.append(contentsOf: recovery.notices)
+        await plotter.start(resumedRecording: recovery.resumed)
+        map.orientation = plotter.data.settings.orientationMode
         var record: DisclaimerRecord? = nil
         do {
             record = try await environment.acknowledgements.disclaimerAcknowledgement()
@@ -122,6 +139,18 @@ final class AppModel {
         } catch {
             notices.append(StartupNotice(kind: .storageFallback, message: "Test chart could not be installed: \(error)"))
         }
+    }
+
+    /// The app is going to the background: write waiting track points and the database log.
+    func enteredBackground() async {
+        await plotter.recording.flush()
+        try? await environment.store.checkpoint()
+    }
+
+    /// A GPX file was opened in the app.
+    func open(_ url: URL) {
+        guard url.pathExtension.lowercased() == GPXFiles.fileExtension || url.isFileURL else { return }
+        pendingOpenURL = url
     }
 
     func dismissNotice(_ notice: StartupNotice) {

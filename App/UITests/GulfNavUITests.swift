@@ -151,12 +151,15 @@ final class GulfNavUITests: XCTestCase {
     var currentApp: XCUIApplication? { GulfNavUITests.lastApp }
 
     @MainActor
-    static func makeApp(root: String, reset: Bool, simulateGPS: Bool = true, fixtureChart: Bool = false) -> XCUIApplication {
+    static func makeApp(root: String, reset: Bool, simulateGPS: Bool = true, fixtureChart: Bool = false,
+                        speedKnots: Int? = nil, trackBatchSize: Int? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         var environment: [String: String] = ["GULFNAV_DATA_ROOT": root]
         if reset { environment["GULFNAV_RESET_DATA"] = "1" }
         if simulateGPS { environment["GULFNAV_SIMULATE_GPS"] = "1" }
         if fixtureChart { environment["GULFNAV_PREINSTALL_FIXTURE_CHART"] = "1" }
+        if let speedKnots { environment["GULFNAV_SIM_SPEED_KNOTS"] = String(speedKnots) }
+        if let trackBatchSize { environment["GULFNAV_TRACK_BATCH_SIZE"] = String(trackBatchSize) }
         app.launchEnvironment = environment
         lastApp = app
         return app
@@ -178,6 +181,10 @@ final class GulfNavUITests: XCTestCase {
     @MainActor
     static func logMapStatus(_ app: XCUIApplication, _ label: String) {
         print("GULFNAV-MAP-STATUS [\(label)] \(value(of: mapStatus(app)))")
+        let appStatus: XCUIElement = app.descendants(matching: .any).matching(identifier: "app.status").firstMatch
+        if appStatus.exists {
+            print("GULFNAV-APP-STATUS [\(label)] \(value(of: appStatus))")
+        }
     }
 
     /// N from `... chartLayers=N`, or -1.
