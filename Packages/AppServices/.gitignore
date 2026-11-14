@@ -1,0 +1,2 @@
+# The root .gitignore excludes *.mbtiles (real chart packages); these two 16 KB test fixtures must be committed.
+!/Tests/AppServicesTests/Resources/*.mbtiles

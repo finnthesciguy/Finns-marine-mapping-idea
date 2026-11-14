@@ -1,0 +1,191 @@
+# XcodeGen spec for the iOS app. Generate the project with `xcodegen generate` in this directory
+# (see README.md); GulfNav.xcodeproj and Info.plist are generated and not committed.
+name: GulfNav
+
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Swift 5 language mode with complete strict-concurrency checking (warnings, not errors). See
+    # README.md, "Swift language mode", for why the app target is not in Swift 6 mode yet.
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  # MapLibre Native for iOS, binary distribution package (module `MapLibre`), pinned exactly.
+  MapLibre:
+    url: https://github.com/maplibre/maplibre-gl-native-distribution
+    exactVersion: 7.0.0
+  NavCore:
+    path: ../Packages/NavCore
+  ChartKit:
+    path: ../Packages/ChartKit
+  AppServices:
+    path: ../Packages/AppServices
+  Persistence:
+    path: ../Packages/Persistence
+  GPXKit:
+    path: ../Packages/GPXKit
+  # Auto-routing engine (pure Swift). Its targets are RoutingKit / RoutingKitTests, which clash with no other
+  # package's target names (SwiftPM refuses duplicate target names across a package graph).
+  RoutingKit:
+    path: ../Packages/RoutingKit
+
+targets:
+  GulfNav:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      # ChartKit's sample Gulf manifest, bundled as the region list for this first build.
+      - path: ../Packages/ChartKit/Samples/gulf-manifest.sample.json
+        buildPhase: resources
+        group: Resources
+      # The 16 KB test chart the UI tests install offline (AppServices.FixtureChart). Excluded from Release
+      # builds by EXCLUDED_SOURCE_FILE_NAMES below.
+      - path: ../Packages/AppServices/Tests/AppServicesTests/Resources/tiny-a.mbtiles
+        buildPhase: resources
+        group: TestSupport
+      # The 216 KB Sarasota routing test pack the UI tests side-load (AppServices.FixtureRoutingPack). Also
+      # excluded from Release builds by EXCLUDED_SOURCE_FILE_NAMES below.
+      - path: ../testdata/routing/sarasota.pack
+        buildPhase: resources
+        group: TestSupport
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Gulf Nav
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocationWhenInUseUsageDescription: Gulf Nav shows your boat's position, speed and course on the chart, and records your track when you ask it to. Your location stays on this device.
+        # Gulf Nav only asks for when-in-use permission; this string is required alongside the background mode
+        # and is shown if the user grants "Always" in Settings.
+        NSLocationAlwaysAndWhenInUseUsageDescription: While you record a track, Gulf Nav keeps recording your boat's position with the screen locked or another app open, so the track has no gaps. Recording stops when you stop it. Your location stays on this device.
+        # Background location is used only while a track is being recorded (LocationPolicy turns
+        # allowsBackgroundLocationUpdates on only then). See README.md, "Background recording".
+        UIBackgroundModes:
+          - location
+        # GPX files: "Open in Gulf Nav" from Files, Mail, AirDrop and other apps.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: GPX file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.topografix.gpx
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.topografix.gpx
+            UTTypeDescription: GPS Exchange Format (GPX)
+            UTTypeConformsTo:
+              - public.xml
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - gpx
+              public.mime-type:
+                - application/gpx+xml
+        LSSupportsOpeningDocumentsInPlace: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav
+        PRODUCT_NAME: GulfNav
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ENABLE_PREVIEWS: YES
+      configs:
+        Release:
+          EXCLUDED_SOURCE_FILE_NAMES: "tiny-a.mbtiles sarasota.pack"
+    dependencies:
+      - package: MapLibre
+        product: MapLibre
+      - package: NavCore
+      - package: ChartKit
+      - package: AppServices
+      - package: Persistence
+      - package: GPXKit
+      - package: RoutingKit
+
+  # Unit tests of app-target helpers, hosted in the app (TEST_HOST is set by XcodeGen from the dependency).
+  GulfNavTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UnitTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+    dependencies:
+      - target: GulfNav
+
+  # XCUITest UI tests: launch the app with LaunchConfiguration switches (isolated data directory,
+  # simulated GPS, offline test chart). No test uses the network.
+  GulfNavUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TEST_TARGET_NAME: GulfNav
+    dependencies:
+      - target: GulfNav
+
+schemes:
+  GulfNav:
+    build:
+      targets:
+        GulfNav: all
+        GulfNavTests: [test]
+        GulfNavUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      # On failure Xcode keeps automatic screenshots; for passing tests only the ones the tests attach.
+      captureScreenshotsAutomatically: true
+      deleteScreenshotsWhenEachTestSucceeds: true
+      preferredScreenCaptureFormat: screenshots
+      targets:
+        - name: GulfNavTests
+        - name: GulfNavUITests
+    archive:
+      config: Release

@@ -1,0 +1,111 @@
+# Routing-pack build: NOAA ENC cells + USACE NCF -> one routing pack per chart region
+# (pipeline/routing, docs/routing-build.md). Manual trigger only. The packs are uploaded
+# as workflow artifacts for review; nothing is published (no release, no manifest upload).
+name: routing-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: Region pack to build (all = the five Gulf regions)
+        type: choice
+        default: all
+        options: [all, ncds_10, ncds_11, ncds_12, ncds_13, ncds_14, pilot]
+      reference_gate:
+        description: Fail the run if a reference route touches source obstacles or passes under a fixed object below the air draft
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: routing-build   # one build at a time: they share NOAA's and USACE's goodwill
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.13"
+  ENC_ROUTING_WORK: ${{ github.workspace }}/routing-work
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    # A cold build of all five regions is about 15-25 minutes on 4 cores (docs/routing-build.md);
+    # the limit leaves room for a slow NOAA or NCF server.
+    timeout-minutes: 120
+    env:
+      REGION: ${{ inputs.region || 'all' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pipeline/*/pyproject.toml
+
+      - name: Install pipeline/catalog and pipeline/routing
+        run: python -m pip install ./pipeline/catalog ./pipeline/routing
+
+      # Downloads, extractions, merged cells, NCF blocks and built tiles are content-keyed caches:
+      # restoring them makes an unchanged catalog a no-op and a changed cell rebuild only its tiles.
+      - name: Restore build caches
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            routing-work/cache
+            routing-work/extract
+            routing-work/merge
+            routing-work/ncf
+            routing-work/mask
+            routing-work/tiles
+            routing-work/snapshots
+          key: routing-work-${{ github.run_id }}
+          restore-keys: routing-work-
+
+      - name: Build
+        working-directory: pipeline/routing
+        run: python -W ignore -m enc_routing build --region "$REGION" 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Save build caches
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            routing-work/cache
+            routing-work/extract
+            routing-work/merge
+            routing-work/ncf
+            routing-work/mask
+            routing-work/tiles
+            routing-work/snapshots
+          key: routing-work-${{ github.run_id }}
+
+      - name: Validate packs (file format and topology)
+        working-directory: pipeline/routing
+        run: python -W ignore -m enc_routing validate --region "$REGION" > "$RUNNER_TEMP/validate.json"
+
+      - name: Reference routes (release gate)
+        working-directory: pipeline/routing
+        run: |
+          GATE=$([ "${{ inputs.reference_gate }}" = false ] && echo "" || echo --gate)
+          python -W ignore -m enc_routing reference --region "$REGION" $GATE | tee "$RUNNER_TEMP/reference.log"
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p out
+          cp "$RUNNER_TEMP"/*.log "$RUNNER_TEMP"/*.json out/ 2>/dev/null || true
+          for d in routing-work/regions/*/; do
+            r=$(basename "$d")
+            mkdir -p "out/$r"
+            cp "$d"/routing-*.pack "$d"/build.json "$d"/routes-summary.json "$d"/reference.vectors.json "out/$r/" 2>/dev/null || true
+          done
+          ls -lR out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: routing-packs-${{ env.REGION }}-${{ github.run_number }}
+          path: out
+          retention-days: 30

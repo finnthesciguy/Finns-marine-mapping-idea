@@ -1,0 +1,215 @@
+"""Reference routes for the five Gulf routing regions (Wave 4).
+
+Every endpoint is a named ENC feature (a light, daybeacon, buoy or harbour
+facility), taken from the merged chart data of the 2026-11-12 catalog: the
+name, the S-57 class and the feature's position (its point, or a point on its
+surface) are written down here, nothing is a guessed coordinate. The router
+snaps an endpoint to the nearest passable water within 750 m, so an endpoint
+on a beacon pile or a breakwater light is fine.
+
+Each route runs with the default boat (4.5 ft draft + 1.5 ft margin, 20 ft
+air draft) in three modes (assess.MODES): strict (charted depth only),
+maintained (USACE maintained depth allowed) and relaxed (maintained depth and
+unknown overhead clearance). Routes marked "inside" also avoid the open Gulf.
+"""
+from __future__ import annotations
+
+BOAT = dict(draft_ft=4.5, margin_ft=1.5, air_draft_ft=20.0)
+
+# name -> (S-57 class, lon, lat), as found in the ENC
+P = {
+    # ---- Florida: Tampa Bay to the Keys (ncds_10)
+    "Key West Bight Channel Light 2": ("BCNLAT", -81.80568, 24.56276),
+    "Boot Key Channel Daybeacon 1": ("BCNLAT", -81.11313, 24.69006),
+    "Naples Bay Channel Daybeacon 26": ("BCNLAT", -81.78866, 26.11589),
+    "Matanzas Harbor Channel Daybeacon 2": ("BCNLAT", -81.95199, 26.45608),
+    "Big Marco Pass - Gordon Pass Daybeacon 17": ("BCNLAT", -81.73897, 26.00691),
+    "Fort Myers Yacht Basin Breakwater West Light": ("BCNSPP", -81.87137, 26.64750),
+    "Boca Grande Yacht Basin Channel Daybeacon 2": ("BCNLAT", -82.25263, 26.74878),
+    "Flamingo Channel Light 15": ("BCNLAT", -80.92405, 25.14002),
+    "Dry Tortugas Southeast Channel Daybeacon 4": ("BCNLAT", -82.85474, 24.64499),
+    "Snake Creek Daybeacon 1": ("BCNLAT", -80.58118, 24.94111),
+    "Molasses Reef Marina Channel Daybeacon 3": ("BCNLAT", -80.44307, 25.07501),
+    "Indian Key Pass Daybeacon 13": ("BCNLAT", -81.42667, 25.82825),
+    "Tampa Bay Lighted Buoy T": ("BOYSAW", -83.01182, 27.58854),
+    "Key West Entrance Lighted Whistle Buoy KW": ("BOYSAW", -81.79999, 24.45717),
+    "Clearwater Harbor Daybeacon 13": ("BCNLAT", -82.80961, 27.96016),
+    "Anclote Anchorage North Entrance Light 7": ("BCNLAT", -82.81894, 28.19389),
+    "Gulfport Channel Daybeacon 3": ("BCNLAT", -82.71842, 27.71911),
+    "Venice Inlet - Siesta Key Daybeacon 19": ("BCNLAT", -82.47475, 27.14681),
+    # ---- Florida Big Bend to Mississippi (ncds_11)
+    "Cedar Keys Main Channel Daybeacon 22": ("BCNLAT", -83.03815, 29.11494),
+    "Steinhatchee River Daybeacon 14": ("BCNLAT", -83.42866, 29.66220),
+    "Carrabelle River Daybeacon 15": ("BCNLAT", -84.66983, 29.85192),
+    "Apalachicola Bay Daybeacon 66": ("BCNLAT", -84.93886, 29.67194),
+    "Saint Andrew Bay Entrance Lighted Buoy SA": ("BOYSAW", -85.77382, 30.09159),
+    "Old East Pass Harbor Channel Light 13": ("BCNLAT", -86.49140, 30.38950),
+    "Pensacola Mobile Sherman Cove Marina Daybeacon 1": ("BCNLAT", -87.32723, 30.33113),
+    "Homeport Marina": ("SMCFAC", -87.68464, 30.27977),
+    "Mobile Entrance Lighted Buoy M": ("BOYSAW", -88.06867, 30.12527),
+    "Mobile Channel Light 63": ("BCNLAT", -88.02527, 30.53902),
+    "Mobile Channel Light 41": ("BCNLAT", -88.02064, 30.39296),
+    "Back Bay of Biloxi Daybeacon 10": ("BCNLAT", -88.88359, 30.41784),
+    "Pascagoula Channel Light 43": ("BCNLAT", -88.53946, 30.31214),
+    "Gulfport Harbor Light House": ("BCNSPP", -89.08670, 30.35631),
+    "Pensacola Bay East Channel Inner Range Front Light": ("BCNLAT", -87.21060, 30.40297),
+    # ---- Louisiana north of 29.33 N (ncds_12)
+    "Lower Baton Rouge Anchorage Lower Daybeacon 228.5": ("BCNSPP", -91.19402, 30.42872),
+    "New Orleans Police Mooring Dolphin Light": ("BCNLAT", -90.06224, 29.94982),
+    "Head of Passes Junction Light": ("BCNLAT", -89.25155, 29.14799),
+    "Tchefuncte River Danger Breakwater Light": ("BCNSPP", -90.15733, 30.37575),
+    "South Shore Harbor Marina Light 2": ("BCNLAT", -90.01552, 30.04555),
+    "The Rigolets Light 3": ("BCNLAT", -89.68882, 30.17330),
+    "City of Bay Saint Louis Municipal Pier Light 1": ("BCNLAT", -89.32006, 30.31131),
+    "Morgan City-Port Allen Alternate Route Daybeacon 10": ("BCNLAT", -91.17922, 29.73332),
+    "Freshwater Bayou Junction Light FW": ("BCNLAT", -92.17047, 29.77480),
+    "Inner Harbor Navigation Canal Light 2": ("BCNLAT", -90.02646, 29.95725),
+    "Grand Isle Turning Basin Light 4": ("BCNLAT", -89.95969, 29.26607),
+    # ---- Louisiana south of 29.33 N (ncds_13)
+    "Southwest Pass Light 10": ("BCNLAT", -89.37323, 28.97653),
+    "Baptiste Collette Bayou Light 10": ("BCNLAT", -89.30563, 29.37832),
+    "South Pass Light 6": ("BCNLAT", -89.14075, 28.99526),
+    "Belle Pass Entrance Light 8": ("BCNLAT", -90.22407, 29.09097),
+    "Cat Island Pass Buoy 13": ("BOYLAT", -90.58568, 29.07573),
+    "Atchafalaya Bay Light 11": ("BCNLAT", -91.57367, 29.46602),
+    "Houma Navigation Canal Floodgate Light 1": ("BCNLAT", -90.72956, 29.32828),
+    "Barataria Waterway Daybeacon 23": ("BCNLAT", -89.98618, 29.37604),
+    # ---- Texas and SW Louisiana (ncds_14)
+    "Galveston Bay Entrance Lighted Buoy GB": ("BOYSAW", -94.54485, 29.24565),
+    "Galveston Channel Light 2": ("BCNLAT", -94.77647, 29.33746),
+    "Clear Creek Channel Daybeacon 7": ("BCNLAT", -95.01594, 29.54837),
+    "Freeport Harbor Light 18": ("BCNLAT", -95.32357, 28.93633),
+    "Port Aransas Harbor Light 3": ("BCNLAT", -97.06183, 27.84169),
+    "Aransas - Corpus Christi Bay Cut Off Channel Light 29": ("BCNLAT", -97.14248, 27.88291),
+    "Matagorda Ship Channel Light 21": ("BCNLAT", -96.36438, 28.45343),
+    "Brazos Santiago Pass Entrance Lighted Buoy BS": ("BOYSAW", -97.08310, 26.06557),
+    "Port Mansfield Channel Daybeacon 15": ("BCNLAT", -97.33305, 26.56110),
+    "Sabine Bank Channel Lighted Buoy SB": ("BOYSAW", -93.66493, 29.41689),
+    "Port Arthur Canal Light 46": ("BCNLAT", -93.94386, 29.78203),
+    "Calcasieu Channel Lighted Buoy CC": ("BOYSAW", -93.22155, 29.33357),
+    "Calcasieu Channel Light 53": ("BCNLAT", -93.34842, 29.80262),
+    "Calcasieu Channel Light 47": ("BCNLAT", -93.34660, 29.76618),
+    "Rockport Channel Light 1": ("BCNLAT", -97.04676, 28.01466),
+    "Port Lavaca Channel Daybeacon 11": ("BCNLAT", -96.60855, 28.61536),
+}
+
+# (id, from, to, description, inside-only)
+ROUTES = {
+    "ncds_10": [
+        ("kw_marathon", "Key West Bight Channel Light 2", "Boot Key Channel Daybeacon 1",
+         "Key West Bight to Marathon (Boot Key Harbor)", False),
+        ("naples_fmb", "Naples Bay Channel Daybeacon 26", "Matanzas Harbor Channel Daybeacon 2",
+         "Naples to Fort Myers Beach (Matanzas Harbor)", False),
+        ("marco_naples", "Big Marco Pass - Gordon Pass Daybeacon 17", "Naples Bay Channel Daybeacon 26",
+         "Marco Island to Naples, inside", True),
+        ("ftmyers_bocagrande", "Fort Myers Yacht Basin Breakwater West Light", "Boca Grande Yacht Basin Channel Daybeacon 2",
+         "Fort Myers to Boca Grande via the Caloosahatchee and Pine Island Sound", False),
+        ("flamingo_marathon", "Flamingo Channel Light 15", "Boot Key Channel Daybeacon 1",
+         "Flamingo (Florida Bay) to Marathon", False),
+        ("kw_tortugas", "Key West Bight Channel Light 2", "Dry Tortugas Southeast Channel Daybeacon 4",
+         "Key West to the Dry Tortugas", False),
+        ("islamorada_keylargo", "Snake Creek Daybeacon 1", "Molasses Reef Marina Channel Daybeacon 3",
+         "Snake Creek (Islamorada) to Key Largo along Hawk Channel", False),
+        ("everglades_naples", "Indian Key Pass Daybeacon 13", "Naples Bay Channel Daybeacon 26",
+         "Indian Key Pass (Everglades City) to Naples", False),
+        ("tampa_keywest", "Tampa Bay Lighted Buoy T", "Key West Entrance Lighted Whistle Buoy KW",
+         "Tampa Bay sea buoy to the Key West sea buoy, offshore", False),
+        ("clearwater_anclote", "Clearwater Harbor Daybeacon 13", "Anclote Anchorage North Entrance Light 7",
+         "Clearwater to Anclote (past the ncds_10 / ncds_11 line)", False),
+        ("gulfport_venice", "Gulfport Channel Daybeacon 3", "Venice Inlet - Siesta Key Daybeacon 19",
+         "Gulfport (Boca Ciega Bay) to Venice", False),
+    ],
+    "ncds_11": [
+        ("anclote_cedarkey", "Anclote Anchorage North Entrance Light 7", "Cedar Keys Main Channel Daybeacon 22",
+         "Anclote to Cedar Key", False),
+        ("cedarkey_steinhatchee", "Cedar Keys Main Channel Daybeacon 22", "Steinhatchee River Daybeacon 14",
+         "Cedar Key to Steinhatchee", False),
+        ("carrabelle_apalachicola", "Carrabelle River Daybeacon 15", "Apalachicola Bay Daybeacon 66",
+         "Carrabelle to Apalachicola, inside (St. George Sound)", True),
+        ("panamacity_destin", "Saint Andrew Bay Entrance Lighted Buoy SA", "Old East Pass Harbor Channel Light 13",
+         "St. Andrew Bay entrance to Destin (East Pass)", False),
+        ("pensacola_perdido", "Pensacola Mobile Sherman Cove Marina Daybeacon 1", "Homeport Marina",
+         "Pensacola (Sherman Cove) to Orange Beach, inside (GIWW)", True),
+        ("mobile_entrance_city", "Mobile Entrance Lighted Buoy M", "Mobile Channel Light 63",
+         "Mobile Bay entrance to Mobile", False),
+        ("biloxi_pascagoula", "Back Bay of Biloxi Daybeacon 10", "Pascagoula Channel Light 43",
+         "Biloxi to Pascagoula, inside (Mississippi Sound)", True),
+        ("gulfport_mobile", "Gulfport Harbor Light House", "Mobile Channel Light 41",
+         "Gulfport to Mobile Bay (past the ncds_11 / ncds_12 line)", False),
+        ("destin_pensacola", "Old East Pass Harbor Channel Light 13", "Pensacola Bay East Channel Inner Range Front Light",
+         "Destin to Pensacola, inside (GIWW)", True),
+        ("gulfport_fl_anclote", "Gulfport Channel Daybeacon 3", "Anclote Anchorage North Entrance Light 7",
+         "Gulfport FL (Boca Ciega Bay) to Anclote (past the ncds_10 / ncds_11 line)", False),
+    ],
+    "ncds_12": [
+        ("batonrouge_neworleans", "Lower Baton Rouge Anchorage Lower Daybeacon 228.5",
+         "New Orleans Police Mooring Dolphin Light", "Mississippi River: Baton Rouge to New Orleans", False),
+        ("neworleans_headofpasses", "New Orleans Police Mooring Dolphin Light", "Head of Passes Junction Light",
+         "Mississippi River: New Orleans to Head of Passes", False),
+        ("mandeville_southshore", "Tchefuncte River Danger Breakwater Light", "South Shore Harbor Marina Light 2",
+         "Lake Pontchartrain: Madisonville to New Orleans lakefront", False),
+        ("southshore_gulfport", "South Shore Harbor Marina Light 2", "Gulfport Harbor Light House",
+         "New Orleans lakefront to Gulfport via the Rigolets", False),
+        ("rigolets_baystlouis", "The Rigolets Light 3", "City of Bay Saint Louis Municipal Pier Light 1",
+         "The Rigolets to Bay St. Louis", False),
+        ("morgancity_freshwater", "Morgan City-Port Allen Alternate Route Daybeacon 10", "Freshwater Bayou Junction Light FW",
+         "Morgan City to Freshwater Bayou (GIWW westbound), inside", True),
+        ("ihnc_lake", "Inner Harbor Navigation Canal Light 2", "South Shore Harbor Marina Light 2",
+         "Industrial Canal (river end) to Lake Pontchartrain", False),
+        ("grandisle_neworleans", "Grand Isle Turning Basin Light 4", "New Orleans Police Mooring Dolphin Light",
+         "Grand Isle to New Orleans", False),
+        ("biloxi_rigolets", "Back Bay of Biloxi Daybeacon 10", "The Rigolets Light 3",
+         "Biloxi to the Rigolets (past the ncds_11 / ncds_12 line), inside", True),
+    ],
+    "ncds_13": [
+        ("swpass_baptiste", "Southwest Pass Light 10", "Baptiste Collette Bayou Light 10",
+         "Southwest Pass to Baptiste Collette Bayou (Venice)", False),
+        ("southpass_swpass", "South Pass Light 6", "Southwest Pass Light 10",
+         "South Pass to Southwest Pass via Head of Passes", False),
+        ("grandisle_fourchon", "Grand Isle Turning Basin Light 4", "Belle Pass Entrance Light 8",
+         "Grand Isle to Port Fourchon (Belle Pass)", False),
+        ("fourchon_catisland", "Belle Pass Entrance Light 8", "Cat Island Pass Buoy 13",
+         "Belle Pass to Cat Island Pass", False),
+        ("atchafalaya_morgancity", "Atchafalaya Bay Light 11", "Morgan City-Port Allen Alternate Route Daybeacon 10",
+         "Atchafalaya Bay to Morgan City", False),
+        ("grandisle_swpass", "Grand Isle Turning Basin Light 4", "Southwest Pass Light 10",
+         "Grand Isle to Southwest Pass, offshore", False),
+        ("headofpasses_southpass", "Head of Passes Junction Light", "South Pass Light 6",
+         "Head of Passes down South Pass", False),
+        ("houma_catisland", "Houma Navigation Canal Floodgate Light 1", "Cat Island Pass Buoy 13",
+         "Houma Navigation Canal floodgate to Cat Island Pass", False),
+        ("barataria_grandisle", "Barataria Waterway Daybeacon 23", "Grand Isle Turning Basin Light 4",
+         "Barataria Waterway to Grand Isle", False),
+    ],
+    "ncds_14": [
+        ("gb_galveston", "Galveston Bay Entrance Lighted Buoy GB", "Galveston Channel Light 2",
+         "Galveston Bay sea buoy to Galveston Channel", False),
+        ("galveston_clearcreek", "Galveston Channel Light 2", "Clear Creek Channel Daybeacon 7",
+         "Galveston to Clear Lake (Kemah)", False),
+        ("freeport_galveston", "Freeport Harbor Light 18", "Galveston Channel Light 2",
+         "Freeport to Galveston", False),
+        ("aransas_corpus", "Port Aransas Harbor Light 3", "Aransas - Corpus Christi Bay Cut Off Channel Light 29",
+         "Port Aransas into Corpus Christi Bay", False),
+        ("portoconnor_aransas", "Matagorda Ship Channel Light 21", "Port Aransas Harbor Light 3",
+         "Matagorda Bay to Port Aransas, inside (GIWW)", True),
+        ("brazos_mansfield", "Brazos Santiago Pass Entrance Lighted Buoy BS", "Port Mansfield Channel Daybeacon 15",
+         "Brazos Santiago Pass to Port Mansfield (Laguna Madre)", False),
+        ("sabine_portarthur", "Sabine Bank Channel Lighted Buoy SB", "Port Arthur Canal Light 46",
+         "Sabine Bank sea buoy to Port Arthur", False),
+        ("calcasieu_lake", "Calcasieu Channel Lighted Buoy CC", "Calcasieu Channel Light 53",
+         "Calcasieu sea buoy up the Calcasieu Ship Channel", False),
+        ("rockport_portlavaca", "Rockport Channel Light 1", "Port Lavaca Channel Daybeacon 11",
+         "Rockport to Port Lavaca, inside", True),
+        ("freshwater_calcasieu", "Freshwater Bayou Junction Light FW", "Calcasieu Channel Light 47",
+         "Freshwater Bayou (Intracoastal City) to Calcasieu (past the ncds_13 / ncds_14 line), inside", True),
+    ],
+}
+
+
+def routes_for_region(rid: str) -> list:
+    out = []
+    for rid_, a, b, desc, inside in ROUTES[rid]:
+        prof = dict(BOAT, avoid_open_gulf=inside)
+        out.append({"id": rid_, "desc": desc + f" ({a} -> {b})", "start": P[a][1:], "end": P[b][1:],
+                    "start_name": a, "end_name": b, "profile": prof})
+    return out
