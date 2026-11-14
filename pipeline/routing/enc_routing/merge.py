@@ -112,87 +112,163 @@ def same_dim(geom, dim: int):
         shapely.MultiPoint(parts) if dim == 0 and len(parts) > 1 else parts[0])
 
 
-def merge_region(region, per_layer: dict, metas: list) -> tuple[dict, dict]:
-    """Best-available merge of the extracted cells over region.bbox, in the
-    region's metric CRS. Returns ({layer: GeoDataFrame}, stats). Layer
-    "REGIONS" holds each cell's exclusive region."""
-    crs = region.crs
-    mc = per_layer.get("M_COVR", [])
-    mcovr = gpd.GeoDataFrame(pd.concat(mc, ignore_index=True), crs="EPSG:4326").to_crs(crs)
-    area_box = gpd.GeoSeries([box(*region.bbox)], crs="EPSG:4326").to_crs(crs).iloc[0]
+# --------------------------------------------------------------------------- per-cell incremental merge
 
-    order = sorted(metas, key=lambda m: priority_key(m["name"][2], m["cscale"], m["isdt"]))
-    covers = []
-    for m in order:
-        cv = mcovr[(mcovr.cell == m["name"]) & (mcovr.CATCOV == 1)]
-        if cv.empty:
-            continue
-        g = shapely.union_all(shapely.make_valid(cv.geometry.values)).intersection(area_box)
-        if not g.is_empty:
-            covers.append((m["name"], g))
-    excl, stats = exclusive_regions(covers)
-    band_area = {}
-    for name, g in excl.items():
-        band_area[name[2]] = band_area.get(name[2], 0) + g.area
-    union_all = shapely.union_all(list(excl.values()))
-    stats["area_km2"] = area_box.area / 1e6
-    stats["uncovered_km2"] = area_box.difference(union_all).area / 1e6
-    stats["band_area_km2"] = {k: round(v / 1e6, 1) for k, v in sorted(band_area.items())}
-    stats["cells_with_area"] = [n for n, g in excl.items() if g.area > 1]
-    out = {"REGIONS": gpd.GeoDataFrame({"cell": list(excl), "band": [int(n[2]) for n in excl]},
-                                       geometry=list(excl.values()), crs=crs)}
-    counts = {}
-    for layer, frames in per_layer.items():
-        if layer == "M_COVR":
-            continue
-        src = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
-        src = src[src.cell.isin(list(excl))]
-        if src.empty:
-            continue
-        src = src.to_crs(crs)
-        src = src.set_geometry(shapely.make_valid(src.geometry.values))
-        parts = []
-        for name, reg in excl.items():
-            sub = src[src.cell == name]
-            if len(sub):
-                parts.append(clip_to_region(sub, reg))
-        parts = [p for p in parts if len(p)]
-        if not parts:
-            continue
-        m = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=crs)
-        counts[layer] = {"extracted": int(len(src)), "kept": int(len(m))}
-        out[layer] = m.reset_index(drop=True)
-    stats["features"] = counts
-    return out, stats
+def cell_coverage(layers, catalog_cell=None):
+    """Data coverage of a cell (lon/lat): union of its M_COVR CATCOV=1 polygons,
+    or the catalog coverage when the cell has none (reported as an anomaly)."""
+    mc = layers.get("M_COVR")
+    if mc is not None and len(mc):
+        cv = mc[pd.to_numeric(mc.CATCOV, errors="coerce") == 1]
+        cv = cv[cv.geom_type.isin(["Polygon", "MultiPolygon"])]
+        if len(cv):
+            g = shapely.union_all(shapely.make_valid(cv.geometry.values))
+            g = same_dim(g, 2)
+            if not g.is_empty:
+                return g, "M_COVR"
+    if catalog_cell is not None:
+        g = catalog_cell.coverage()
+        if g is not None and not g.is_empty:
+            return shapely.make_valid(g), "catalog"
+    return shapely.Polygon(), "none"
 
 
-def skin_check(excl: dict, merged_path) -> dict:
-    """Group-1 objects must tile each exclusive region: measure gaps and
-    overlaps after the merge."""
-    frames = []
-    for layer in GROUP1:
-        try:
-            g = gpd.read_file(merged_path, layer=layer, engine="pyogrio")
-        except Exception:  # layer absent
+def _to_metric(geom, crs):
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    return shapely.transform(geom, lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1])))
+
+
+def _to_lonlat(geom, crs):
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    return shapely.transform(geom, lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1])))
+
+
+def exclusive_region(cov_ll, higher_ll: list, close_m: float = SLIVER_M):
+    """Exclusive region (lon/lat) of a cell with coverage cov_ll, given the
+    coverages of the higher-priority cells that overlap it. The claimed area
+    is closed by close_m in a local transverse Mercator first, so hairline
+    slivers between two higher-priority cells are not left to this cell.
+    Returns (exclusive geometry, stats)."""
+    from .config import tmerc
+
+    st = {"sliver_pieces": 0, "sliver_area_m2": 0.0}
+    if not higher_ll:
+        return cov_ll, st
+    c = cov_ll.centroid
+    crs = tmerc(round(c.x, 1))
+    cov = _to_metric(cov_ll, crs)
+    claimed = _to_metric(shapely.union_all(higher_ll), crs)
+    raw = cov.difference(claimed)
+    closed = claimed.buffer(close_m, join_style="mitre").buffer(-close_m, join_style="mitre")
+    excl = cov.difference(closed)
+    excl = shapely.union_all([p for p in split_parts(excl) if p.area > 1.0]) if not excl.is_empty else excl
+    removed = [p for p in split_parts(raw.difference(excl)) if p.area > 0.01]
+    st["sliver_pieces"] = len(removed)
+    st["sliver_area_m2"] = round(float(sum(p.area for p in removed)), 1)
+    if excl.is_empty:
+        return shapely.Polygon(), st
+    return same_dim(shapely.make_valid(_to_lonlat(excl, crs)), 2), st
+
+
+def feature_keys(df, layer: str, cell: str) -> list:
+    """Stable feature identity across tiles and builds: cell + LNAM, else the
+    row number within the cell's layer (fixed for a given edition/update)."""
+    lnam = df["LNAM"].values if "LNAM" in df.columns else [None] * len(df)
+    out = []
+    for k, v in enumerate(lnam):
+        v = "" if v is None or (isinstance(v, float) and np.isnan(v)) else str(v)
+        out.append(f"{cell}:{v}" if v else f"{cell}:{layer}:{k}")
+    return out
+
+
+def merge_cell(layers: dict, excl_ll) -> dict:
+    """Clip every layer of one cell to its exclusive region (lon/lat), with
+    stable feature keys. M_COVR is dropped (coverage is held separately)."""
+    out = {}
+    for layer, gdf in layers.items():
+        if layer == "M_COVR" or gdf is None or gdf.empty:
             continue
-        g = g[g.geom_type.isin(["Polygon", "MultiPolygon"])]
-        frames.append(g[["cell", "geometry"]])
-    allg = pd.concat(frames, ignore_index=True)
-    gap_total, ovl_total, gap_pieces = 0.0, 0.0, 0
-    per_cell = {}
-    for name, reg in excl.items():
-        sub = allg[allg.cell == name].geometry.values
-        if reg.area <= 1:
+        g = gdf.copy()
+        g["fkey"] = feature_keys(g, layer, str(g.cell.iloc[0]))
+        g = g.set_geometry(shapely.make_valid(g.geometry.values))
+        g = clip_to_region(g, excl_ll)
+        if len(g):
+            out[layer] = g.reset_index(drop=True)
+    return out
+
+
+def merge_all(cells, load, close_m: float = SLIVER_M, log=print) -> dict:
+    """Per-cell incremental merge of every cell (catalog Cell objects).
+
+    `load(cell)` returns (layers, meta) of the cell's extraction. A cell's
+    result is cached under merge/<name>.<key>.pkl, where key covers the
+    cell's edition and update and those of every higher-priority cell
+    overlapping it: a changed cell re-clips only itself and the
+    lower-priority cells under it.
+
+    Returns {name: {"path", "meta", "coverage" (lon/lat), "excl" (lon/lat),
+    "stats", "cov_source"}}."""
+    import hashlib
+
+    from .config import BUILDER_VERSION, work
+
+    covs, metas = {}, {}
+    for c in cells:
+        cp = work("merge", "cov", f"{c.name}.{c.edtn}.{c.updn}.pkl")
+        if cp.exists():
+            covs[c.name], metas[c.name] = pd.read_pickle(cp)
             continue
-        u = shapely.union_all(sub) if len(sub) else shapely.Polygon()
-        gap = reg.difference(u)
-        ovl = float(sum(shapely.area(sub))) - u.area
-        gp = [p for p in split_parts(gap) if p.area > 1.0]
-        gap_total += sum(p.area for p in gp)
-        gap_pieces += len(gp)
-        ovl_total += max(ovl, 0)
-        if gp or ovl > 1:
-            per_cell[name] = {"gap_m2": round(sum(p.area for p in gp), 1), "gap_pieces": len(gp),
-                              "overlap_m2": round(max(ovl, 0), 1)}
-    return {"gap_m2": round(gap_total, 1), "gap_pieces": gap_pieces,
-            "overlap_m2": round(ovl_total, 1), "cells_with_issues": per_cell}
+        layers, meta = load(c)
+        cov, src = cell_coverage(layers, c)
+        meta = dict(meta, cov_source=src)
+        pd.to_pickle((cov, meta), cp)
+        covs[c.name], metas[c.name] = cov, meta
+    order = sorted(cells, key=lambda c: priority_key(c.name[2], c.cscale, metas[c.name]["isdt"]))
+    rank = {c.name: k for k, c in enumerate(order)}
+    names = [c.name for c in order]
+    geoms = np.array([covs[n] for n in names], dtype=object)
+    tree = shapely.STRtree(geoms)
+    ident = {c.name: f"{c.name}.{c.edtn}.{c.updn}" for c in cells}
+    out = {}
+    n_new = 0
+    for c in order:
+        cov = covs[c.name]
+        hi = []
+        if not cov.is_empty:
+            for j in tree.query(cov, predicate="intersects"):
+                o = names[j]
+                if rank[o] < rank[c.name] and shapely.area(shapely.intersection(geoms[j], cov)) > 0:
+                    hi.append(o)
+        hi.sort(key=lambda o: rank[o])
+        key = hashlib.sha256(json.dumps([BUILDER_VERSION, ident[c.name], [ident[o] for o in hi], close_m]
+                                        ).encode()).hexdigest()[:16]
+        path = work("merge", f"{c.name}.{key}.pkl")
+        if path.exists():
+            excl, st = pd.read_pickle(path)[:2]
+        else:
+            layers, _ = load(c)
+            excl, st = exclusive_region(cov, [covs[o] for o in hi], close_m)
+            # same-band overlap with higher-priority cells (rescheming leftovers)
+            same = []
+            for o in hi:
+                if o[2] == c.name[2]:
+                    a = _to_metric(shapely.intersection(cov, covs[o]), "EPSG:6933").area / 1e6
+                    if a > 0.001:
+                        same.append([o, round(a, 3)])
+            st["same_band_overlap_km2"] = same
+            st["higher"] = hi
+            merged = merge_cell(layers, excl)
+            pd.to_pickle((excl, st, merged), path)
+            n_new += 1
+        out[c.name] = {"path": path, "meta": metas[c.name], "coverage": cov, "excl": excl, "stats": st,
+                       "cov_source": metas[c.name].get("cov_source")}
+    log(f"merge: {len(order)} cells, {n_new} (re)clipped")
+    return out
+
+
+def load_merged(entry) -> dict:
+    return pd.read_pickle(entry["path"])[2]

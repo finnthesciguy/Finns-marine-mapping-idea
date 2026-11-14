@@ -72,7 +72,19 @@ LAYERS: dict[str, list[str]] = {
     # meta
     "M_COVR": ["CATCOV"],
     "M_QUAL": ["CATZOC", "SURSTA", "SUREND", "POSACC", "SOUACC"],
+    # names only (reference-route endpoints and reports; not used by the mesh)
+    "SEAARE": ["CATSEA"],
+    "LNDRGN": ["CATLND"],
+    "BUAARE": [],
+    "HRBFAC": ["CATHAF"],
+    "SMCFAC": ["CATSCF"],
 }
+
+EXTRACT_VERSION = "v3"  # bump when LAYERS or read_cell change (part of the cache path)
+
+# DSPM values every NOAA Gulf cell is expected to carry (verified on the pilot):
+# WGS 84, soundings at MLLW, heights above MHW, metres for depth and height.
+EXPECTED_DSPM = {"HDAT": 2, "SDAT": 12, "VDAT": 16, "DUNI": 1, "HUNI": 1}
 
 
 def _norm(v):
@@ -90,11 +102,14 @@ def read_cell(path: Path, cell_meta: dict) -> dict[str, gpd.GeoDataFrame]:
     dsid = pyogrio.read_dataframe(str(path), layer="DSID")
     meta = dict(cell_meta)
     r = dsid.iloc[0]
+    def _i(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
     meta.update(
-        dspm=dict(
-            HDAT=int(r.DSPM_HDAT), VDAT=int(r.DSPM_VDAT), SDAT=int(r.DSPM_SDAT),
-            DUNI=int(r.DSPM_DUNI), HUNI=int(r.DSPM_HUNI), CSCL=int(r.DSPM_CSCL),
-        ),
+        dspm={k: _i(getattr(r, f"DSPM_{k}", None)) for k in ("HDAT", "VDAT", "SDAT", "DUNI", "HUNI", "CSCL")},
         edtn=str(r.DSID_EDTN), updn=str(r.DSID_UPDN), uadt=str(r.DSID_UADT), isdt=str(r.DSID_ISDT),
     )
     for layer, attrs in LAYERS.items():
@@ -120,52 +135,75 @@ def read_cell(path: Path, cell_meta: dict) -> dict[str, gpd.GeoDataFrame]:
     return out, meta
 
 
-def extract_cells(cells, force: bool = False):
-    """Extract every cell, cached per cell edition and update as a pickle.
-    Returns (per_layer {layer: [GeoDataFrame per cell]}, metas, n_extracted)."""
+def _extract_one(args):
+    """Worker: unzip, read and cache one cell. Returns (name, meta) or (name, error)."""
+    name, cscale, cache = args
     from .download import unzip_cell
 
-    metas = []
-    per_layer: dict[str, list] = {}
-    n_new = 0
-    for c in cells:
-        cache = work("extract", "cells", f"{c.name}.{c.edtn}.{c.updn}.pkl")
-        if cache.exists() and not force:
-            layers, meta = pd.read_pickle(cache)
-        else:
-            d = unzip_cell(c.name)
-            layers, meta = read_cell(d / f"{c.name}.000", {"name": c.name, "cscale": c.cscale})
-            pd.to_pickle((layers, meta), cache)
-            n_new += 1
-        meta.setdefault("band", int(c.name[2]))
-        metas.append(meta)
-        for k, v in layers.items():
-            per_layer.setdefault(k, []).append(v)
-    return per_layer, metas, n_new
+    import warnings
+
+    try:
+        d = unzip_cell(name)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            layers, meta = read_cell(d / f"{name}.000", {"name": name, "cscale": cscale})
+        # GDAL warnings (e.g. illegal attribute ids, huge multipolygons) are reported per cell
+        meta["warnings"] = sorted({str(w.message).split(". ")[0][:160] for w in caught})
+    except Exception as e:  # noqa: BLE001 - a broken cell is reported and left out
+        return name, None, f"{type(e).__name__}: {e}"
+    tmp = Path(str(cache) + ".tmp")
+    pd.to_pickle((layers, meta), tmp)
+    os.replace(tmp, cache)
+    return name, meta, None
 
 
-def extract_all(cells, force: bool = False) -> Path:
-    """Spike helper: concatenate every cell into one GeoPackage."""
-    dest = work("extract", "extract.gpkg")
-    per_layer, metas, _ = extract_cells(cells, force)
-    if dest.exists():
-        dest.unlink()
-    counts = {}
-    for k, frames in sorted(per_layer.items()):
-        g = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
-        counts[k] = len(g)
-        # GeoPackage needs one geometry type per layer only loosely; pyogrio
-        # writes "GEOMETRY" when mixed, which is fine.
-        g.to_file(dest, layer=k, driver="GPKG", engine="pyogrio")
-    work("extract", "cells_meta.json").write_text(json.dumps(metas, indent=1))
-    work("extract", "counts.json").write_text(json.dumps(counts, indent=1))
-    return dest
+def cell_anomalies(meta: dict, layers: dict | None, cat_updn: int | None = None) -> list[str]:
+    """Things about a cell the build should report."""
+    out = [f"GDAL: {w}" for w in meta.get("warnings", [])]
+    for k, v in EXPECTED_DSPM.items():
+        got = meta.get("dspm", {}).get(k)
+        if got != v:
+            out.append(f"DSPM {k}={got} (expected {v})")
+    if cat_updn is not None and str(meta.get("updn")) != str(cat_updn):
+        out.append(f"applied update {meta.get('updn')} != catalog {cat_updn}")
+    if layers is not None:
+        mc = layers.get("M_COVR")
+        if mc is None or mc.empty or not (pd.to_numeric(mc.CATCOV, errors="coerce") == 1).any():
+            out.append("no M_COVR with CATCOV=1 (catalog coverage used instead)")
+        dep = layers.get("DEPARE")
+        if dep is not None and len(dep):
+            bad = pd.to_numeric(dep.DRVAL1, errors="coerce").isna() & dep.geom_type.isin(["Polygon", "MultiPolygon"])
+            if bad.any():
+                out.append(f"{int(bad.sum())} DEPARE without DRVAL1 (treated as not navigable)")
+    return out
 
 
-def load(layer: str) -> gpd.GeoDataFrame:
-    import pyogrio
+def cache_path(c) -> Path:
+    return work("extract", EXTRACT_VERSION, f"{c.name}.{c.edtn}.{c.updn}.pkl")
 
-    p = work("extract", "extract.gpkg")
-    if layer not in {n for n, _ in pyogrio.list_layers(str(p))}:
-        return gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs="EPSG:4326")
-    return gpd.read_file(p, layer=layer, engine="pyogrio")
+
+def extract_cells(cells, force: bool = False, workers: int = 4, log=print) -> dict:
+    """Extract every cell not yet cached for its edition and update (in
+    parallel). Returns {name: error} for the cells that could not be read."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    todo = [c for c in cells if force or not cache_path(c).exists()]
+    errors = {}
+    if todo:
+        log(f"extracting {len(todo)} cells with {workers} workers")
+        args = [(c.name, int(c.cscale), cache_path(c)) for c in todo]
+        with ProcessPoolExecutor(workers) as ex:
+            for k, (name, meta, err) in enumerate(ex.map(_extract_one, args, chunksize=4)):
+                if err:
+                    errors[name] = err
+                    log(f"  extract failed: {name}: {err}")
+                if (k + 1) % 100 == 0:
+                    log(f"  extracted {k + 1}/{len(todo)}")
+    return errors
+
+
+def load_cell(c):
+    """(layers, meta) of a cached cell extraction."""
+    layers, meta = pd.read_pickle(cache_path(c))
+    meta.setdefault("band", int(c.name[2]))
+    return layers, meta

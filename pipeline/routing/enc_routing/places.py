@@ -101,3 +101,14 @@ ROUTES = [
 GULF_MASK = {
     "pilot": {"seed": GULF_SEED, "barriers": [TAMPA_MOUTH], "close_m": 1500.0},
 }
+
+
+def routes_for(region) -> list:
+    """Reference routes of a region. The pilot keeps its Wave 2 routes (each run
+    once with the profile as written); the Gulf regions' routes (gulf_places.py)
+    run in the strict, maintained and relaxed modes."""
+    if region.rid == "pilot":
+        return [dict(r, modes=["strict"]) for r in ROUTES]
+    from .gulf_places import routes_for_region
+
+    return routes_for_region(region.rid)

@@ -89,52 +89,124 @@ def boundary_edges(tris):
     return idx // 3, idx % 3
 
 
-def vertices_on_edges(p, tris, ti, ki, cell=2000):
+def vertices_on_edges(p, tris, ti, ki, cell=None, max_pairs=20_000_000):
     """For the edges (tris[ti,ki], tris[ti,(ki+1)%3]) find vertices lying
-    strictly inside them (exact). Returns list of (edge index, [vertex ids
-    sorted along the edge])."""
-    a = tris[ti, ki]
-    c = tris[ti, (ki + 1) % 3]
+    strictly inside them (exact integer test). Returns a list of
+    (edge index, [vertex ids sorted along the edge]).
+
+    Vectorised: vertices are bucketed on a uniform grid; each edge is tested
+    against the vertices of every grid cell its bounding box touches, in
+    chunks of at most max_pairs candidate pairs."""
+    p = np.asarray(p, dtype=np.int64)
+    ti = np.asarray(ti, dtype=np.int64)
+    ki = np.asarray(ki, dtype=np.int64)
+    if len(ti) == 0 or len(p) == 0:
+        return []
+    a = tris[ti, ki].astype(np.int64)
+    c = tris[ti, (ki + 1) % 3].astype(np.int64)
     P, Q = p[a], p[c]
-    # bucket vertices on a grid
+    lo = np.minimum(P, Q)
+    hi = np.maximum(P, Q)
+    if cell is None:
+        ext = np.maximum(hi - lo, 1).max(axis=1)
+        cell = int(max(256, np.median(ext)))
     g = p // cell
-    from collections import defaultdict
-    buckets = defaultdict(list)
-    for i, (gx, gy) in enumerate(map(tuple, g)):
-        buckets[(gx, gy)].append(i)
-    out = []
-    lo = np.minimum(P, Q) // cell
-    hi = np.maximum(P, Q) // cell
-    for e in range(len(ti)):
-        if (hi[e] - lo[e]).max() > 50:
-            cand = np.flatnonzero((p[:, 0] >= min(P[e, 0], Q[e, 0])) & (p[:, 0] <= max(P[e, 0], Q[e, 0]))
-                                  & (p[:, 1] >= min(P[e, 1], Q[e, 1])) & (p[:, 1] <= max(P[e, 1], Q[e, 1])))
-        else:
-            cand = []
-            for gx in range(lo[e, 0], hi[e, 0] + 1):
-                for gy in range(lo[e, 1], hi[e, 1] + 1):
-                    cand += buckets.get((gx, gy), [])
-            cand = np.array(cand, dtype=np.int64)
-        if len(cand) == 0:
-            continue
-        cand = cand[(cand != a[e]) & (cand != c[e])]
-        if len(cand) == 0:
-            continue
-        d = Q[e] - P[e]
-        w = p[cand] - P[e]
-        cross = d[0] * w[:, 1] - d[1] * w[:, 0]
-        dot = d[0] * w[:, 0] + d[1] * w[:, 1]
-        L2 = d[0] * d[0] + d[1] * d[1]
-        on = (cross == 0) & (dot > 0) & (dot < L2)
-        if on.any():
-            vs = cand[on]
-            out.append((e, [int(v) for v in vs[np.argsort(dot[on])]]))
-    return out
+    gx0, gy0 = g.min(axis=0)
+    gx1, gy1 = g.max(axis=0)
+    W = int(gy1 - gy0 + 1)
+    vkey = (g[:, 0] - gx0) * W + (g[:, 1] - gy0)
+    vorder = np.argsort(vkey, kind="stable")
+    sk = vkey[vorder]
+    clo = lo // cell
+    chi = hi // cell
+    nx = chi[:, 0] - clo[:, 0] + 1
+    ny = chi[:, 1] - clo[:, 1] + 1
+    ncell = nx * ny
+    out = {}
+
+    def test(ce, cv):
+        Pe, Qe = P[ce], Q[ce]
+        d = Qe - Pe
+        wv = p[cv] - Pe
+        cross = d[:, 0] * wv[:, 1] - d[:, 1] * wv[:, 0]
+        dot = d[:, 0] * wv[:, 0] + d[:, 1] * wv[:, 1]
+        L2 = d[:, 0] * d[:, 0] + d[:, 1] * d[:, 1]
+        on = (cross == 0) & (dot > 0) & (dot < L2) & (cv != a[ce]) & (cv != c[ce])
+        for e_, v_, t_ in zip(ce[on].tolist(), cv[on].tolist(), dot[on].tolist()):
+            out.setdefault(e_, {})[v_] = t_
+
+    # long edges (many grid cells): brute force over the vertices in their bounding box
+    big = np.flatnonzero(ncell > 4096)
+    if len(big):
+        xorder = np.argsort(p[:, 0], kind="stable")
+        xs = p[xorder, 0]
+        for e_ in big.tolist():
+            i0, i1 = np.searchsorted(xs, lo[e_, 0], "left"), np.searchsorted(xs, hi[e_, 0], "right")
+            cv = xorder[i0:i1]
+            cv = cv[(p[cv, 1] >= lo[e_, 1]) & (p[cv, 1] <= hi[e_, 1])]
+            if len(cv):
+                test(np.full(len(cv), e_), cv)
+    small = np.flatnonzero(ncell <= 4096)
+    e0 = 0
+    E = len(small)
+    while e0 < E:
+        # grow the chunk while the number of (edge, cell) pairs stays moderate
+        csum = np.cumsum(ncell[small[e0:]])
+        e1 = e0 + max(1, int(np.searchsorted(csum, max_pairs // 8)))
+        e1 = min(e1, E)
+        idx = small[e0:e1]
+        cnt = ncell[idx]
+        eid = np.repeat(idx, cnt)
+        off = np.repeat(np.cumsum(cnt) - cnt, cnt)
+        k = np.arange(len(eid)) - off
+        w = nx[eid]
+        cx = clo[eid, 0] + k % w
+        cy = clo[eid, 1] + k // w
+        key = (cx - gx0) * W + (cy - gy0)
+        valid = (cx >= gx0) & (cx <= gx1) & (cy >= gy0) & (cy <= gy1)
+        eid, key = eid[valid], key[valid]
+        s0 = np.searchsorted(sk, key, side="left")
+        s1 = np.searchsorted(sk, key, side="right")
+        m = s1 - s0
+        keep = m > 0
+        eid, s0, m = eid[keep], s0[keep], m[keep]
+        # expand candidate vertices, bounded in chunks
+        tot = int(m.sum())
+        start = 0
+        cm = np.cumsum(m)
+        while start < len(eid):
+            base = cm[start - 1] if start else 0
+            stop = int(np.searchsorted(cm, base + max_pairs, side="right"))
+            stop = max(stop, start + 1)
+            ee, ss, mm = eid[start:stop], s0[start:stop], m[start:stop]
+            ce = np.repeat(ee, mm)
+            o2 = np.repeat(np.cumsum(mm) - mm, mm)
+            cv = vorder[np.repeat(ss, mm) + (np.arange(len(ce)) - o2)]
+            test(ce, cv)
+            start = stop
+        del tot
+        e0 = e1
+    res = []
+    for e_ in sorted(out):
+        vs = out[e_]
+        res.append((e_, [v for v, _ in sorted(vs.items(), key=lambda kv: (kv[1], kv[0]))]))
+    return res
 
 
-def fix_tjunctions(p, tris, face_of):
+def fix_tjunctions(p, tris, face_of, max_iter=8):
     """Split every triangle whose boundary edge has a mesh vertex strictly
-    inside it (exact test). Returns (tris, face_of, n_split)."""
+    inside it (exact test), repeating until none is left. Returns (tris,
+    face_of, n_split)."""
+    total = 0
+    for _ in range(max_iter):
+        tris, face_of, n = _fix_tjunctions_once(p, tris, face_of)
+        total += n
+        if n == 0:
+            break
+    return tris, face_of, total
+
+
+def _fix_tjunctions_once(p, tris, face_of):
     ti, ki = boundary_edges(tris)
     hits = vertices_on_edges(p, tris, ti, ki)
     if not hits:

@@ -49,11 +49,12 @@ def test_catalog_parse_and_select(tmp_path):
     assert [c.name for c in cells] == ["US5XX1AA", "US4XX1BB", "US3XX1CC"]
     a = cells[0]
     assert a.band == 5 and a.band_name == "harbour" and a.edtn == 2 and a.updn == 1
-    # interior panel is a hole
-    assert not a.coverage.contains(Point(-82.45, 27.05))
-    assert a.coverage.contains(Point(-82.48, 27.02))
+    # interior panel is a hole (parsing is pipeline/catalog's enc_catalog)
+    assert not a.coverage().contains(Point(-82.45, 27.05))
+    assert a.coverage().contains(Point(-82.48, 27.02))
     sel = catalog.select_cells(cells, (-83, 26.5, -82, 27.5))
     assert [c.name for c in sel] == ["US5XX1AA"]  # far cell outside, cancelled cell dropped
+    assert catalog.select_cells(cells, (-83, 26.5, -82, 27.5), min_band=6) == []
 
 
 # ------------------------------------------------------------------ merge

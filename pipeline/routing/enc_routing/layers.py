@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import math
-import urllib.parse
 
 import geopandas as gpd
 import numpy as np
@@ -20,7 +19,7 @@ import pandas as pd
 import shapely
 from shapely.geometry import LineString, Point, box
 
-from .config import FT, GEO_CRS, work
+from .config import FT, GEO_CRS
 
 # --------------------------------------------------------------------------- units
 
@@ -107,6 +106,12 @@ def _get(merged, layer):
     return g
 
 
+def _fkeys(g):
+    if "fkey" in g.columns:
+        return g.fkey.values
+    return np.array([f"row:{k}" for k in range(len(g))], dtype=object)
+
+
 def _polys(g):
     return g[g.geom_type.isin(["Polygon", "MultiPolygon"])]
 
@@ -126,6 +131,13 @@ def depth_areas(merged) -> gpd.GeoDataFrame:
             "DRVAL2": pd.to_numeric(g.DRVAL2, errors="coerce").values,
             "cell": g.cell.values, "cscale": g.cscale.values, "OBJNAM": g.OBJNAM.values,
             "SORDAT": g.SORDAT.values, "geometry": g.geometry.values}))
+    if not frames:
+        return gpd.GeoDataFrame({"cls": pd.Series([], dtype=object), "DRVAL1": pd.Series([], dtype=float),
+                                 "DRVAL2": pd.Series([], dtype=float), "cell": pd.Series([], dtype=object),
+                                 "cscale": pd.Series([], dtype=int), "OBJNAM": pd.Series([], dtype=object),
+                                 "SORDAT": pd.Series([], dtype=object), "d1": pd.Series([], dtype=np.int32),
+                                 "d2": pd.Series([], dtype=np.int32), "geometry": gpd.GeoSeries([])},
+                                geometry="geometry")
     df = pd.concat(frames, ignore_index=True)
     df["d1"] = to_dm(df.DRVAL1)
     df["d2"] = to_dm(df.DRVAL2)
@@ -149,7 +161,13 @@ def hazards(merged) -> gpd.GeoDataFrame:
             "cls": code, "VALSOU": pd.to_numeric(g.VALSOU, errors="coerce").values,
             "WATLEV": pd.to_numeric(g.WATLEV, errors="coerce").fillna(0).astype(int).values,
             "cat": cat.fillna(0).astype(int).values, "OBJNAM": g.OBJNAM.values,
-            "geometry": g.geometry.values}))
+            "fkey": _fkeys(g), "geometry": g.geometry.values}))
+    if not frames:
+        return gpd.GeoDataFrame({"cls": pd.Series([], dtype=int), "VALSOU": pd.Series([], dtype=float),
+                                 "WATLEV": pd.Series([], dtype=int), "cat": pd.Series([], dtype=int),
+                                 "OBJNAM": pd.Series([], dtype=object), "fkey": pd.Series([], dtype=object),
+                                 "valsou_dm": pd.Series([], dtype=int), "blocking": pd.Series([], dtype=bool),
+                                 "geometry": gpd.GeoSeries([])}, geometry="geometry")
     df = pd.concat(frames, ignore_index=True)
     df["valsou_dm"] = to_dm(df.VALSOU)
     # unknown depth, drying or awash: blocks every boat
@@ -190,12 +208,13 @@ def overhead(merged, water) -> gpd.GeoDataFrame:
     clr_dm: charted clearance (dm; for an opening span the closed clearance
     VERCCL, else VERCLR); -32768 = not charted."""
     rows = []
-    shapely.prepare(water)
+    if water is not None:
+        shapely.prepare(water)
     for code, layer in ((1, "BRIDGE"), (2, "CBLOHD"), (3, "PIPOHD")):
         g = _get(merged, layer)
         for r in g.itertuples():
             geom = r.geometry
-            if geom is None or geom.is_empty or not water.intersects(geom):
+            if geom is None or geom.is_empty or (water is not None and not water.intersects(geom)):
                 continue
             cats = int_set(getattr(r, "CATBRG", None)) if layer == "BRIDGE" else set()
             opens = bool(cats & OPENING_CATBRG)
@@ -210,48 +229,17 @@ def overhead(merged, water) -> gpd.GeoDataFrame:
             clr = verccl if (opens and not np.isnan(verccl)) else verclr
             rows.append({"kind": code, "opens": opens, "catbrg": sum(1 << (c - 1) for c in cats if 1 <= c <= 16),
                          "clr_dm": int(to_dm([clr])[0]), "open_dm": int(to_dm([vercop])[0]),
-                         "hor_dm": int(to_dm([horclr])[0]), "OBJNAM": r.OBJNAM, "geometry": geom})
+                         "hor_dm": int(to_dm([horclr])[0]), "OBJNAM": r.OBJNAM,
+                         "fkey": getattr(r, "fkey", f"{layer}:{r.Index}"), "geometry": geom})
     df = gpd.GeoDataFrame(rows, geometry="geometry") if rows else gpd.GeoDataFrame(
         {"kind": [], "geometry": []}, geometry="geometry")
-    # Overhead cables are often charted twice (identical geometry): keep one.
+    # Overhead cables are often charted twice (identical geometry): keep one
+    # (the first in feature-key order, so the choice does not depend on tiling).
     if len(df):
+        df = df.sort_values("fkey", kind="stable").reset_index(drop=True)
         wkb = shapely.to_wkb(shapely.normalize(df.geometry.values))
         df = df[~pd.Series(wkb).duplicated().values].reset_index(drop=True)
     return df
-
-
-NCF = ("https://services7.arcgis.com/n1YM8pTrFmm7L4hs/ArcGIS/rest/services/"
-       "National_Channel_Framework/FeatureServer")
-NCF_LAYERS = {0: "ChannelLine", 2: "ChannelReach"}
-
-
-def ncf_query(layer: int, rid: str, bbox, page: int = 1000) -> gpd.GeoDataFrame:
-    """One NCF layer clipped to bbox (GeoJSON, paginated, cached per region)."""
-    from .download import fetch
-
-    cache = work("ncf", rid, f"{NCF_LAYERS[layer]}.geojson")
-    legacy = work("ncf", f"{NCF_LAYERS[layer]}.geojson")  # Wave 1 spike cache (pilot bbox)
-    if not cache.exists() and rid == "pilot" and legacy.exists():
-        cache.write_bytes(legacy.read_bytes())
-    if cache.exists():
-        g = gpd.read_file(cache)
-        return g if len(g) else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=GEO_CRS)
-    feats, offset = [], 0
-    while True:
-        q = {"where": "1=1", "outFields": "*", "f": "geojson", "outSR": "4326",
-             "geometry": ",".join(str(v) for v in bbox), "geometryType": "esriGeometryEnvelope",
-             "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-             "resultOffset": str(offset), "resultRecordCount": str(page)}
-        tmp = work("ncf", rid, f"tmp_{layer}_{offset}.json")
-        fetch(f"{NCF}/{layer}/query?" + urllib.parse.urlencode(q), tmp)
-        d = json.loads(tmp.read_text())
-        tmp.unlink()
-        feats += d.get("features", [])
-        if len(d.get("features", [])) < page and not d.get("properties", {}).get("exceededTransferLimit"):
-            break
-        offset += page
-    cache.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
-    return gpd.read_file(cache) if feats else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=GEO_CRS)
 
 
 def _date_ms(v) -> int:
@@ -280,17 +268,18 @@ def is_icw(name) -> bool:
     return "INTRACOASTAL" in n or n.startswith("GIWW")
 
 
-def channels(merged, region, crs) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """(channel polygons with attributes, highway centrelines).
+def channels(merged, ncf_reach, ncf_line, crs, p) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """(channel polygons with attributes, highway centrelines), in crs.
 
     Channel polygons: NCF reaches (source 1) with maintained/authorised depth,
     ENC FAIRWY (2), ENC DRGARE (3), ENC RECTRC/NAVLNE buffered (4).
-    Highway lines: NCF centrelines and the ENC ICW recommended track."""
-    p = region.params
+    Highway lines: NCF centrelines and the ENC ICW recommended track.
+    ncf_reach / ncf_line are lon/lat GeoDataFrames (ncf.py) or None.
+    Rows are sorted by feature key, so "lowest index wins" ties do not
+    depend on how the area was tiled."""
     rows = []
-    ncf = ncf_query(2, region.rid, region.bbox)
-    if len(ncf):
-        ncf = ncf[ncf.geometry.notna()].to_crs(crs)
+    if ncf_reach is not None and len(ncf_reach):
+        ncf = ncf_reach[ncf_reach.geometry.notna()].to_crs(crs)
         for r in ncf.itertuples():
             g = shapely.make_valid(r.geometry)
             if g.is_empty:
@@ -298,33 +287,33 @@ def channels(merged, region, crs) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
             # NCF reaches sit 1-30 m off the charted channel: grow them by a
             # tolerance (maintained depth is opt-in and always graded yellow)
             g = shapely.simplify(g.buffer(p.ncf_tolerance_m, quad_segs=4), 1.0)
-            nm = str(r.sdsfeaturename or "").strip()
-            if len(nm) > 120 or "<" in nm:  # garbage (field shift) seen in a few NCF records
-                nm = ""
-            rows.append({"source": 1, "icw": is_icw(nm), "name": nm.title() if nm else "",
-                         "ident": str(r.channelreachidpk or ""), "desc": str(r.sdsfeaturedescription or "").title(),
+            rows.append({"source": 1, "icw": is_icw(r.name_clean), "name": r.name_clean.title() if r.name_clean else "",
+                         "ident": str(r.ident or ""), "desc": str(r.desc or "").title(),
                          "maint_dm": int(ft_to_chart_dm([r.depthmaintained])[0]),
                          "auth_dm": int(ft_to_chart_dm([r.depthauthorized])[0]),
-                         "date": _date_ms(r.dateuploaded), "geometry": g})
+                         "date": int(r.date or 0), "fkey": r.fkey, "geometry": g})
     for src, layer in ((2, "FAIRWY"), (3, "DRGARE")):
         g = _polys(_get(merged, layer))
-        for r in g.itertuples():
+        for r, fk in zip(g.itertuples(), _fkeys(g)):
             rows.append({"source": src, "icw": is_icw(r.OBJNAM), "name": str(r.OBJNAM or ""),
                          "ident": str(r.LNAM or ""), "desc": "", "maint_dm": -32768,
                          "auth_dm": int(to_dm([getattr(r, "DRVAL1", np.nan)])[0]) if layer == "DRGARE" else -32768,
-                         "date": _ymd(r.SORDAT), "geometry": r.geometry})
+                         "date": _ymd(r.SORDAT), "fkey": fk, "geometry": r.geometry})
     for layer in ("RECTRC", "NAVLNE"):
         g = _get(merged, layer)
-        for r in g.itertuples():
+        for r, fk in zip(g.itertuples(), _fkeys(g)):
             rows.append({"source": 4, "icw": is_icw(r.OBJNAM), "name": str(r.OBJNAM or ""),
                          "ident": str(r.LNAM or ""), "desc": "", "maint_dm": -32768, "auth_dm": -32768,
-                         "date": _ymd(r.SORDAT), "geometry": r.geometry.buffer(p.track_buffer_m)})
-    chan = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+                         "date": _ymd(r.SORDAT), "fkey": fk, "geometry": r.geometry.buffer(p.track_buffer_m)})
+    if rows:
+        chan = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
+        chan = chan.sort_values("fkey", kind="stable").reset_index(drop=True)
+    else:
+        chan = gpd.GeoDataFrame({"source": [], "icw": [], "name": [], "ident": [], "desc": [], "maint_dm": [],
+                                 "auth_dm": [], "date": [], "fkey": [], "geometry": []}, geometry="geometry", crs=crs)
     hw = []
-    lines = ncf_query(0, region.rid, region.bbox)
-    if len(lines):
-        lines = lines[lines.geometry.notna() & (lines.sdsfeaturedescription == "Centerline")].to_crs(crs)
-        hw += list(lines.geometry.values)
+    if ncf_line is not None and len(ncf_line):
+        hw += list(ncf_line[ncf_line.geometry.notna()].to_crs(crs).geometry.values)
     rt = _get(merged, "RECTRC")
     if len(rt):
         hw += list(rt[rt.OBJNAM.map(is_icw)].geometry.values)
@@ -341,9 +330,12 @@ def reg_areas(merged) -> gpd.GeoDataFrame:
             if k == 0:
                 continue
             rows.append({"kind": k, "cls": layer, "OBJNAM": r.OBJNAM, "INFORM": r.INFORM,
-                         "RESTRN": str(getattr(r, "RESTRN", "") or ""), "geometry": r.geometry})
-    return gpd.GeoDataFrame(rows, geometry="geometry") if rows else gpd.GeoDataFrame(
-        {"kind": [], "geometry": []}, geometry="geometry")
+                         "RESTRN": str(getattr(r, "RESTRN", "") or ""), "fkey": getattr(r, "fkey", f"{layer}:{r.Index}"),
+                         "geometry": r.geometry})
+    if not rows:
+        return gpd.GeoDataFrame({"kind": [], "cls": [], "OBJNAM": [], "INFORM": [], "RESTRN": [], "fkey": [],
+                                 "geometry": []}, geometry="geometry")
+    return gpd.GeoDataFrame(rows, geometry="geometry").sort_values("fkey", kind="stable").reset_index(drop=True)
 
 
 CATZOC_CODE = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}  # A1, A2, B, C, D, U

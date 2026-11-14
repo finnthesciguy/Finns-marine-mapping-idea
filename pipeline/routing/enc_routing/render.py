@@ -191,3 +191,82 @@ def run_render(region, out_dir=None):
     plt.close(fig)
     print(sizes)
     return sizes
+
+
+# --------------------------------------------------------------------------- region overview (Wave 4)
+
+DEPTH_BINS_DM = [-40000, 0, 18, 36, 55, 91, 40000]          # none/drying, <6 ft, 6-12, 12-18, 18-30, 30+
+DEPTH_COLS = ["#d9d3c3", "#b8d8ea", "#d4e9f5", "#e6f2fa", "#f2f8fc", "#ffffff"]
+MODE_COLS = {"strict": "#1a9641", "maintained": "#e66101", "relaxed": "#7b3294"}
+
+
+def run_render_region(region, out_dir=None, small=False, figsize=(11, 9)):
+    """Overview of a region's pack (triangles by charted depth, maintained-only
+    water in purple) with the reference routes: green = found strictly,
+    orange = needs maintained channels, purple = also unknown clearances;
+    x = start of a route that failed in every mode."""
+    from matplotlib.tri import Triangulation
+
+    from .cli import _pack_path
+
+    out_dir = Path(out_dir) if out_dir else region.dir("render")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pack = P.read_pack(_pack_path(region))
+    v = pack.vertices.astype(float) / 1e7
+    t = pack.tris
+    d = pack.attrs["depth_dm"].astype(np.int64)
+    d = np.where(d == P.DEPTH_NONE, -1, d)
+    cls = np.digitize(d, DEPTH_BINS_DM[1:-1])
+    colors = np.array(DEPTH_COLS)[cls]
+    maint_only = (pack.attrs["depth_dm"] < 18) & (pack.attrs["maint_dm"] >= 18)
+    colors[maint_only] = "#c2a5cf"
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_facecolor("#e8d9b0")
+    tri = Triangulation(v[:, 0], v[:, 1], t)
+    from matplotlib.colors import ListedColormap
+
+    pal = list(DEPTH_COLS) + ["#c2a5cf"]
+    idx = np.where(maint_only, len(DEPTH_COLS), cls)
+    ax.tripcolor(tri, facecolors=idx.astype(float), cmap=ListedColormap(pal), vmin=-0.5, vmax=len(pal) - 0.5,
+                 edgecolors="none", rasterized=True)
+    if region.chart_bbox:
+        w, s, e, n = region.chart_bbox
+        b = pack.bbox
+        w, s, e, n = max(w, b[0] / 1e7), max(s, b[1] / 1e7), min(e, b[2] / 1e7), min(n, b[3] / 1e7)
+        ax.plot([w, e, e, w, w], [s, s, n, n, s], ls="--", lw=0.8, color="#555555")
+    rows_path = region.dir("routes.json")
+    if rows_path.exists():
+        rows = json.loads(rows_path.read_text())
+        by = {}
+        for r in rows:
+            by.setdefault(r["id"], {})[r["mode"]] = r
+        for rid, modes in by.items():
+            best = next((m for m in ("strict", "maintained", "relaxed") if m in modes and modes[m]["ok"]), None)
+            if best is None:
+                st = next(iter(modes.values()))["start"]
+                ax.plot(st[0], st[1], "x", color="#d7191c", ms=7, mew=2)
+                continue
+            w = np.array(modes[best]["result"]["waypoints"])
+            ax.plot(w[:, 0], w[:, 1], color=MODE_COLS[best], lw=1.3)
+            ax.annotate(rid.split("_")[0], (w[0, 0], w[0, 1]), fontsize=6, color="#222222")
+    ax.set_xlim(pack.bbox[0] / 1e7, pack.bbox[2] / 1e7)
+    ax.set_ylim(pack.bbox[1] / 1e7, pack.bbox[3] / 1e7)
+    ax.set_aspect(1 / np.cos(np.radians((pack.bbox[1] + pack.bbox[3]) / 2e7)))
+    ax.set_title(f"{region.rid}: routing pack ({len(t):,} triangles, data {pack.data_date}); dashed = chart box; "
+                 "routes: green strict, orange maintained channels, purple + unknown clearance, x failed",
+                 fontsize=8)
+    from matplotlib.patches import Patch
+
+    handles = [Patch(color=c, label=lab) for c, lab in zip(
+        DEPTH_COLS + ["#c2a5cf"], ["no depth / drying", "< 6 ft", "6-12 ft", "12-18 ft", "18-30 ft", "30+ ft",
+                                    "< 6 ft charted, >= 6 ft maintained"])]
+    ax.legend(handles=handles, loc="lower left", fontsize=6, framealpha=0.9)
+    full = out_dir / f"{region.rid}-overview.png"
+    fig.savefig(full, dpi=160, bbox_inches="tight")
+    sizes = {full.name: full.stat().st_size}
+    if small:
+        sp = out_dir / f"gulf-{region.rid}.png"
+        sizes[sp.name] = save_small(fig, sp, max_kb=380)
+    plt.close(fig)
+    print(sizes)
+    return sizes

@@ -87,20 +87,28 @@ def cut_pack(pack: P.Pack, bbox_deg, region_id: str) -> P.Pack:
                   geom=np.array(geom, np.int32).reshape(-1, 2), info=info, nbr=nbr, grid=grid)
 
 
-def clip_source_geometry(region, wkb_path, bbox_deg, margin_deg=0.01) -> bytes:
-    """Source geometry (region metric CRS WKB) clipped to bbox, as EPSG:4326 WKB
-    with coordinates rounded to 1e-7 degree."""
+def clip_source_geometry(region, name, bbox_deg, margin_deg=0.01) -> bytes:
+    """Source geometry of a built region (checks.pkl, lon/lat) clipped to bbox,
+    as EPSG:4326 WKB with coordinates rounded to 1e-7 degree. name:
+    "obstacles" (land, structures, blocking hazards) or "bridge_zone"
+    (bridges over water grown by the bridge zone distance)."""
+    import pandas as pd
     import shapely
-    from pyproj import Transformer
 
-    g = shapely.from_wkb(Path(wkb_path).read_bytes())
-    tr = Transformer.from_crs(region.crs, "EPSG:4326", always_xy=True)
-    inv = Transformer.from_crs("EPSG:4326", region.crs, always_xy=True)
-    b = (bbox_deg[0] - margin_deg, bbox_deg[1] - margin_deg, bbox_deg[2] + margin_deg, bbox_deg[3] + margin_deg)
-    clip = shapely.transform(shapely.segmentize(shapely.box(*b), 0.001),
-                             lambda xy: np.column_stack(inv.transform(xy[:, 0], xy[:, 1])))
-    g = g.intersection(clip)
-    g = shapely.transform(g, lambda xy: np.round(np.column_stack(tr.transform(xy[:, 0], xy[:, 1])), 7))
+    from .assess import load_checks
+
+    ck = load_checks(region)
+    b = shapely.box(bbox_deg[0] - margin_deg, bbox_deg[1] - margin_deg, bbox_deg[2] + margin_deg,
+                    bbox_deg[3] + margin_deg)
+    if name == "obstacles":
+        g = shapely.union_all([x for x in ck["obstacles"] if x.intersects(b)])
+    elif name == "bridge_zone":
+        g = ck["bridge_zone_ll"](b)
+    else:
+        raise ValueError(name)
+    g = g.intersection(b)
+    g = shapely.transform(g, lambda xy: np.round(xy, 7))
+    del pd
     return shapely.to_wkb(g)
 
 
@@ -270,3 +278,22 @@ SARASOTA_QUERIES = [
      "note": "start in a small water part near Marina Jack that the mesh does not connect to the bay: "
              "NOT_CONNECTED, every hint false"},
 ]
+
+
+def vectors_from_reference(pack_path, rows, out_json):
+    """routing-vectors/1 file from reference-route results (assess.run_reference
+    rows), so RoutingKit can reproduce a region's reference routes exactly
+    (ROUTINGKIT_PILOT_PACK / ROUTINGKIT_PILOT_VECTORS)."""
+    items = []
+    for r in rows:
+        prof = r["profile"]
+        items.append({"id": f"{r['id']}/{r['mode']}", "profile": {k: prof[k] for k in (
+            "draft_ft", "margin_ft", "air_draft_ft", "use_maintained", "accept_unknown_clearance", "avoid_open_gulf")},
+            "start": list(r["start"]), "goal": list(r["end"]), "max_snap_m": 750.0, "expected": expected(r["result"])})
+    doc = {"schema": "routing-vectors/1", "pack": Path(pack_path).name,
+           "pack_sha256": hashlib.sha256(Path(pack_path).read_bytes()).hexdigest(),
+           "tolerances": {"waypoints_units": 0, "distance_m": 1e-6, "snap_m": 1e-3,
+                          "note": "integer fields and sequences must match exactly; floats within tolerance"},
+           "queries": items}
+    Path(out_json).write_text(json.dumps(doc, indent=1, default=_np))
+    return doc

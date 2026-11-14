@@ -1,4 +1,5 @@
-"""Navigation mesh builder: merged ENC + NCF layers -> routing Pack.
+"""Navigation mesh builder, per tile: merged ENC + NCF layers -> triangles
+with attributes (tiles.py drives it, assemble.py joins the tiles into a pack).
 
 Overview (details and the exact rules are in docs/routing-pack-format.md,
 part C):
@@ -15,7 +16,8 @@ part C):
    sounding-refinement regions and sounding lowering zones, clearance zones
    of known-depth hazards, hazard proximity ring, shore distance rings,
    overhead footprints, channels, highway corridors, regulated areas,
-   M_QUAL, open-Gulf mask, and a lat/lon grid that bounds triangle size.
+   M_QUAL, open-Gulf mask, the tile edges and a lat/lon grid that bounds
+   triangle size (0.02 deg near shore, 0.1 deg offshore).
 3. The lines are transformed to integer 1e-7 degree units and snap-rounded
    in one pass (GEOS OverlayNG, grid 1 unit), polygonized into faces, and
    every face inside the domain is triangulated with GEOS's constrained
@@ -27,9 +29,7 @@ part C):
 """
 from __future__ import annotations
 
-import datetime as dt
-import hashlib
-import json
+import os
 import time
 
 import geopandas as gpd
@@ -42,13 +42,14 @@ from shapely.geometry import LineString, box
 from . import layers as L
 from . import packfmt as P
 from . import topology
-from .config import BUILDER_VERSION, GEO_CRS
+from .config import GEO_CRS
 
 UNITS = 1e7  # integer units per degree
 
 
 def log(msg, t0=[time.time()]):
-    print(f"[{time.time() - t0[0]:7.1f}s] {msg}", flush=True)
+    if os.environ.get("ENC_ROUTING_VERBOSE"):
+        print(f"[{time.time() - t0[0]:7.1f}s] {msg}", flush=True)
 
 
 # --------------------------------------------------------------------------- transforms
@@ -69,31 +70,6 @@ class Units:
     def units_to_metric(self, xy):
         x, y = self.inv.transform(np.asarray(xy[:, 0]) / UNITS, np.asarray(xy[:, 1]) / UNITS)
         return np.column_stack([x, y])
-
-
-# --------------------------------------------------------------------------- open-Gulf mask
-
-def gulf_mask(shore_union, region, crs):
-    from .places import GULF_MASK
-
-    cfg = GULF_MASK.get(region.rid)
-    if cfg is None:
-        return None
-    tr = Transformer.from_crs(GEO_CRS, crs, always_xy=True)
-
-    def pt(lonlat):
-        return tr.transform(*lonlat)
-    area = shapely.segmentize(box(*region.bbox), 0.01)
-    area = shapely.transform(area, lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1])))
-    land = shapely.union_all([p for p in shapely.get_parts(shore_union) if p.area > 5e4])
-    for line in cfg["barriers"]:
-        land = land.union(LineString([pt(p) for p in line]).buffer(50))
-    land = land.simplify(20)
-    r = cfg["close_m"]
-    barrier = land.buffer(r).buffer(-r)
-    seed = shapely.Point(pt(cfg["seed"]))
-    free = area.difference(barrier)
-    return next(p for p in shapely.get_parts(free) if p.covers(seed))
 
 
 # --------------------------------------------------------------------------- sounding refinement
@@ -122,7 +98,10 @@ def sounding_refinement(areas: gpd.GeoDataFrame, snd: gpd.GeoDataFrame, p):
     pi, ai = tree.query(snd.geometry.values, predicate="within")
     a_of = np.full(len(snd), -1)
     a_of[pi] = dep.index.values[ai]  # area index in `areas`
-    tri = Delaunay(xy).simplices
+    try:
+        tri = Delaunay(xy).simplices
+    except Exception:  # noqa: BLE001 - degenerate (collinear) soundings: nothing to refine
+        return gpd.GeoDataFrame({"area_idx": [], "refined_dm": [], "geometry": []}, geometry="geometry")
     A = a_of[tri]
     same = (A[:, 0] >= 0) & (A[:, 0] == A[:, 1]) & (A[:, 1] == A[:, 2])
     tri = tri[same]
@@ -172,15 +151,25 @@ def sounding_lowering(areas, refine, snd, p):
 
 # --------------------------------------------------------------------------- preparation
 
-def prepare(region, merged):
-    """All input layers in the region's metric CRS. Returns a dict."""
-    p = region.params
-    crs = region.crs
+def robust_union(geoms):
+    """union_all, retried on a 1 mm grid if GEOS reports a topology error."""
+    geoms = [g for g in geoms if g is not None and not g.is_empty]
+    if not geoms:
+        return shapely.Polygon()
+    try:
+        return shapely.union_all(geoms)
+    except shapely.errors.GEOSException:
+        return shapely.union_all(shapely.make_valid(np.asarray(geoms, dtype=object)), grid_size=0.001)
+
+
+def prepare_tile(merged, ncf_reach, ncf_line, gulf_ll, crs, p):
+    """All input layers of one tile (with margin) in the tile's metric CRS.
+    merged: {layer: GeoDataFrame in crs}; ncf_*: lon/lat GeoDataFrames;
+    gulf_ll: open-Gulf polygon (lon/lat) or None. Returns a dict."""
     C, s = p.clearance_m, p.simplify_m
     areas = L.depth_areas(merged).reset_index(drop=True)
     wet = areas[areas.d1 >= 0]
-    water = L.close(shapely.union_all(wet.geometry.values), p.close_m)
-    log(f"water: {len(wet)} depth areas")
+    water = L.close(robust_union(wet.geometry.values), p.close_m) if len(wet) else shapely.Polygon()
     haz = L.hazards(merged).reset_index(drop=True)
     shore, fenders = L.shore_parts(merged, split_fenders=True)
     block = shore + list(haz[haz.blocking].geometry.values)
@@ -191,39 +180,36 @@ def prepare(region, merged):
     bridge_zone = shapely.Polygon()
     if br is not None and len(br):
         brw = br[br.intersects(water)]
-        bridge_zone = shapely.union_all(shapely.buffer(brw.geometry.values, p.bridge_zone_m, quad_segs=4))
-    far = shapely.union_all(shapely.buffer(block, C + 2 * s))
-    near = shapely.union_all(shapely.buffer(block, p.bridge_clearance_m + 2 * s))
-    B = shapely.union_all([far.difference(bridge_zone), near.intersection(bridge_zone),
-                           shapely.union_all(shapely.buffer(fenders, p.fender_clearance_m + 2 * s))])
+        if len(brw):
+            bridge_zone = shapely.union_all(shapely.buffer(brw.geometry.values, p.bridge_zone_m, quad_segs=4))
+    far = robust_union(shapely.buffer(block, C + 2 * s))
+    near = robust_union(shapely.buffer(block, p.bridge_clearance_m + 2 * s))
+    B = robust_union([far.difference(bridge_zone), near.intersection(bridge_zone),
+                      robust_union(shapely.buffer(fenders, p.fender_clearance_m + 2 * s))])
     Bs = shapely.make_valid(shapely.simplify(B, s, preserve_topology=True))
     dom = shapely.make_valid(water.difference(Bs))
     parts = [g for g in shapely.get_parts(dom) if g.geom_type == "Polygon" and g.area >= p.min_part_m2]
-    domain = shapely.union_all(parts)
-    log(f"domain: {domain.area / 1e6:.1f} km2 in {len(parts)} parts")
-    shore_union = shapely.union_all(shapely.buffer(shore + fenders, 0.01))
+    domain = shapely.union_all(parts) if parts else shapely.Polygon()
     rings = []
-    grown = 0.0
     base = Bs  # clearance + 2s from obstacles (fenders: less; rings are cost-only)
     for r in p.shore_rings_m[:2]:
         g = shapely.simplify(shapely.buffer(base, r - (C + 2 * s), quad_segs=4), p.ring_simplify_m)
         rings.append(shapely.make_valid(g))
-    log("shore rings")
     hz_known = haz[~haz.blocking]
     hz_zone = gpd.GeoDataFrame({"valsou_dm": hz_known.valsou_dm.values},
                                geometry=shapely.buffer(hz_known.geometry.values, C + 0.1))
     hz_ring = shapely.make_valid(shapely.simplify(
-        shapely.union_all(shapely.buffer(haz.geometry.values, p.hazard_ring_m, quad_segs=4)), 2.0))
+        shapely.union_all(shapely.buffer(haz.geometry.values, p.hazard_ring_m, quad_segs=4)), 2.0)) \
+        if len(haz) else shapely.Polygon()
     snd = L.soundings(merged)
     refine = sounding_refinement(areas, snd, p)
     lower = sounding_lowering(areas, refine, snd, p)
-    log(f"soundings: {len(snd)}; refinement regions {len(refine)}, lowering zones {len(lower)}")
     over = L.overhead(merged, water)
     if len(over):
         rad = np.where(over.geom_type.isin(["Polygon", "MultiPolygon"]), p.overhead_poly_buffer_m,
                        p.overhead_line_buffer_m)
         over["foot"] = shapely.buffer(over.geometry.values, rad)
-    chan, highway = L.channels(merged, region, crs)
+    chan, highway = L.channels(merged, ncf_reach, ncf_line, crs, p)
     chan = chan[chan.intersects(domain)].reset_index(drop=True)
     chan["geometry"] = [shapely.simplify(g, 2.0) if src == 4 else g
                         for g, src in zip(chan.geometry.values, chan.source.values)]
@@ -232,13 +218,19 @@ def prepare(region, merged):
         if len(highway) else shapely.Polygon()
     regs = L.reg_areas(merged).reset_index(drop=True)
     qual = L.quality(merged).reset_index(drop=True)
-    qual["geometry"] = shapely.make_valid(shapely.simplify(qual.geometry.values, 5.0, preserve_topology=True))
-    gulf = gulf_mask(shore_union, region, crs)
-    log("prepared all layers")
-    return dict(areas=areas, water=water, domain=domain, obst_buffer=Bs, shore_union=shore_union,
+    if len(qual):
+        qual["geometry"] = shapely.make_valid(shapely.simplify(qual.geometry.values, 5.0, preserve_topology=True))
+    gulf = None
+    if gulf_ll is not None and not gulf_ll.is_empty:
+        from pyproj import Transformer
+
+        tr = Transformer.from_crs(GEO_CRS, crs, always_xy=True)
+        gulf = shapely.make_valid(shapely.transform(gulf_ll, lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1]))))
+    used_cells = sorted(set(wet[wet.intersects(domain)].cell.astype(str))) if len(wet) and not domain.is_empty else []
+    return dict(areas=areas, water=water, domain=domain, obst_buffer=Bs,
                 rings=rings, haz=haz, hz_zone=hz_zone, hz_ring=hz_ring, snd=snd, refine=refine,
                 lower=lower, over=over, chan=chan, highway=hw, regs=regs, qual=qual, gulf=gulf,
-                block_raw=shapely.union_all(block), bridge_zone=bridge_zone, fender_raw=shapely.union_all(fenders) if fenders else shapely.Polygon())
+                gulf_ll=gulf_ll, used_cells=used_cells)
 
 
 def constraint_lines(prep):
@@ -257,14 +249,32 @@ def constraint_lines(prep):
     lines.append(shapely.boundary(prep["highway"]))
     lines += list(shapely.boundary(prep["regs"].geometry.values))
     lines += list(shapely.boundary(prep["qual"].geometry.values))
-    if prep["gulf"] is not None:
-        lines.append(shapely.boundary(prep["gulf"]))
     lines = [g for g in lines if g is not None and not g.is_empty]
     # keep only what is near the domain (cheap bbox + prepared intersects)
     env = shapely.buffer(dom, 2.0)
     shapely.prepare(env)
     lines = [g for g in lines if env.intersects(g)]
     return lines
+
+
+def tile_grid_lines(rect_u, box_u, coarse_u: int, fine_u: int, fine_cells):
+    """Size-grid lines for a tile (units): coarse lines every coarse_u over
+    the whole line box (the tile edges are among them), fine lines every
+    fine_u inside the coarse cells listed in fine_cells ((i, j) offsets from
+    the tile's south-west corner). All coordinates are exact integers."""
+    x0, y0, x1, y1 = rect_u
+    bx0, by0, bx1, by1 = box_u
+    out = []
+    xs = np.arange(-(-bx0 // coarse_u) * coarse_u, bx1 + 1, coarse_u)
+    ys = np.arange(-(-by0 // coarse_u) * coarse_u, by1 + 1, coarse_u)
+    out += [LineString([(int(x), by0), (int(x), by1)]) for x in xs]
+    out += [LineString([(bx0, int(y)), (bx1, int(y))]) for y in ys]
+    for i, j in fine_cells:
+        cx0, cy0 = x0 + i * coarse_u, y0 + j * coarse_u
+        for k in range(1, coarse_u // fine_u):
+            out.append(LineString([(cx0 + k * fine_u, cy0), (cx0 + k * fine_u, cy0 + coarse_u)]))
+            out.append(LineString([(cx0, cy0 + k * fine_u), (cx0 + coarse_u, cy0 + k * fine_u)]))
+    return out
 
 
 def grid_lines(bbox_units, step_units):
@@ -292,8 +302,14 @@ def polygon_area2(poly):
     return a
 
 
-def faces_and_triangles(lines_u, domain_u, bbox_u, p):
-    lines_u = list(lines_u) + grid_lines(bbox_u, int(round(p.grid_deg * UNITS)))
+def faces_and_triangles(lines_u, domain_u, bbox_u, p, grid=None, keep_rect=None):
+    """Node the constraint lines (units) on the integer grid, polygonize, keep
+    the faces inside the domain (and inside keep_rect, a tile), triangulate
+    them, repair and validate. grid: the size-grid lines (default: a uniform
+    grid of p.grid_deg over bbox_u)."""
+    if grid is None:
+        grid = grid_lines(bbox_u, int(round(p.grid_deg * UNITS)))
+    lines_u = list(lines_u) + list(grid)
     log(f"noding {len(lines_u)} lines, {sum(shapely.get_num_coordinates(lines_u))} coords")
     noded = shapely.union_all(np.asarray(lines_u, dtype=object), grid_size=1.0)
     log("noded")
@@ -302,7 +318,15 @@ def faces_and_triangles(lines_u, domain_u, bbox_u, p):
     shapely.prepare(domain_u)
     rp = shapely.point_on_surface(faces)
     keep = shapely.contains(domain_u, rp)
+    if keep_rect is not None:
+        x0, y0, x1, y1 = keep_rect
+        c = shapely.get_coordinates(rp)
+        keep &= (c[:, 0] > x0) & (c[:, 0] < x1) & (c[:, 1] > y0) & (c[:, 1] < y1)
     faces = faces[keep]
+    if len(faces) == 0:
+        rep = {"ok": True, "faces": 0, "flat_removed": 0, "tjunction_splits": 0, "area2_faces": 0,
+               "area2_triangles": 0, "area_mismatch": 0, "boundary_edges": 0, "bowtie_vertices": 0}
+        return faces, np.zeros((0, 2), np.int64), np.zeros((0, 3), np.int64), np.zeros(0, np.int64), rep
     log(f"faces in domain: {len(faces)}")
     cdt = shapely.constrained_delaunay_triangles(faces)
     counts = shapely.get_num_geometries(cdt)
@@ -363,7 +387,7 @@ def _pairs(geoms, pts, predicate, distance=None):
     return i, j
 
 
-def face_attributes(prep, pts_m, p, region):
+def face_attributes(prep, pts_m, p):
     n = len(pts_m)
     pts = shapely.points(pts_m)
     r = p.sample_radius_units * 0.0111  # metres (1 unit ~ 1.1 cm in latitude)
@@ -510,153 +534,3 @@ class Strings:
             self.index[s] = len(self.items)
             self.items.append(s)
         return self.index[s]
-
-
-def _geom_records(geoms_u):
-    """Split geometries into single parts: (part geometries, source index)."""
-    parts, src = [], []
-    for k, g in enumerate(geoms_u):
-        for q in shapely.get_parts(g):
-            if q.is_empty:
-                continue
-            parts.append(q)
-            src.append(k)
-    return parts, np.array(src, int)
-
-
-def _gtype_coords(q):
-    if q.geom_type == "Point":
-        return 1, shapely.get_coordinates(q)
-    if q.geom_type in ("LineString", "LinearRing"):
-        return 2, shapely.get_coordinates(q)
-    if q.geom_type == "Polygon":
-        c = shapely.get_coordinates(q.exterior)[:-1]
-        return 3, c
-    raise ValueError(q.geom_type)
-
-
-def side_tables(prep, U, S: Strings):
-    geom_pool = []
-    npool = 0
-
-    def add_geom(q):
-        nonlocal npool
-        gt, c = _gtype_coords(q)
-        c = np.rint(c).astype(np.int64)
-        first = npool
-        geom_pool.append(c)
-        npool += len(c)
-        rp = np.rint(shapely.get_coordinates(shapely.point_on_surface(q))[0]).astype(np.int64)
-        return gt, first, len(c), rp
-
-    # overhead: one record per input object (multi-part geometries keep their first part's rep point
-    # but list every part as its own record)
-    over = prep["over"]
-    ov_records, ov_map = [], {}
-    if len(over):
-        gu = U.geoms_to_units(over.geometry.values)
-        for k, (g, row) in enumerate(zip(gu, over.itertuples())):
-            ov_map[k] = len(ov_records)
-            for q in shapely.get_parts(g):
-                gt, first, cnt, rp = add_geom(q)
-                clr = row.clr_dm
-                fl = 1 if row.opens else 0
-                if row.kind == 1 and not row.opens and clr == -32768:
-                    clr, fl = 0, fl | 2  # not charted: treated as solid
-                ov_records.append((row.kind, fl, row.catbrg,
-                                   P.CLR_UNKNOWN if clr == -32768 else clr,
-                                   P.CLR_UNKNOWN if row.open_dm == -32768 else row.open_dm,
-                                   P.CLR_UNKNOWN if row.hor_dm == -32768 else row.hor_dm, 0,
-                                   S(row.OBJNAM), rp[0], rp[1], first, cnt, gt, (0,) * 7))
-    ovh = np.array(ov_records, dtype=P.OVHD_DT)
-    # hazards (all of them, raw geometry)
-    haz = prep["haz"]
-    hz_records = []
-    gu = U.geoms_to_units(haz.geometry.values)
-    for g, row in zip(gu, haz.itertuples()):
-        for q in shapely.get_parts(g):
-            gt, first, cnt, rp = add_geom(q)
-            hz_records.append((row.cls, min(255, max(0, row.WATLEV)), min(255, max(0, row.cat)), gt,
-                               row.valsou_dm, 0, rp[0], rp[1], first, cnt, S(row.OBJNAM), 0))
-    hzd = np.array(hz_records, dtype=P.HAZD_DT)
-    # channels
-    chan = prep["chan"]
-    rp = U.geoms_to_units(shapely.point_on_surface(chan.geometry.values)) if len(chan) else []
-    ch_records = []
-    for q, row in zip(rp, chan.itertuples()):
-        c = np.rint(shapely.get_coordinates(q)[0]).astype(np.int64)
-        ch_records.append((row.source, 1 if row.icw else 0, row.maint_dm, row.auth_dm, 0, S(row.name),
-                           S(row.ident), S(row.desc), row.date, c[0], c[1]))
-    chn = np.array(ch_records, dtype=P.CHAN_DT)
-    regs = prep["regs"]
-    rp = U.geoms_to_units(shapely.point_on_surface(regs.geometry.values)) if len(regs) else []
-    ar_records = []
-    for q, row in zip(rp, regs.itertuples()):
-        c = np.rint(shapely.get_coordinates(q)[0]).astype(np.int64)
-        name = row.OBJNAM if isinstance(row.OBJNAM, str) and row.OBJNAM else (
-            {1: "Entry prohibited area", 2: "Restricted area", 3: "Caution area"}[row.kind])
-        ar_records.append((row.kind, 1 if row.cls == "RESARE" else 2, 0, S(name), S(row.INFORM),
-                           c[0], c[1], (0, 0, 0)))
-    ars = np.array(ar_records, dtype=P.AREA_DT)
-    geom = np.concatenate(geom_pool).astype(np.int32) if geom_pool else np.zeros((0, 2), np.int32)
-    return ovh, ov_map, hzd, chn, ars, geom
-
-
-# --------------------------------------------------------------------------- build
-
-def build_pack(region, merged, metas, merge_stats=None, out_path=None) -> tuple[P.Pack, dict]:
-    t0 = time.time()
-    p = region.params
-    prep = prepare(region, merged)
-    U = Units(region.crs)
-    lines = constraint_lines(prep)
-    lines_u = U.geoms_to_units(lines)
-    domain_u = U.geoms_to_units([prep["domain"]])[0]
-    b = [int(round(v * UNITS)) for v in region.bbox]
-    faces, coords, tris, face_of, topo = faces_and_triangles(lines_u, domain_u, b, p)
-    if not topo["ok"]:
-        raise RuntimeError(f"mesh topology validation failed: {topo}")
-    pts_u, inr = face_sample_points(coords, tris, face_of, len(faces))
-    pts_m = U.units_to_metric(pts_u)
-    fa = face_attributes(prep, pts_m, p, region)
-    log("face attributes")
-    S = Strings()
-    ovh, ov_map, hzd, chn, ars, geom = side_tables(prep, U, S)
-    # face attribute overhead index -> record index
-    ov = fa["overhead"]
-    fa["overhead"] = np.array([ov_map.get(int(x), P.ID_NONE) if x != P.ID_NONE else P.ID_NONE for x in ov])
-    attrs_t = {k: np.asarray(v)[face_of] for k, v in fa.items()}
-    verts, ctris, perm = P.canonicalize(coords, tris)
-    attrs_t = {k: v[perm] for k, v in attrs_t.items()}
-    # the header bbox holds every vertex and every GEOM point (spec A.3)
-    allpts = np.vstack([verts.astype(np.int64), geom.astype(np.int64).reshape(-1, 2)])
-    vmin, vmax = allpts.min(0), allpts.max(0)
-    bbox = (min(b[0], int(vmin[0])), min(b[1], int(vmin[1])), max(b[2], int(vmax[0])), max(b[3], int(vmax[1])))
-    nbr, dup = P.adjacency(ctris)
-    assert dup == 0
-    grid = P.build_grid(verts, ctris, bbox, int(round(p.index_cell_deg * UNITS)))
-    used = set(merge_stats.get("cells_with_area", [])) if merge_stats else set(m["name"] for m in metas)
-    srcs = []
-    for m in sorted(metas, key=lambda m: m["name"]):
-        srcs.append((S(m["name"]), int(m["edtn"]), int(m["updn"]), int(str(m["isdt"]).replace("-", "") or 0),
-                     int(m["cscale"]), int(m["name"][2]), 1 if m["name"] in used else 0, (0,) * 6))
-    sources = np.array(srcs, dtype=P.SRCS_DT)
-    data_date = int(max((s["issue_date"] for s in sources if s["used"]), default=0))
-    now = dt.datetime.now(dt.timezone.utc)
-    info = {"builder": f"enc_routing {BUILDER_VERSION}", "params": json.dumps(p.__dict__, default=list),
-            "params_key": p.key(), "crs": region.crs, "cells": int(sources["used"].sum()),
-            "topology": json.dumps({k: topo[k] for k in ("faces", "flat_removed", "tjunction_splits",
-                                                          "bowtie_vertices", "boundary_edges")}),
-            "ncf": "USACE National Channel Framework (ChannelReach, ChannelLine)",
-            "attribution": "NOAA ENC and USACE NCF data; not for navigation"}
-    pack = P.Pack(region_id=region.rid, bbox=bbox, data_date=data_date,
-                  build_date=now.year * 10000 + now.month * 100 + now.day,
-                  build_time=now.hour * 10000 + now.minute * 100 + now.second,
-                  clearance_dm=int(round(p.clearance_m * 10)), check_dm=int(round((p.clearance_m - 1.0) * 10)),
-                  shore_rings_m=tuple(int(x) for x in (list(p.shore_rings_m[:2]) + [0, 0])[:2]),
-                  vertices=verts, tris=ctris, attrs=attrs_t, strings=S.items, overhead=ovh, hazards=hzd,
-                  channels=chn, areas=ars, sources=sources, geom=geom, info=info, nbr=nbr, grid=grid)
-    report = {"topology": topo, "vertices": int(len(verts)), "triangles": int(len(ctris)),
-              "faces": int(len(faces)), "build_seconds": round(time.time() - t0, 1),
-              "domain_km2": round(prep["domain"].area / 1e6, 1)}
-    return pack, prep, report

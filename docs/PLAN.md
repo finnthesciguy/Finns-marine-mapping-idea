@@ -228,6 +228,24 @@ Auto-routing decisions taken in this piece: the auto-route notice is a separate 
 
 Known gaps in the app so far: chart downloads run in the foreground only; the app installs NOAA's dated 2024 packages until our own are published; bundle id, name and icon are placeholders; background recording is untested on a device; no text labels on the chart (no offline glyphs).
 
+## 5d. Wave 4 progress
+
+Routing packs for the whole Gulf ([operator guide](routing-build.md)). Built from the ENC catalog of 2026-11-12 (1,147 cells of band 3 and better, 129 MB) and the USACE NCF; format 1.1 unchanged.
+
+| pack | cells used | triangles | size | data date | cold build (tiles + assemble) | peak memory |
+|---|---|---|---|---|---|---|
+| ncds_10 | 261 of 263 | 2.66 M | 13.2 MB | 2026-10-23 | 108 s | 2.0 GB |
+| ncds_11 | 413 of 419 | 4.18 M | 20.1 MB | 2026-11-06 | 133 s | 2.9 GB |
+| ncds_12 | 343 of 360 | 4.75 M | 22.8 MB | 2026-11-09 | 136 s | 3.1 GB |
+| ncds_13 | 257 of 276 | 3.83 M | 18.6 MB | 2026-11-09 | 120 s | 2.6 GB |
+| ncds_14 | 380 of 389 | 2.93 M | 14.5 MB | 2026-11-10 | 99 s | 2.1 GB |
+
+- **Regions and overlap.** Same ids as the chart regions; each pack is its chart box grown by 30 nm (inside the Gulf AOI). 37 % of stored triangles are overlap copies (89 MB of packs, 57 MB unique). Passages longer than the overlap across a region line (Texas to Florida, Morgan City to Galveston) still cannot be planned in one go; the app should name the hand-over point both packs hold.
+- **Builder.** Tiled (fixed 0.2° tiles, local transverse Mercator each, cached by an input hash): a changed cell rebuilds only its tiles (measured: 1 of 654 tiles), output is byte-identical whatever the build order (per-region cold builds and the all-regions build give the same content hash for all five packs). Topology validation still fails the build. Catalog, selection and downloads now come from pipeline/catalog. Open-Gulf mask derived from the data (passes under 10 km sealed); size grid 0.1° offshore. Part C of the format document needs the updates listed in routing-build.md section 8.
+- **Reference routes** (default boat, endpoints are named ENC features; strict / maintained channels needed / also unknown clearance / failed): ncds_10 8 / 2 / 0 / 1, ncds_11 6 / 1 / 1 / 2, ncds_12 3 / 1 / 1 / 4, ncds_13 8 / 1 / 0 / 0, ncds_14 9 / 0 / 0 / 1. No route found touches land, structures or blocking hazards in the raw data or passes under a fixed object below the air draft. RoutingKit (release) reproduces every reference route of all five packs exactly; the largest pack loads in 1.4 s and needs 263 MB resident (332 MB peak) on Linux.
+- **The GIWW, walked link by link inside only with a 6 ft requirement, is broken in many places:** by charted depth at Roberts Bay and south of Venice (maintained depth closes them), Clearwater to Anclote, St. George Sound and Apalachicola to West Bay, the Santa Rosa Sound danger zone (charted entry prohibited), Louisiana west of Larose and at Freshwater Bayou (maintained depth closes some), and it is cut by objects of unknown clearance (Biloxi Back Bay, Bay St. Louis, Calcasieu, Port Arthur), solid bridge parts (Bay St. Louis railroad swing bridge, Houma), and by locks, which are not modelled (New Orleans, Brazos/Colorado River in Texas).
+- **Open, for the owner and skippers:** Lake Pontchartrain is charted as one 0–5 m depth area, so it is closed to every keel boat (soundings are too sparse for the refinement rule); charted "entry prohibited" danger zones close the GIWW where it really is open most of the time; the Florida Keys sanctuary makes almost every Keys leg yellow; 63–75 % of hazards have no depth; locks and floodgates are obstacles; the largest pack needs about 330 MB on the phone. Nothing is published.
+
 ## 6. What the owner has to do
 
 Nothing is needed for Waves 1 and 2. Before Wave 3:
