@@ -130,8 +130,8 @@ extension GulfNavUITests {
         XCTAssertEqual(GulfNavUITests.statusField(app, "planBlocked"), "1")
         XCTAssertEqual(GulfNavUITests.statusField(app, "planHints"), "useMaintainedChannels")
         waitForOverlay(app, "blocked", equals: 1)
-        let message: XCUIElement = GulfNavUITests.element(app, "autoroute.noRoute.message")
-        XCTAssertTrue(message.waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        let message: XCUIElement = scrollTo(app, "autoroute.noRoute.message")
+        XCTAssertTrue(message.exists)
         XCTAssertTrue(message.label.hasPrefix("No route for My boat: the water is too shallow"), message.label)
         GulfNavUITests.logMapStatus(app, "autoroute-noroute")
         attachScreenshot(app, "autoroute-noroute")
@@ -179,8 +179,8 @@ extension GulfNavUITests {
         addProfile(app, name: "Bravo", draft: "3")
         waitForStatus(app, "profiles", "2")
         XCTAssertEqual(GulfNavUITests.statusField(app, "defaultProfile"), "Alpha", "the first boat stays the default")
-        let bravoDetail: XCUIElement = app.staticTexts["profile.detail.Bravo"]
-        XCTAssertTrue(bravoDetail.waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        let bravoDetail: XCUIElement = scrollTo(app, "profile.detail.Bravo")
+        XCTAssertTrue(bravoDetail.exists)
         XCTAssertTrue(bravoDetail.label.hasPrefix("Draft 3.0 ft + 1.5 ft margin"), bravoDetail.label)
         attachScreenshot(app, "profiles-two")
 
@@ -239,7 +239,7 @@ extension GulfNavUITests {
         if target.waitForExistence(timeout: 5) && target.isHittable { return target }
         var swipes: Int = 0
         while !(target.exists && target.isHittable) && swipes < 8 {
-            if downwards { app.swipeDown() } else { app.swipeUp() }
+            if downwards { scrollUp(app) } else { scrollDown(app) }
             swipes += 1
         }
         XCTAssertTrue(target.exists, "\(identifier) found after \(swipes) swipes")

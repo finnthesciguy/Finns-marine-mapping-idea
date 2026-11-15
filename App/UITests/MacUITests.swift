@@ -57,13 +57,13 @@ extension GulfNavUITests {
         attachScreenshot(app, "mac-waypoints-by-shortcut")
         app.buttons["waypoints.done"].tap()
 
-        // File > New Route on Chart (⌘N) starts the route editor; if the shortcut did not arrive (the sheet may
+        // Navigation > New Route on Chart (⌘N) starts the route editor; if the shortcut did not arrive (the sheet may
         // still be closing), the menu item is used and a note says so.
         XCTAssertTrue(app.buttons["map.chartsButton"].waitForExistence(timeout: GulfNavUITests.stepTimeout))
         app.typeKey("n", modifierFlags: XCUIElement.KeyModifierFlags.command)
         if !waitBriefly(10, { GulfNavUITests.statusField(app, "editPoints") == "0" }) {
-            print("GULFNAV-NOTE ⌘N did not start a route within 10 s; using File > New Route on Chart")
-            clickMenuItem(app, menu: "File", item: "New Route on Chart")
+            print("GULFNAV-NOTE ⌘N did not start a route within 10 s; using Navigation > New Route on Chart")
+            clickMenuItem(app, menu: "Navigation", item: "New Route on Chart")
         }
         waitForStatus(app, "editPoints", "0")
         let map: XCUIElement = GulfNavUITests.chartMap(app)

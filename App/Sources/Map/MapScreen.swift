@@ -106,11 +106,8 @@ struct MapScreen: View {
                         .frame(width: 2, height: 2)
                     #if targetEnvironment(macCatalyst)
                     // Debug probe for the UI tests: the window and screen size as macOS reports them.
-                    GeometryReader { geometry in
-                        StatusProbe(identifier: "mac.window",
-                                    value: "content=\(Int(geometry.size.width))x\(Int(geometry.size.height)); " + MacWindow.describe())
-                    }
-                    .frame(width: 2, height: 2)
+                    StatusProbe(identifier: "mac.window", value: MacWindow.describe())
+                        .frame(width: 2, height: 2)
                     #endif
                     Spacer()
                 }

@@ -8,26 +8,27 @@ import SwiftUI
 /// Shortcuts: ⌘N new route, ⇧⌘N plan auto-route, ⌘O import GPX, ⇧⌘E export all, ⌘, settings,
 /// ⌘D drop waypoint, ⌘R start/stop recording, ⌘1 charts, ⌘2 waypoints, ⌘3 routes, ⌘4 tracks,
 /// ⌘= zoom in, ⌘- zoom out, ⌘U north up, ⇧⌘U north up / course up, ⌘L follow the boat.
+///
+/// Placement: everything is in our own menus (Navigation, GPX, Chart). On CI, items given to
+/// `CommandGroup(replacing: .newItem)` never appeared in the File menu and ⌘N did nothing, while the
+/// `CommandMenu` items worked; on Mac Catalyst that group appears to live in UIKit's "new scene" menu, which a
+/// single-window app does not have. The File menu's own New item is still replaced by nothing, so ⌘N is free.
 struct MacCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
-        CommandGroup(replacing: CommandGroupPlacement.newItem) {
-            Button("New Route on Chart") { model.send(.newRoute) }
-                .keyboardShortcut("n", modifiers: [.command])
-            Button("Plan Auto-Route…") { model.send(.autoRoute) }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-            Divider()
-            Button("Import GPX…") { model.send(.importGPX) }
-                .keyboardShortcut("o", modifiers: [.command])
-            Button("Export All as GPX…") { model.send(.exportAll) }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-        }
+        // One window only (UIApplicationSupportsMultipleScenes is false): no New Window item.
+        CommandGroup(replacing: CommandGroupPlacement.newItem) {}
         CommandGroup(replacing: CommandGroupPlacement.appSettings) {
             Button("Settings…") { model.send(.showSettings) }
                 .keyboardShortcut(",", modifiers: [.command])
         }
         CommandMenu("Navigation") {
+            Button("New Route on Chart") { model.send(.newRoute) }
+                .keyboardShortcut("n", modifiers: [.command])
+            Button("Plan Auto-Route…") { model.send(.autoRoute) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Divider()
             Button("Drop Waypoint") { model.send(.dropWaypoint) }
                 .keyboardShortcut("d", modifiers: [.command])
             Button("Start or Stop Recording") { model.send(.toggleRecording) }
@@ -41,6 +42,12 @@ struct MacCommands: Commands {
                 .keyboardShortcut("3", modifiers: [.command])
             Button("Tracks…") { model.send(.showTracks) }
                 .keyboardShortcut("4", modifiers: [.command])
+        }
+        CommandMenu("GPX") {
+            Button("Import GPX…") { model.send(.importGPX) }
+                .keyboardShortcut("o", modifiers: [.command])
+            Button("Export All as GPX…") { model.send(.exportAll) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
         }
         CommandMenu("Chart") {
             Button("Zoom In") { model.send(.zoomIn) }

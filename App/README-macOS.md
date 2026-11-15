@@ -105,11 +105,11 @@ boat moves up Tampa Bay as on the iOS simulator. The launch switches in `README.
 
 | Area | iOS | Mac |
 |---|---|---|
-| Chart engine | MapLibre Native 7.0.0 | MapKit tile overlays reading the same MBTiles (see above); zoom buttons and a compass from MapKit |
+| Chart engine | MapLibre Native 7.0.0 | MapKit tile overlays reading the same MBTiles (see above); MapKit's own zoom buttons and compass are hidden (they would sit under the input layer) |
 | Position | GPS | Wi-Fi positioning through Location Services, often unavailable or denied. The instrument strip says "No position…" instead of showing values (also when the last fix is older than 30 s), and everything except "drop at the boat" and following works without a position |
 | "Drop Waypoint" with no position | error banner | dropped at the centre of the chart |
-| Chart interaction | tap, long-press, pinch | click (select / add route point), click-and-hold (drop waypoint), right-click or control-click context menu (Drop Waypoint Here, Go To Here, Auto-Route From Here, Auto-Route To Here, plus Select Waypoint on a waypoint), trackpad / scroll and MapKit's zoom controls, ⌘= / ⌘- |
-| Menu bar | — | File: New Route on Chart ⌘N, Plan Auto-Route… ⇧⌘N, Import GPX… ⌘O, Export All as GPX… ⇧⌘E. App menu: Settings… ⌘,. Navigation: Drop Waypoint ⌘D, Start or Stop Recording ⌘R, Charts ⌘1, Waypoints ⌘2, Routes ⌘3, Tracks ⌘4. Chart: Zoom In ⌘=, Zoom Out ⌘-, North Up ⌘U, Switch North Up / Course Up ⇧⌘U, Follow the Boat ⌘L. Debug builds: Debug menu. Each item does exactly what the matching map button does (`AppCommand`, carried out in `MapScreen`) |
+| Chart interaction | tap, long-press, pinch | a transparent input layer over the MapKit map takes all pointer input (on CI a click on MKMapView never reached the app's tap recognizer): click (select a waypoint / add a route point), double-click (zoom in on the point), click-and-hold (drop a waypoint), drag (pan; turns follow mode off), scroll wheel or two-finger scroll (zoom), trackpad pinch (zoom), right-click or control-click context menu (Drop Waypoint Here, Go To Here, Auto-Route From Here, Auto-Route To Here, plus Select Waypoint on a waypoint), ⌘= / ⌘- |
+| Menu bar | — | Navigation: New Route on Chart ⌘N, Plan Auto-Route… ⇧⌘N, Drop Waypoint ⌘D, Start or Stop Recording ⌘R, Charts ⌘1, Waypoints ⌘2, Routes ⌘3, Tracks ⌘4. GPX: Import GPX… ⌘O, Export All as GPX… ⇧⌘E. Chart: Zoom In ⌘=, Zoom Out ⌘-, North Up ⌘U, Switch North Up / Course Up ⇧⌘U, Follow the Boat ⌘L. App menu: Settings… ⌘,. Debug builds: Debug menu. File > New (window) is removed: one window. Items given to SwiftUI's File-menu `.newItem` group never appeared on Mac Catalyst (CI), so all items are in the app's own menus. Each item does exactly what the matching map button does (`AppCommand`, carried out in `MapScreen`) |
 | GPX import | document picker, "Open in Gulf Nav" | open panel (⌘O), drag a `.gpx` onto the window, Finder "Open With" > Gulf Nav; the same import plan screen |
 | GPX export | share sheet | save panel |
 | Screens | sheets | the same SwiftUI sheets, shown as Mac sheets on the window (no redesign) |
@@ -220,8 +220,9 @@ asset catalog; add a 1024 × 1024 image.
   less sharp than on iPhone. Requesting the next zoom level for `contentScaleFactor` 2 would fix that.
 - **Chart framing and zoom are approximate.** MapKit has no zoom levels. Zoom is converted with Web Mercator
   arithmetic, so framing a planned route and ⌘= / ⌘- steps are close to, not identical with, MapLibre's.
-- **Follow mode and scroll-wheel zoom.** A scroll-wheel or trackpad pan turns follow mode off (as a drag does on
-  iOS); zoom does not. Whether MapKit reports trackpad scrolling as a pan gesture on every Mac is unverified.
+- **Chart input is the app's own.** Drag pans and scroll / pinch zoom through MapKit's camera API from the input
+  layer; it has not been tried by hand on a real Mac (feel, scroll direction, speed of 120 points per zoom level).
+  Only a drag turns follow mode off; zoom does not.
 - **Fixed shortcuts.** Menu items do not show state ("Stop Recording" vs "Start Recording"); they are fixed
   wording with fixed shortcuts.
 - **Untested Mac wiring.** Drag and drop accepts GPX/XML data or a `.gpx` file URL; it is exercised by hand only,

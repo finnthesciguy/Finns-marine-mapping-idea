@@ -25,11 +25,14 @@
 // `MKPolyline(coordinates:count:)`; `MKPolylineRenderer(polyline:)` with `strokeColor`, `lineWidth`, `lineCap`,
 // `lineJoin`, `lineDashPattern`; `MKAnnotationView(annotation:reuseIdentifier:)` with `image`, `isEnabled`,
 // `displayPriority` (`.required`), `zPriority` (`.max`), `canShowCallout`; delegate methods
-// `mapView(_:rendererFor:)`, `mapView(_:viewFor:)`, `mapView(_:regionWillChangeAnimated:)`,
+// `mapView(_:rendererFor:)`, `mapView(_:viewFor:)`,
 // `mapView(_:regionDidChangeAnimated:)`, `mapViewDidChangeVisibleRegion(_:)`, `mapViewWillStartLoadingMap(_:)`,
 // `mapViewDidFinishLoadingMap(_:)`, `mapViewDidFailLoadingMap(_:withError:)`,
 // `mapViewDidFinishRenderingMap(_:fullyRendered:)`; `UIContextMenuInteraction(delegate:)`,
-// `contextMenuInteraction(_:configurationForMenuAtLocation:)`, `location(in:)`.
+// `contextMenuInteraction(_:configurationForMenuAtLocation:)`, `location(in:)`; for the input layer
+// `MKMapCamera.centerCoordinateDistance` (MKMapCamera.h, iOS 13+), `UIPanGestureRecognizer.allowedScrollTypesMask`
+// with `allowedTouchTypes = []` for scroll-only recognition (UIPanGestureRecognizer.h and its documentation page),
+// `UIPinchGestureRecognizer.scale`.
 #if targetEnvironment(macCatalyst)
 import AppServices
 import ChartKit
@@ -84,15 +87,17 @@ struct ChartMapView: UIViewRepresentable {
         // Rotation must stay enabled for course-up: with it off, MapKit ignores the camera heading and keeps
         // north up. The coordinator turns the chart back to north when north-up is selected.
         mapView.isRotateEnabled = true
-        mapView.showsCompass = true
-        mapView.showsZoomControls = true
+        // MapKit's zoom buttons and compass would sit under the input layer (see `ChartInputLayer`) and get no
+        // clicks; zoom is scroll / pinch / double-click / ⌘= ⌘-, and north-up is the map button and ⌘U.
+        mapView.showsCompass = false
+        mapView.showsZoomControls = false
         mapView.showsScale = true
         // About 150 m to 12,000 km from the camera: harbour detail to the whole Gulf and beyond.
         mapView.cameraZoomRange = MKMapView.CameraZoomRange(minCenterCoordinateDistance: 150,
                                                             maxCenterCoordinateDistance: 12_000_000)
         let container = ChartMapContainerView(mapView: mapView)
         context.coordinator.attach(mapView, probe: container.statusProbe)
-        context.coordinator.installGestures(on: mapView)
+        context.coordinator.installGestures(on: container.inputLayer)
         // Start over Tampa Bay until the first fix arrives (zoom 9, as on iOS).
         context.coordinator.setCenter(CLLocationCoordinate2D(latitude: 27.62, longitude: -82.70), zoom: 9, animated: false)
         return container
@@ -103,9 +108,32 @@ struct ChartMapView: UIViewRepresentable {
     }
 }
 
-/// Hosts the map plus, in debug builds, the invisible `map.status` accessibility element (as on iOS).
+/// A transparent view over the map that receives all pointer input for the chart (click, double-click,
+/// click-and-hold, drag, scroll, pinch, right-click). On the first CI run of the Mac UI tests a single click on the
+/// MKMapView never reached the UIKit tap recognizer added to it (a route got no points), while right-click through
+/// `UIContextMenuInteraction` did work. Why is not established (MapKit's own click handling on Mac Catalyst is the
+/// likely cause). With this layer the app's recognizers are on a plain UIView, which is the ordinary UIKit case, and
+/// map panning and zooming are done by the coordinator through MapKit's camera API. It is not an accessibility
+/// element, so `chart-map` (the map view) is still what the tests find.
+final class ChartInputLayer: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.clear
+        isOpaque = false
+        isUserInteractionEnabled = true
+        isAccessibilityElement = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+}
+
+/// Hosts the map, the input layer above it and, in debug builds, the invisible `map.status` accessibility element.
 final class ChartMapContainerView: UIView {
     let mapView: MKMapView
+    let inputLayer: ChartInputLayer
     let statusProbe: UIView?
 
     init(mapView: MKMapView) {
@@ -123,10 +151,14 @@ final class ChartMapContainerView: UIView {
         #else
         self.statusProbe = nil
         #endif
+        self.inputLayer = ChartInputLayer(frame: mapView.frame)
         super.init(frame: mapView.frame)
         mapView.frame = bounds
         mapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(mapView)
+        inputLayer.frame = bounds
+        inputLayer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(inputLayer)
         if let statusProbe {
             addSubview(statusProbe)
         }
@@ -548,28 +580,114 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
 
     // MARK: Clicks, long press and the context menu
 
-    func installGestures(on mapView: MKMapView) {
+    func installGestures(on layer: ChartInputLayer) {
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPress.minimumPressDuration = 0.6
         longPress.delegate = self
-        mapView.addGestureRecognizer(longPress)
-        // A double click zooms (MapKit); a single click must wait for it to fail so it does not also add a route
-        // point or change the selection.
+        layer.addGestureRecognizer(longPress)
+        // A double click zooms in; a single click waits for it to fail so it does not also add a route point.
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         doubleTap.delegate = self
-        mapView.addGestureRecognizer(doubleTap)
+        layer.addGestureRecognizer(doubleTap)
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.require(toFail: doubleTap)
         tap.delegate = self
-        mapView.addGestureRecognizer(tap)
-        mapView.addInteraction(UIContextMenuInteraction(delegate: self))
+        layer.addGestureRecognizer(tap)
+        // Drag with the mouse or one finger on the trackpad: pan the chart.
+        let drag = UIPanGestureRecognizer(target: self, action: #selector(handleDrag(_:)))
+        drag.delegate = self
+        layer.addGestureRecognizer(drag)
+        // Scroll wheel or two-finger trackpad scroll: zoom (scroll-only: no touch types, per the
+        // `allowedScrollTypesMask` documentation).
+        let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+        scroll.allowedScrollTypesMask = UIScrollTypeMask.all
+        scroll.allowedTouchTypes = []
+        scroll.delegate = self
+        layer.addGestureRecognizer(scroll)
+        scrollRecognizer = scroll
+        // Trackpad pinch: zoom.
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        layer.addGestureRecognizer(pinch)
+        pinchRecognizer = pinch
+        layer.addInteraction(UIContextMenuInteraction(delegate: self))
     }
 
-    /// MapKit's own recognizers keep working alongside ours.
+    private weak var scrollRecognizer: UIGestureRecognizer?
+    private weak var pinchRecognizer: UIGestureRecognizer?
+    private var lastDrag: CGPoint = .zero
+    private var lastScroll: CGPoint = .zero
+    private var pinchStartDistance: Double = 0
+
+    /// Scroll and pinch may run together with anything; clicks, holds and drags are exclusive.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        true
+        let free: [UIGestureRecognizer?] = [scrollRecognizer, pinchRecognizer]
+        return free.contains { $0 === gestureRecognizer || $0 === otherGestureRecognizer }
+    }
+
+    @objc private func handleDrag(_ recognizer: UIPanGestureRecognizer) {
+        guard let mapView else { return }
+        switch recognizer.state {
+        case .began:
+            lastDrag = recognizer.translation(in: mapView)
+            if let callback = latest?.onUserPannedMap {
+                DispatchQueue.main.async {
+                    callback()
+                }
+            }
+        case .changed:
+            let translation: CGPoint = recognizer.translation(in: mapView)
+            let dx: CGFloat = translation.x - lastDrag.x
+            let dy: CGFloat = translation.y - lastDrag.y
+            lastDrag = translation
+            // The point that must come to the centre is the centre moved against the drag.
+            let target = CGPoint(x: mapView.bounds.midX - dx, y: mapView.bounds.midY - dy)
+            mapView.setCenter(mapView.convert(target, toCoordinateFrom: mapView), animated: false)
+        default:
+            break
+        }
+    }
+
+    @objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
+        guard let mapView else { return }
+        switch recognizer.state {
+        case .began:
+            lastScroll = recognizer.translation(in: mapView)
+        case .changed:
+            let translation: CGPoint = recognizer.translation(in: mapView)
+            let dy: Double = Double(translation.y - lastScroll.y)
+            lastScroll = translation
+            // 120 points of scrolling per zoom level; scrolling the content down (wheel up) zooms in.
+            zoom(byLevels: dy / 120.0, animated: false)
+        default:
+            break
+        }
+    }
+
+    @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+        guard let mapView else { return }
+        switch recognizer.state {
+        case .began:
+            pinchStartDistance = mapView.camera.centerCoordinateDistance
+        case .changed:
+            guard pinchStartDistance > 0, recognizer.scale > 0.01 else { return }
+            guard let camera = mapView.camera.copy() as? MKMapCamera else { return }
+            camera.centerCoordinateDistance = pinchStartDistance / Double(recognizer.scale)
+            mapView.setCamera(camera, animated: false)
+        default:
+            break
+        }
+    }
+
+    /// Zooms by `levels` zoom levels (positive: in), keeping the centre and heading (MapKit clamps the distance to
+    /// `cameraZoomRange`).
+    func zoom(byLevels levels: Double, animated: Bool) {
+        guard let mapView, levels.isFinite, levels != 0 else { return }
+        guard let camera = mapView.camera.copy() as? MKMapCamera else { return }
+        camera.centerCoordinateDistance = camera.centerCoordinateDistance / pow(2.0, levels)
+        mapView.setCamera(camera, animated: animated)
     }
 
     private func coordinate(at point: CGPoint, in mapView: MKMapView) -> Coordinate {
@@ -583,7 +701,13 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     }
 
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
-        // Nothing: MapKit zooms on a double click by itself; this recognizer only delays single clicks.
+        // Zoom in one level on the clicked point.
+        guard recognizer.state == .ended, let mapView else { return }
+        let point: CGPoint = recognizer.location(in: mapView)
+        guard let camera = mapView.camera.copy() as? MKMapCamera else { return }
+        camera.centerCoordinate = mapView.convert(point, toCoordinateFrom: mapView)
+        camera.centerCoordinateDistance = camera.centerCoordinateDistance / 2.0
+        mapView.setCamera(camera, animated: true)
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -708,9 +832,7 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
 
         if let command = view.cameraCommand, command.revision != appliedCameraRevision {
             appliedCameraRevision = command.revision
-            let step: Double = command.kind == .zoomIn ? 1 : -1
-            let center: CLLocationCoordinate2D = mapView.centerCoordinate
-            setCenter(center, zoom: zoomLevel + step, animated: true)
+            zoom(byLevels: command.kind == .zoomIn ? 1 : -1, animated: true)
             return
         }
         if view.focusRevision != appliedFocusRevision {
@@ -741,30 +863,7 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
         return d > 180 ? 360 - d : d
     }
 
-    /// True while one of MapKit's pan recognizers (mouse drag or two-finger trackpad scroll) is active: the
-    /// region change comes from the user, not from follow mode. Zooming does not switch follow off (as on iOS).
-    private func userIsPanning(_ mapView: MKMapView) -> Bool {
-        var views: [UIView] = [mapView]
-        views.append(contentsOf: mapView.subviews)
-        for view in views {
-            for recognizer in view.gestureRecognizers ?? [] where recognizer is UIPanGestureRecognizer {
-                if recognizer.state == .began || recognizer.state == .changed {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
     // MARK: MKMapViewDelegate
-
-    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
-        if userIsPanning(mapView), let callback = latest?.onUserPannedMap {
-            DispatchQueue.main.async {
-                callback()
-            }
-        }
-    }
 
     func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
         updateArrow(mapDirection: mapView.camera.heading)

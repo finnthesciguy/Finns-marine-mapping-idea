@@ -33,8 +33,11 @@ else
 fi
 
 # /path/GulfNavUITests.swift:83: error: -[GulfNavUITests.GulfNavUITests testX] : XCTAssertTrue failed - message
+# becomes "GulfNavUITests.swift:83 [testX]: XCTAssertTrue failed - message" (the test the failure belongs to, since a
+# helper's file and line alone do not say which test called it).
 failures=$(grep -E "^[^ ].*\.swift:[0-9]+: error: " "$log" \
-  | sed -E 's#^.*/([^/]+\.swift:[0-9]+): error: (-\[[^]]*\] : )?#\1: #' \
+  | sed -E 's#^.*/([^/]+\.swift:[0-9]+): error: -\[[^] ]+ ([^]]+)\] : #\1 [\2]: #' \
+  | sed -E 's#^.*/([^/]+\.swift:[0-9]+): error: #\1: #' \
   | cut -c1-2000 | awk '!seen[$0]++' | head -n 10)
 if [ -n "$failures" ]; then
   echo "--- failures ---"

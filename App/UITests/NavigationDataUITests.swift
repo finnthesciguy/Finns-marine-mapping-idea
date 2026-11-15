@@ -51,6 +51,7 @@ extension GulfNavUITests {
         // announced at once (ETA "—" is then correct); bearing and distance are shown either way.
         app.staticTexts["waypoint.name.Egmont"].tap()
         let goTo: XCUIElement = app.buttons["waypoint.edit.goTo"]
+        reveal(app, goTo)
         XCTAssertTrue(goTo.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         goTo.tap()
         waitForStatus(app, "nav", "directTo")
@@ -112,6 +113,7 @@ extension GulfNavUITests {
         XCTAssertTrue(second.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         second.tap()
         let delete: XCUIElement = app.buttons["waypoint.edit.delete"]
+        reveal(app, delete)
         XCTAssertTrue(delete.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         delete.tap()
         tapConfirmation(app, identifier: "waypoint.edit.confirmDelete", label: "Delete")
@@ -159,6 +161,7 @@ extension GulfNavUITests {
         XCTAssertTrue(detail.label.hasPrefix("3 points, "), detail.label)
         app.staticTexts["route.name.0"].tap()
         let follow: XCUIElement = app.buttons["route.follow"]
+        reveal(app, follow)
         XCTAssertTrue(follow.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         follow.tap()
         waitForStatus(app, "nav", "route")
@@ -189,6 +192,7 @@ extension GulfNavUITests {
         XCTAssertTrue(row.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         row.tap()
         let follow: XCUIElement = app.buttons["route.follow"]
+        reveal(app, follow)
         XCTAssertTrue(follow.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         follow.tap()
         waitForStatus(app, "nav", "route")
@@ -459,6 +463,22 @@ extension GulfNavUITests {
         #endif
     }
 
+    /// Mac: a sheet in an 800 × 632 window is shorter than a phone screen, and list rows below the fold are not in
+    /// the accessibility tree; scroll until the element is there and hittable (up to 8 steps). iOS: nothing (the
+    /// layout the iOS assertions were written for is unchanged).
+    @MainActor
+    func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
+        #if targetEnvironment(macCatalyst)
+        if element.waitForExistence(timeout: 3) && element.isHittable { return }
+        var steps: Int = 0
+        while !(element.exists && element.isHittable) && steps < 8 {
+            scrollDown(app)
+            steps += 1
+        }
+        print("GULFNAV-NOTE revealed an element after \(steps) scroll steps (exists: \(element.exists))")
+        #endif
+    }
+
     /// Scrolls the frontmost list down one step: a swipe on a touch screen; on the Mac (where dragging does not
     /// scroll) a scroll-wheel step on the list.
     @MainActor
@@ -495,11 +515,46 @@ extension GulfNavUITests {
     @MainActor
     func clickMenuItem(_ app: XCUIApplication, menu: String, item: String) {
         let bar: XCUIElement = app.menuBars.menuBarItems[menu]
-        XCTAssertTrue(bar.waitForExistence(timeout: GulfNavUITests.stepTimeout), "menu bar item \(menu)")
+        if !bar.waitForExistence(timeout: GulfNavUITests.stepTimeout) {
+            logMenuBar(app)
+        }
+        XCTAssertTrue(bar.exists, "menu bar item \(menu)")
         bar.click()
         let entry: XCUIElement = app.menuBars.menuItems[item]
-        XCTAssertTrue(entry.waitForExistence(timeout: GulfNavUITests.stepTimeout), "menu item \(menu) > \(item)")
+        if !entry.waitForExistence(timeout: GulfNavUITests.stepTimeout) {
+            logMenuBar(app)
+            logMenuItems(app, of: bar, menu: menu)
+        }
+        XCTAssertTrue(entry.exists, "menu item \(menu) > \(item)")
         entry.click()
+    }
+
+    /// Mac: prints the menu bar's top-level titles as a GULFNAV-NOTE line.
+    @MainActor
+    func logMenuBar(_ app: XCUIApplication) {
+        let items: XCUIElementQuery = app.menuBars.menuBarItems
+        var titles: [String] = []
+        var index: Int = 0
+        while index < items.count && index < 20 {
+            let element: XCUIElement = items.element(boundBy: index)
+            titles.append(element.title.isEmpty ? element.label : element.title)
+            index += 1
+        }
+        print("GULFNAV-NOTE menu bar: \(titles.joined(separator: " | "))")
+    }
+
+    /// Mac: prints the item titles of an open menu as a GULFNAV-NOTE line.
+    @MainActor
+    func logMenuItems(_ app: XCUIApplication, of bar: XCUIElement, menu: String) {
+        let items: XCUIElementQuery = bar.menuItems
+        var titles: [String] = []
+        var index: Int = 0
+        while index < items.count && index < 30 {
+            let element: XCUIElement = items.element(boundBy: index)
+            titles.append(element.title.isEmpty ? element.label : element.title)
+            index += 1
+        }
+        print("GULFNAV-NOTE menu \(menu) items: \(titles.joined(separator: " | "))")
     }
     #endif
 

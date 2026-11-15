@@ -138,24 +138,37 @@ enum MacWindow {
     /// Fits a 1024 × 768 display with the menu bar and Dock.
     static let contentMinimum: CGSize = CGSize(width: 800, height: 600)
     private static var lastRequest: String = "none"
+    private static var requestCount: Int = 0
+    private static var startedAt: Date?
+    /// Only while the app starts is the window resized; after that the user's own size is kept.
+    static let startUpPeriod: TimeInterval = 6
 
+    /// Sets the minimum size and, during start-up, asks for the default size (clamped to the screen) whenever the
+    /// window is smaller. On CI the first request was made while the window was still the tiny "Loading…" window
+    /// and did not stick (the window ended at the 800 × 600 content minimum), and later calls only checked the
+    /// minimum, so nothing asked again; `GulfNavApp` now calls this several times during start-up.
     static func configure() {
+        let now = Date()
+        if startedAt == nil { startedAt = now }
+        let starting: Bool = now.timeIntervalSince(startedAt ?? now) < startUpPeriod
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
             let screen: CGSize = windowScene.screen.bounds.size
             let usable = CGSize(width: max(screen.width - 40, 320), height: max(screen.height - 100, 320))
             let minimum = CGSize(width: min(contentMinimum.width, usable.width), height: min(contentMinimum.height, usable.height))
             windowScene.sizeRestrictions?.minimumSize = minimum
+            let wanted = CGSize(width: min(defaultSize.width, usable.width), height: min(defaultSize.height, usable.height))
             let current: CGRect = windowScene.effectiveGeometry.systemFrame
-            if current.width < minimum.width || current.height < minimum.height {
-                let size = CGSize(width: min(defaultSize.width, usable.width), height: min(defaultSize.height, usable.height))
-                let frame = CGRect(x: 20, y: 40, width: size.width, height: size.height)
-                lastRequest = "\(Int(frame.width))x\(Int(frame.height))"
-                windowScene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Mac(systemFrame: frame)) { error in
-                    let text: String = error.localizedDescription
-                    Task { @MainActor in
-                        MacWindow.noteFailure(text)
-                    }
+            let tooSmall: Bool = current.width < minimum.width || current.height < minimum.height
+            let belowWanted: Bool = current.width < wanted.width - 20 || current.height < wanted.height - 20
+            guard tooSmall || (starting && belowWanted) else { continue }
+            let frame = CGRect(x: 20, y: 40, width: wanted.width, height: wanted.height)
+            requestCount += 1
+            lastRequest = "\(Int(frame.width))x\(Int(frame.height)) (request \(requestCount), window was \(Int(current.width))x\(Int(current.height)))"
+            windowScene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Mac(systemFrame: frame)) { error in
+                let text: String = error.localizedDescription
+                Task { @MainActor in
+                    MacWindow.noteFailure(text)
                 }
             }
         }
@@ -165,14 +178,17 @@ enum MacWindow {
         lastRequest += " failed: " + text
     }
 
-    /// Debug probe value (`mac.window`): `screen=WxH; window=x,y,WxH; requested=…`.
+    /// Debug probe value (`mac.window`): `screen=WxH; window=x,y,WxH; content=WxH; requested=…`. `content` is the
+    /// key window's bounds (the earlier probe measured its own 2 × 2 frame).
     static func describe() -> String {
         var parts: [String] = []
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
             let screen: CGSize = windowScene.screen.bounds.size
             let frame: CGRect = windowScene.effectiveGeometry.systemFrame
+            let content: CGSize = windowScene.windows.first?.bounds.size ?? .zero
             parts.append("screen=\(Int(screen.width))x\(Int(screen.height))")
+            parts.append("content=\(Int(content.width))x\(Int(content.height))")
             parts.append("window=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))x\(Int(frame.height))")
         }
         parts.append("requested=" + lastRequest)
