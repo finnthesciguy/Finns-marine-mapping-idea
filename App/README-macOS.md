@@ -51,6 +51,8 @@ How the MapKit map matches the iOS one:
     (`AppServices.ChartTileMath`).
 - **Offline base.** A water-coloured tile overlay replaces Apple's map, so nothing is loaded from Apple's
   servers and the chart looks as it does on iOS.
+- **Missing tiles.** A tile the package does not have (outside the region box, a zoom it lacks) is answered with a
+  transparent tile. Returning an error made MapKit report a map load failure (seen on CI).
 - **Overlays.** Tracks, routes, route points, the direct-to line, planned auto-routes, blocked places and
   waypoints come from the same GeoJSON (`AppServices.MapOverlays`).
   - The MapLibre layer table is re-expressed as data in `AppServices.OverlayStyling`: the same colours, widths,
@@ -111,7 +113,7 @@ boat moves up Tampa Bay as on the iOS simulator. The launch switches in `README.
 | GPX import | document picker, "Open in Gulf Nav" | open panel (⌘O), drag a `.gpx` onto the window, Finder "Open With" > Gulf Nav; the same import plan screen |
 | GPX export | share sheet | save panel |
 | Screens | sheets | the same SwiftUI sheets, shown as Mac sheets on the window (no redesign) |
-| Window | — | opens at 1280 × 860, minimum 900 × 640, the chart fills the window |
+| Window | — | opens at 1280 × 860 (clamped to the screen), minimum 800 × 600 (fits a 1024 × 768 display), the chart fills the window. SwiftUI sizes a Catalyst window from its content, and the first content is the small "Loading…" view (CI saw a 59 × 69 window), so the root view has a minimum frame with `.windowResizability(.contentMinSize)`, and `MacWindow.configure()` sets the scene's minimum size and requests a frame (`requestGeometryUpdate(.Mac(systemFrame:))`) when the window is still smaller |
 | Keep the screen on | idle timer | "Keep the display awake": a process activity that stops display sleep while the setting is on |
 | Track recording | background location mode while recording, blue indicator | no background mode needed (a Mac app keeps running behind other windows); records while a position is available. The Tracks and Settings wording says so |
 | Data folder | `Library/Charts`, `Library/AppData`, `Library/RoutingPacks` | the same subfolders under `~/Library/Containers/com.example.gulfnav/Data/Library/Application Support/com.example.gulfnav/` (sandboxed). Charts and routing packs are excluded from backup (Time Machine honours the flag) |
@@ -171,7 +173,9 @@ iOS app did before:
   - the speed-unit picker is also found as radio buttons;
   - export expects a save panel and cancels it.
 - **Mac-only tests** (`UITests/MacUITests.swift`):
-  - the window size and the chart filling it;
+  - the window size (the window that contains the chart, at least 800 × 600) and the chart filling it; every test
+    logs each window's frame and the app's `mac.window` probe (screen and window size as macOS reports them) as
+    `GULFNAV-NOTE` lines;
   - menu items and ⌘D / ⌘R / ⌘2 / ⌘N doing what the buttons do;
   - no simulated GPS: the "no position" line, and ⌘D dropping at the chart centre;
   - right-click > Drop Waypoint Here.

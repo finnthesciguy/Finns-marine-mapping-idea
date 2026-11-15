@@ -104,6 +104,14 @@ struct MapScreen: View {
                     StatusProbe(identifier: "app.status",
                                 value: model.autoRoute.statusValue + "; " + model.profiles.statusValue + "; " + plotter.statusValue)
                         .frame(width: 2, height: 2)
+                    #if targetEnvironment(macCatalyst)
+                    // Debug probe for the UI tests: the window and screen size as macOS reports them.
+                    GeometryReader { geometry in
+                        StatusProbe(identifier: "mac.window",
+                                    value: "content=\(Int(geometry.size.width))x\(Int(geometry.size.height)); " + MacWindow.describe())
+                    }
+                    .frame(width: 2, height: 2)
+                    #endif
                     Spacer()
                 }
                 Spacer()
@@ -152,6 +160,9 @@ struct MapScreen: View {
             if editing { model.map.follow = false }
         }
         .onAppear {
+            #if targetEnvironment(macCatalyst)
+            MacWindow.configure()
+            #endif
             KeepScreenOn.set(model.plotter.data.settings.keepScreenOn)
         }
         .onChange(of: plotter.data.settings.keepScreenOn) { _, keepOn in
@@ -489,11 +500,17 @@ struct InstrumentStrip: View {
         let cog: String = showsValues ? InstrumentFormat.cog(degrees: readout.courseOverGround) : InstrumentFormat.placeholder
         VStack(alignment: .leading, spacing: 4) {
             if let state = positionState, let message = PositionStatus.message(state) {
-                Label(message, systemImage: "location.slash")
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
-                    .padding(.horizontal, 10)
-                    .accessibilityIdentifier("instrument.positionStatus")
+                // The identifier goes on the text: on a Label it reached the symbol image, whose accessibility
+                // label is "Location Services Off" (seen on CI).
+                HStack(spacing: 6) {
+                    Image(systemName: "location.slash")
+                        .accessibilityHidden(true)
+                    Text(message)
+                        .accessibilityIdentifier("instrument.positionStatus")
+                }
+                .font(.caption)
+                .foregroundStyle(Color.secondary)
+                .padding(.horizontal, 10)
             }
             values(sog: sog, cog: cog, position: position)
         }

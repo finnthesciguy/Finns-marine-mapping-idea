@@ -376,6 +376,10 @@ jobs:
         run: |
           xcodebuild -version
           sw_vers
+      - name: Display configuration
+        run: |
+          # The UI tests need a window of at least 800 x 600 points; show what display the runner has.
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Resolution|UI Looks like|Display Type|Main Display|Online|Chipset' || echo "(no display information)"
       - name: Allow UI automation
         run: |
           # macOS UI tests drive the app through the accessibility APIs; without automation mode a CI Mac may

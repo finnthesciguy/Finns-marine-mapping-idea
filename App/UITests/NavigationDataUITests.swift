@@ -434,6 +434,18 @@ extension GulfNavUITests {
     func importSampleGPX(_ app: XCUIApplication) {
         #if targetEnvironment(macCatalyst)
         clickMenuItem(app, menu: "Debug", item: "Import Sample GPX")
+        var path: String = "menu bar Debug > Import Sample GPX"
+        if !app.staticTexts["gpx.summary"].waitForExistence(timeout: 10) {
+            // Fallback: the debug menu button in the window (a SwiftUI Menu: its items are menu items on a Mac).
+            path = "window debug menu (menu bar item gave no import plan in 10 s)"
+            let button: XCUIElement = app.descendants(matching: .any).matching(identifier: "map.debugMenu").firstMatch
+            if button.waitForExistence(timeout: 5) {
+                button.click()
+                let item: XCUIElement = app.menuItems["Import sample GPX"].firstMatch
+                if item.waitForExistence(timeout: 5) { item.click() }
+            }
+        }
+        print("GULFNAV-NOTE sample GPX import via \(path)")
         XCTAssertTrue(app.staticTexts["gpx.summary"].waitForExistence(timeout: GulfNavUITests.stepTimeout), "import plan shown")
         return
         #else

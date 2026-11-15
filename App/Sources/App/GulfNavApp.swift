@@ -10,11 +10,18 @@ struct GulfNavApp: App {
         // minimum below which the map controls and instrument strip would overlap.
         WindowGroup {
             RootView(model: model)
+                .frame(minWidth: MacWindow.contentMinimum.width, minHeight: MacWindow.contentMinimum.height)
                 .onAppear {
-                    MacWindow.applySizeLimits()
+                    MacWindow.configure()
+                }
+                .task {
+                    // Again after the first layout, in case the scene was not connected or sized yet.
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    MacWindow.configure()
                 }
         }
         .defaultSize(width: MacWindow.defaultSize.width, height: MacWindow.defaultSize.height)
+        .windowResizability(.contentMinSize)
         .commands {
             MacCommands(model: model)
         }

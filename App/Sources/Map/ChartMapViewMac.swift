@@ -158,6 +158,14 @@ enum ChartTileImage {
                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     }
 
+    /// A fully transparent tile.
+    static func transparent() -> Data? {
+        guard let context = context() else { return nil }
+        context.clear(CGRect(x: 0, y: 0, width: side, height: side))
+        guard let image = context.makeImage() else { return nil }
+        return png(image)
+    }
+
     /// A tile of one colour (the water background).
     static func solid(red: CGFloat, green: CGFloat, blue: CGFloat) -> Data? {
         guard let context = context() else { return nil }
@@ -185,7 +193,14 @@ enum ChartTileImage {
     }
 }
 
-/// Error passed to MapKit for a tile the package does not have (MapKit then draws nothing there).
+/// A tile the package does not have (outside the region box, a zoom it lacks, a gap) is answered with a
+/// transparent tile, not an error: MapKit reported such errors through `mapViewDidFailLoadingMap` (seen on CI as
+/// `didFailLoading=…NoChartTile…`), which is for real failures only.
+enum EmptyTile {
+    static let data: Data? = ChartTileImage.transparent()
+}
+
+/// Error passed to MapKit only when not even the transparent tile could be made.
 struct NoChartTile: Error {}
 
 /// The offline base: water colour everywhere, replacing Apple's map (as the offline MapLibre style does on iOS).
@@ -243,13 +258,13 @@ final class ChartTileOverlay: MKTileOverlay {
         let tile = ChartTileMath.Tile(zoom: path.z, x: path.x, y: path.y)
         guard let reader, tile.zoom >= entry.sourceMinZoom, ChartTileMath.tile(tile, overlaps: entry.bounds),
               let source = ChartTileMath.source(for: tile, maxZoom: entry.sourceMaxZoom) else {
-            result(nil, NoChartTile())
+            ChartTileOverlay.noTile(result)
             return
         }
         Task.detached {
             let data: Data? = try? await reader.tile(zoom: source.tile.zoom, x: source.tile.x, y: source.tile.y)
             guard let data else {
-                result(nil, NoChartTile())
+                ChartTileOverlay.noTile(result)
                 return
             }
             if source.isWholeTile {
@@ -257,8 +272,17 @@ final class ChartTileOverlay: MKTileOverlay {
             } else if let scaled = ChartTileImage.crop(data, source) {
                 result(scaled, nil)
             } else {
-                result(nil, NoChartTile())
+                ChartTileOverlay.noTile(result)
             }
+        }
+    }
+
+    /// Answers a request for a tile the package does not have.
+    static func noTile(_ result: @escaping @Sendable (Data?, (any Error)?) -> Void) {
+        if let empty = EmptyTile.data {
+            result(empty, nil)
+        } else {
+            result(nil, NoChartTile())
         }
     }
 }

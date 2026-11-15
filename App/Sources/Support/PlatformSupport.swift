@@ -127,17 +127,56 @@ extension GPXDocumentTypes {
 #if targetEnvironment(macCatalyst)
 // MARK: - Mac window
 
-/// Window size limits of the Mac build (`UIWindowScene.sizeRestrictions`, Mac Catalyst 13.1+).
+/// Window size of the Mac build. SwiftUI sizes a Mac Catalyst window from its content; the first content is the
+/// small "Loading…" view, which on CI gave a 59 × 69 point window with the map screen laid out around it. So:
+/// - the root view has a minimum frame (`contentMinimum`) and the scene uses `.windowResizability(.contentMinSize)`;
+/// - `configure()` sets `UIWindowScene.sizeRestrictions.minimumSize` and, if the window is still smaller, asks
+///   for a frame with `requestGeometryUpdate(.Mac(systemFrame:))` (Mac Catalyst 16+), clamped to the screen.
 @MainActor
 enum MacWindow {
     static let defaultSize: CGSize = CGSize(width: 1280, height: 860)
-    static let minimumSize: CGSize = CGSize(width: 900, height: 640)
+    /// Fits a 1024 × 768 display with the menu bar and Dock.
+    static let contentMinimum: CGSize = CGSize(width: 800, height: 600)
+    private static var lastRequest: String = "none"
 
-    static func applySizeLimits() {
+    static func configure() {
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
-            windowScene.sizeRestrictions?.minimumSize = minimumSize
+            let screen: CGSize = windowScene.screen.bounds.size
+            let usable = CGSize(width: max(screen.width - 40, 320), height: max(screen.height - 100, 320))
+            let minimum = CGSize(width: min(contentMinimum.width, usable.width), height: min(contentMinimum.height, usable.height))
+            windowScene.sizeRestrictions?.minimumSize = minimum
+            let current: CGRect = windowScene.effectiveGeometry.systemFrame
+            if current.width < minimum.width || current.height < minimum.height {
+                let size = CGSize(width: min(defaultSize.width, usable.width), height: min(defaultSize.height, usable.height))
+                let frame = CGRect(x: 20, y: 40, width: size.width, height: size.height)
+                lastRequest = "\(Int(frame.width))x\(Int(frame.height))"
+                windowScene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.Mac(systemFrame: frame)) { error in
+                    let text: String = error.localizedDescription
+                    Task { @MainActor in
+                        MacWindow.noteFailure(text)
+                    }
+                }
+            }
         }
+    }
+
+    static func noteFailure(_ text: String) {
+        lastRequest += " failed: " + text
+    }
+
+    /// Debug probe value (`mac.window`): `screen=WxH; window=x,y,WxH; requested=…`.
+    static func describe() -> String {
+        var parts: [String] = []
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            let screen: CGSize = windowScene.screen.bounds.size
+            let frame: CGRect = windowScene.effectiveGeometry.systemFrame
+            parts.append("screen=\(Int(screen.width))x\(Int(screen.height))")
+            parts.append("window=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))x\(Int(frame.height))")
+        }
+        parts.append("requested=" + lastRequest)
+        return parts.joined(separator: "; ")
     }
 }
 #endif

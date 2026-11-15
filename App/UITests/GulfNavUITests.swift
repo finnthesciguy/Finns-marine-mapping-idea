@@ -40,9 +40,12 @@ final class GulfNavUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["disclaimer.title"].exists)
         XCTAssertFalse(app.buttons["map.chartsButton"].exists, "map controls must not be reachable before accepting")
         XCTAssertFalse(GulfNavUITests.mapStatus(app).exists, "the map must not be shown before accepting")
-        // Trying to get past it without accepting does nothing.
+        // Trying to get past it without accepting does nothing. (Touch-screen gestures; on the Mac there is no
+        // swipe to try, and a drag on the application element has no hit point.)
+        #if !targetEnvironment(macCatalyst)
         app.swipeDown()
         app.swipeUp()
+        #endif
         XCTAssertTrue(accept.exists)
         XCTAssertFalse(app.buttons["map.chartsButton"].exists)
         attachScreenshot(app, "disclaimer")
@@ -189,6 +192,31 @@ final class GulfNavUITests: XCTestCase {
     }
 
     /// N from `... chartLayers=N`, or -1.
+    #if targetEnvironment(macCatalyst)
+    /// Mac: the window that shows the chart (falls back to the first window), so a stray small window is never
+    /// measured instead of the content window.
+    @MainActor
+    static func contentWindow(_ app: XCUIApplication) -> XCUIElement {
+        let withMap: XCUIElement = app.windows.containing(.any, identifier: "chart-map").firstMatch
+        return withMap.exists ? withMap : app.windows.firstMatch
+    }
+
+    /// Mac: prints every window's frame and the app's own `mac.window` probe (screen and window size as macOS
+    /// reports them) as GULFNAV-NOTE lines.
+    @MainActor
+    static func logMacWindow(_ app: XCUIApplication, _ label: String) {
+        let count: Int = app.windows.count
+        var index: Int = 0
+        while index < count && index < 6 {
+            let window: XCUIElement = app.windows.element(boundBy: index)
+            print("GULFNAV-NOTE [\(label)] window \(index) frame \(window.frame)")
+            index += 1
+        }
+        let probe: XCUIElement = app.descendants(matching: .any).matching(identifier: "mac.window").firstMatch
+        print("GULFNAV-NOTE [\(label)] windows=\(count) mac.window: \(value(of: probe))")
+    }
+    #endif
+
     static func chartLayerCount(_ status: String) -> Int {
         guard let range = status.range(of: "chartLayers=") else { return -1 }
         let digits: String = String(status[range.upperBound...].prefix(while: { $0.isNumber }))
@@ -203,8 +231,14 @@ final class GulfNavUITests: XCTestCase {
     func acceptDisclaimer(_ app: XCUIApplication) {
         let accept: XCUIElement = app.buttons["disclaimer.accept"]
         XCTAssertTrue(accept.waitForExistence(timeout: GulfNavUITests.launchTimeout), "disclaimer shown on a clean start")
+        #if targetEnvironment(macCatalyst)
+        GulfNavUITests.logMacWindow(app, "before-accept")
+        #endif
         accept.tap()
         XCTAssertTrue(app.buttons["map.chartsButton"].waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        #if targetEnvironment(macCatalyst)
+        GulfNavUITests.logMacWindow(app, "map")
+        #endif
     }
 
     /// Polls `condition` every half second until it holds or `timeout` passes; on timeout records a failure
