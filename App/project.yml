@@ -251,6 +251,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.tests
         GENERATE_INFOPLIST_FILE: YES
+        # The host app's product is GulfNav.app (PRODUCT_NAME GulfNav), not GulfNavMac.app: XcodeGen derives
+        # TEST_HOST from the target name unless it is set (PBXProjGenerator), so it is set here. A Mac Catalyst
+        # app is a Mac bundle (Contents/MacOS/<executable>); the plain form is for an iOS build of the target.
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/GulfNav.app/GulfNav
+        "TEST_HOST[sdk=macosx*]": $(BUILT_PRODUCTS_DIR)/GulfNav.app/Contents/MacOS/GulfNav
+        BUNDLE_LOADER: $(TEST_HOST)
         SUPPORTS_MACCATALYST: YES
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
@@ -278,6 +284,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2,6"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
+        # The target (not product) name: Xcode launches that target's product, GulfNav.app.
         TEST_TARGET_NAME: GulfNavMac
     dependencies:
       - target: GulfNavMac
