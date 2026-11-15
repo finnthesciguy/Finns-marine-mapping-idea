@@ -15,6 +15,9 @@ struct GulfNavApp: App {
                 }
         }
         .defaultSize(width: MacWindow.defaultSize.width, height: MacWindow.defaultSize.height)
+        .commands {
+            MacCommands(model: model)
+        }
         #else
         WindowGroup {
             RootView(model: model)

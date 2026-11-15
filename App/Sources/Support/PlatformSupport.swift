@@ -141,3 +141,76 @@ enum MacWindow {
     }
 }
 #endif
+
+// MARK: - Map screen additions on the Mac
+
+/// Mac: GPX files dropped onto the window are imported (the same import plan as "Import GPX"), and an
+/// "Export All" from the menu bar is saved from the map screen. iOS: nothing (the content is returned as is).
+struct MacMapScreenSupport: ViewModifier {
+    let plotter: PlotterModel
+    @Binding var dropTargeted: Bool
+
+    func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content
+            .gpxExport(plotter)
+            .onDrop(of: GPXDrop.acceptedTypes, isTargeted: $dropTargeted) { providers in
+                GPXDrop.handle(providers, plotter: plotter)
+            }
+            .overlay {
+                if dropTargeted {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.accentColor, lineWidth: 4)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("map.dropTarget")
+                }
+            }
+        #else
+        content
+        #endif
+    }
+}
+
+/// Mac: reading a GPX file dropped from Finder or another app.
+enum GPXDrop {
+    /// GPX first (Finder files declare it through the app's imported type), then any XML or file URL.
+    static var acceptedTypes: [UTType] {
+        var types: [UTType] = GPXDocumentTypes.allowed
+        types.append(UTType.fileURL)
+        return types
+    }
+
+    /// Loads the first dropped item that is GPX/XML data or a `.gpx` file and plans its import. Returns
+    /// whether the drop was accepted.
+    @MainActor
+    static func handle(_ providers: [NSItemProvider], plotter: PlotterModel) -> Bool {
+        for provider in providers {
+            for type in GPXDocumentTypes.allowed where provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                _ = provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
+                    Task { @MainActor in
+                        if let data {
+                            await plotter.planImport(data: data)
+                        } else {
+                            plotter.data.errorText = "The dropped file could not be read: \(error?.localizedDescription ?? "no data")"
+                        }
+                    }
+                }
+                return true
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                _ = provider.loadObject(ofClass: URL.self) { url, error in
+                    Task { @MainActor in
+                        guard let url, url.pathExtension.lowercased() == GPXFiles.fileExtension else {
+                            plotter.data.errorText = "Only GPX files can be dropped on the chart."
+                            return
+                        }
+                        await plotter.planImport(fileAt: url)
+                    }
+                }
+                return true
+            }
+        }
+        return false
+    }
+}

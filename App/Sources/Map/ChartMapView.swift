@@ -48,6 +48,11 @@ struct ChartMapView: UIViewRepresentable {
     /// Move the camera here once, when `focusRevision` changes (framing a planned auto-route).
     var focus: MapFocus? = nil
     var focusRevision: Int = 0
+    /// Mac only (context menu, menu-bar zoom, chart centre); not used by the iOS map, where a long-press drops a
+    /// waypoint and pinch zooms. Present so `MapScreen` builds the same view on both platforms.
+    var onPointAction: ((MapPointAction, Coordinate) -> Void)? = nil
+    var cameraCommand: MapCameraCommand? = nil
+    var onCenterChanged: ((Coordinate) -> Void)? = nil
 
     func makeCoordinator() -> ChartMapCoordinator {
         ChartMapCoordinator()

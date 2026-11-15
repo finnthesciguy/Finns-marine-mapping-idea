@@ -19,6 +19,10 @@ struct MapScreen: View {
     @State private var sheet: MapSheet?
     @State private var showingImporter: Bool = false
     @State private var editingWaypoint: Waypoint?
+    /// Mac: zoom commands for the chart, and the chart centre (where "Drop Waypoint" puts one without a position).
+    @State private var cameraCommand: MapCameraCommand?
+    @State private var mapCenter: Coordinate?
+    @State private var dropTargeted: Bool = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -49,7 +53,12 @@ struct MapScreen: View {
                          },
                          onCameraChanged: { zoom, latitude in plotter.mapCameraChanged(zoom: zoom, latitude: latitude) },
                          focus: map.focus,
-                         focusRevision: map.focusRevision)
+                         focusRevision: map.focusRevision,
+                         onPointAction: { action, coordinate in
+                             Task { await perform(action, at: coordinate) }
+                         },
+                         cameraCommand: cameraCommand,
+                         onCenterChanged: { center in mapCenter = center })
                 .ignoresSafeArea()
 
             VStack(spacing: 8) {
@@ -133,6 +142,11 @@ struct MapScreen: View {
                 await plotter.planImport(fileAt: url)
             }
         }
+        .onChange(of: model.commandRequest) { _, request in
+            guard let request else { return }
+            perform(request.command)
+        }
+        .modifier(MacMapScreenSupport(plotter: plotter, dropTargeted: $dropTargeted))
         .onChange(of: model.plotter.routeDraft != nil) { _, editing in
             // While points are being tapped in, the chart must not move under the finger with every fix.
             if editing { model.map.follow = false }
@@ -142,6 +156,88 @@ struct MapScreen: View {
         }
         .onChange(of: plotter.data.settings.keepScreenOn) { _, keepOn in
             KeepScreenOn.set(keepOn)
+        }
+    }
+
+    // MARK: Commands (Mac menu bar) and chart context menu
+
+    /// Carries out a menu-bar command the same way the matching button does.
+    private func perform(_ command: AppCommand) {
+        let plotter: PlotterModel = model.plotter
+        switch command {
+        case .dropWaypoint:
+            Task {
+                if PlatformText.isMac && model.navigation.readout.lastFix == nil {
+                    // No position (usual on a Mac): drop it at the centre of the chart instead. Before the chart
+                    // has reported a centre it is still at its start position over Tampa Bay.
+                    let center: Coordinate = mapCenter ?? Coordinate(latitude: 27.62, longitude: -82.70)
+                    await perform(.dropWaypoint, at: center)
+                } else {
+                    await plotter.dropWaypointAtBoat()
+                }
+            }
+        case .newRoute:
+            sheet = nil
+            model.map.follow = false
+            plotter.beginNewRoute()
+        case .autoRoute:
+            sheet = .autoRoute
+        case .toggleRecording:
+            Task { await plotter.toggleRecording() }
+        case .importGPX:
+            sheet = nil
+            showingImporter = true
+        case .exportAll:
+            sheet = nil
+            Task { await plotter.export(waypoints: nil, routes: nil, tracks: nil, title: "All") }
+        case .showCharts:
+            sheet = .charts
+        case .showWaypoints:
+            sheet = .waypoints
+        case .showRoutes:
+            sheet = .routes
+        case .showTracks:
+            sheet = .tracks
+        case .showSettings:
+            sheet = .settings
+        case .zoomIn:
+            cameraCommand = MapCameraCommand(kind: .zoomIn, revision: (cameraCommand?.revision ?? 0) + 1)
+        case .zoomOut:
+            cameraCommand = MapCameraCommand(kind: .zoomOut, revision: (cameraCommand?.revision ?? 0) + 1)
+        case .northUp:
+            model.map.orientation = .northUp
+        case .toggleOrientation:
+            model.map.toggleOrientation()
+        case .toggleFollow:
+            model.map.follow.toggle()
+        #if DEBUG
+        case .toggleSimulatedGPS:
+            model.navigation.setSimulating(!model.navigation.isSimulating)
+        case .importSampleGPX:
+            Task { await plotter.planImport(data: Data(GPXSamples.tampaBay.utf8)) }
+        #endif
+        }
+    }
+
+    /// A chart context-menu item (Mac: right-click or control-click on the chart).
+    private func perform(_ action: MapPointAction, at coordinate: Coordinate) async {
+        let plotter: PlotterModel = model.plotter
+        switch action {
+        case .dropWaypoint:
+            if let created = await plotter.data.addWaypoint(at: coordinate) {
+                plotter.select(created.id)
+            }
+        case .goTo:
+            if let created = await plotter.data.addWaypoint(at: coordinate) {
+                plotter.select(created.id)
+                plotter.goTo(created)
+            }
+        case .routeFrom:
+            model.autoRoute.choose(.chartPoint(coordinate), for: .start)
+            sheet = .autoRoute
+        case .routeTo:
+            model.autoRoute.choose(.chartPoint(coordinate), for: .goal)
+            sheet = .autoRoute
         }
     }
 

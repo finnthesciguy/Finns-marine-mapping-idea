@@ -28,6 +28,9 @@ final class AppModel {
     let autoRoute: AutoRouteModel
     /// A GPX file opened in the app from elsewhere ("Open in…"), waiting for the map screen to plan it.
     var pendingOpenURL: URL?
+    /// A menu-bar command (Mac) waiting for the map screen to carry it out.
+    private(set) var commandRequest: AppCommandRequest?
+    @ObservationIgnored private var commandSerial: Int = 0
 
     @ObservationIgnored private var started = false
 
@@ -181,6 +184,12 @@ final class AppModel {
     func open(_ url: URL) {
         guard url.pathExtension.lowercased() == GPXFiles.fileExtension || url.isFileURL else { return }
         pendingOpenURL = url
+    }
+
+    /// Asks the map screen to carry out a command (Mac menu bar and keyboard shortcuts).
+    func send(_ command: AppCommand) {
+        commandSerial += 1
+        commandRequest = AppCommandRequest(command: command, serial: commandSerial)
     }
 
     func dismissNotice(_ notice: StartupNotice) {

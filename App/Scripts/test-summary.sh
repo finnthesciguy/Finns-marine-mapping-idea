@@ -6,11 +6,13 @@
 #     those printed at a timeout (failing waits) first, then the last ones; long lines are wrapped, never cut;
 #   - if no test case ran at all, the last error-looking lines instead.
 # Usage: test-summary.sh <xcodebuild-test-log> [exit-status]
+# Optional environment: SUMMARY_TITLE (default "iOS app"; the Mac job passes "Mac app"), SUMMARY_NOTES=1 to
+# also list the last GULFNAV-NOTE lines the tests printed.
 set -u
 log="${1:?usage: test-summary.sh <log> [status]}"
 status="${2:-?}"
 
-echo "===== iOS app test summary (xcodebuild exit status: $status) ====="
+echo "===== ${SUMMARY_TITLE:-iOS app} test summary (xcodebuild exit status: $status) ====="
 if [ ! -f "$log" ]; then
   echo "(no test log at $log)"
   exit 0
@@ -53,6 +55,14 @@ for kind in MAP APP; do
     printf '%s\n' "$last" | cut -c1-2000 | fold -w 200
   fi
 done
+
+if [ "${SUMMARY_NOTES:-0}" = 1 ]; then
+  notes=$(grep -o "GULFNAV-NOTE .*" "$log" | awk '!seen[$0]++' | tail -n 8)
+  if [ -n "$notes" ]; then
+    echo "--- notes ---"
+    printf '%s\n' "$notes" | cut -c1-300
+  fi
+fi
 
 if [ -z "$cases" ]; then
   echo "--- last error lines ---"

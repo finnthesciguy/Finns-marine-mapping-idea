@@ -48,9 +48,8 @@ enum MapPointAction: String, CaseIterable {
     case goTo
     case routeFrom
     case routeTo
-    case centerHere
 
-    static let menuOrder: [MapPointAction] = [.dropWaypoint, .goTo, .routeFrom, .routeTo, .centerHere]
+    static let menuOrder: [MapPointAction] = [.dropWaypoint, .goTo, .routeFrom, .routeTo]
 
     var title: String {
         switch self {
@@ -58,7 +57,6 @@ enum MapPointAction: String, CaseIterable {
         case .goTo: return "Go To Here"
         case .routeFrom: return "Auto-Route From Here"
         case .routeTo: return "Auto-Route To Here"
-        case .centerHere: return "Centre Chart Here"
         }
     }
 
@@ -68,7 +66,6 @@ enum MapPointAction: String, CaseIterable {
         case .goTo: return "location.north.line"
         case .routeFrom: return "point.topleft.down.to.point.bottomright.curvepath"
         case .routeTo: return "flag.checkered"
-        case .centerHere: return "scope"
         }
     }
 }
@@ -82,4 +79,35 @@ struct MapCameraCommand: Equatable {
 
     var kind: Kind
     var revision: Int
+}
+
+/// Commands of the Mac menu bar (and their keyboard shortcuts), carried out by the map screen. Defined for both
+/// platforms; only the Mac build has the menus that send them.
+enum AppCommand: String, CaseIterable {
+    case dropWaypoint
+    case newRoute
+    case autoRoute
+    case toggleRecording
+    case importGPX
+    case exportAll
+    case showCharts
+    case showWaypoints
+    case showRoutes
+    case showTracks
+    case showSettings
+    case zoomIn
+    case zoomOut
+    case northUp
+    case toggleOrientation
+    case toggleFollow
+    #if DEBUG
+    case toggleSimulatedGPS
+    case importSampleGPX
+    #endif
+}
+
+/// One command request; `serial` makes repeated commands distinct.
+struct AppCommandRequest: Equatable {
+    var command: AppCommand
+    var serial: Int
 }

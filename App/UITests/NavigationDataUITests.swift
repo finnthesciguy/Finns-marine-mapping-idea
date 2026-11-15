@@ -298,10 +298,18 @@ extension GulfNavUITests {
         waitUntil(GulfNavUITests.stepTimeout, "export written, status: \(GulfNavUITests.appStatusValue(app))") {
             (GulfNavUITests.statusField(app, "lastExport") ?? "").hasSuffix(".gpx")
         }
+        #if targetEnvironment(macCatalyst)
+        // Mac: a save panel instead of the share sheet. Report whether one appeared, then cancel it.
+        let panel: XCUIElement = app.sheets.firstMatch
+        print("GULFNAV-NOTE save panel visible: \(panel.waitForExistence(timeout: 10))")
+        attachScreenshot(app, "export-save-panel")
+        app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
+        #else
         // The share sheet's own elements belong to the system; only report whether it appeared.
         let shareSheet: XCUIElement = app.otherElements["ActivityListView"]
         print("GULFNAV-NOTE share sheet visible: \(shareSheet.waitForExistence(timeout: 10))")
         attachScreenshot(app, "export-share-sheet")
+        #endif
     }
 
     // MARK: Settings
@@ -318,7 +326,18 @@ extension GulfNavUITests {
 
         app.buttons["map.settingsButton"].tap()
         let segmented: XCUIElement = app.segmentedControls["settings.speedUnit"]
+        #if targetEnvironment(macCatalyst)
+        // Mac: a segmented picker may surface as a segmented control, radio buttons or plain buttons.
+        XCTAssertTrue(app.buttons["settings.done"].waitForExistence(timeout: GulfNavUITests.stepTimeout), "settings shown")
+        var kmh: XCUIElement = app.buttons["km/h"].firstMatch
+        if segmented.exists {
+            kmh = segmented.buttons["km/h"]
+        } else if app.radioButtons["km/h"].exists {
+            kmh = app.radioButtons["km/h"]
+        }
+        #else
         let kmh: XCUIElement = segmented.exists ? segmented.buttons["km/h"] : app.buttons["km/h"].firstMatch
+        #endif
         XCTAssertTrue(kmh.waitForExistence(timeout: GulfNavUITests.stepTimeout), "km/h choice shown")
         kmh.tap()
         waitForStatus(app, "speedUnit", "kilometersPerHour")
@@ -326,7 +345,7 @@ extension GulfNavUITests {
         let attribution: XCUIElement = app.descendants(matching: .any).matching(identifier: "settings.attribution").firstMatch
         var swipes: Int = 0
         while !attribution.exists && swipes < 6 {
-            app.swipeUp()
+            scrollDown(app)
             swipes += 1
         }
         XCTAssertTrue(attribution.exists, "NOAA attribution shown (after \(swipes) swipes)")
@@ -409,9 +428,15 @@ extension GulfNavUITests {
         }
     }
 
-    /// Debug menu > Import sample GPX, then waits for the import plan.
+    /// Debug menu > Import sample GPX, then waits for the import plan. On the Mac the menu bar's Debug menu is
+    /// used (a SwiftUI `Menu` in the window shows its items as menu items, not buttons, on a Mac).
     @MainActor
     func importSampleGPX(_ app: XCUIApplication) {
+        #if targetEnvironment(macCatalyst)
+        clickMenuItem(app, menu: "Debug", item: "Import Sample GPX")
+        XCTAssertTrue(app.staticTexts["gpx.summary"].waitForExistence(timeout: GulfNavUITests.stepTimeout), "import plan shown")
+        return
+        #else
         let menu: XCUIElement = app.buttons["map.debugMenu"]
         XCTAssertTrue(menu.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         menu.tap()
@@ -419,7 +444,52 @@ extension GulfNavUITests {
         XCTAssertTrue(item.waitForExistence(timeout: GulfNavUITests.stepTimeout), "debug menu item")
         item.tap()
         XCTAssertTrue(app.staticTexts["gpx.summary"].waitForExistence(timeout: GulfNavUITests.stepTimeout), "import plan shown")
+        #endif
     }
+
+    /// Scrolls the frontmost list down one step: a swipe on a touch screen; on the Mac (where dragging does not
+    /// scroll) a scroll-wheel step on the list.
+    @MainActor
+    func scrollDown(_ app: XCUIApplication) {
+        #if targetEnvironment(macCatalyst)
+        let list: XCUIElement = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.tables.firstMatch
+        if list.exists {
+            list.scroll(byDeltaX: 0, deltaY: -400)
+        } else {
+            app.windows.firstMatch.scroll(byDeltaX: 0, deltaY: -400)
+        }
+        #else
+        app.swipeUp()
+        #endif
+    }
+
+    /// Scrolls the frontmost list up one step (`app.swipeDown()` on a touch screen).
+    @MainActor
+    func scrollUp(_ app: XCUIApplication) {
+        #if targetEnvironment(macCatalyst)
+        let list: XCUIElement = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.tables.firstMatch
+        if list.exists {
+            list.scroll(byDeltaX: 0, deltaY: 400)
+        } else {
+            app.windows.firstMatch.scroll(byDeltaX: 0, deltaY: 400)
+        }
+        #else
+        app.swipeDown()
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// Mac: chooses `item` from the menu bar's `menu`.
+    @MainActor
+    func clickMenuItem(_ app: XCUIApplication, menu: String, item: String) {
+        let bar: XCUIElement = app.menuBars.menuBarItems[menu]
+        XCTAssertTrue(bar.waitForExistence(timeout: GulfNavUITests.stepTimeout), "menu bar item \(menu)")
+        bar.click()
+        let entry: XCUIElement = app.menuBars.menuItems[item]
+        XCTAssertTrue(entry.waitForExistence(timeout: GulfNavUITests.stepTimeout), "menu item \(menu) > \(item)")
+        entry.click()
+    }
+    #endif
 
     @MainActor
     func replaceText(in field: XCUIElement, with text: String) {

@@ -205,7 +205,10 @@ targets:
                 - gpx
               public.mime-type:
                 - application/gpx+xml
-        LSSupportsOpeningDocumentsInPlace: false
+        # macOS rejects NO here (Xcode: "'LSSupportsOpeningDocumentsInPlace = NO' is not supported on macOS").
+        # YES is correct for this app: an opened .gpx is only read, in place, inside
+        # start/stopAccessingSecurityScopedResource (AppServices GPXFiles.plan(fileAt:)), and never written.
+        LSSupportsOpeningDocumentsInPlace: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav

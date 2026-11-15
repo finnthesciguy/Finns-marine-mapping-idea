@@ -5,7 +5,7 @@
 #   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing, and its UI and
 #     unit tests run on a booted simulator (job ios-app-tests),
 #   - the Mac app (target GulfNavMac: the same app as Mac Catalyst, MapKit chart map) built without signing
-#     (job mac-app).
+#     (job mac-app), and its unit and UI tests run on the runner itself (job mac-app-tests).
 # Packages and tools are discovered at run time, so new ones are picked up without editing this file.
 name: CI
 
@@ -320,7 +320,12 @@ jobs:
             | grep -E 'ChartMapViewMac|PlatformSupport|MacCommands|MacUITests|ChartMapShared|AppPathsMac|CoreLocationService' \
             | sort -u | cut -c1-300 | head -n 60 || echo "(none)"
           app=$(find "$RUNNER_TEMP/MacDerivedData/Build/Products" -maxdepth 2 -name 'GulfNav.app' -path '*maccatalyst*' | head -n 1)
-          if [ -n "$app" ]; then
+          if [ $status -ne 0 ]; then
+            echo "Post-build checks skipped: the build failed."
+          elif [ -z "$app" ] || [ ! -f "$app/Contents/MacOS/GulfNav" ]; then
+            echo "::error::Build reported success but no GulfNav.app executable was found under Debug-maccatalyst"
+            status=1
+          else
             echo "Built: $app"
             /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" || true
             lipo -info "$app/Contents/MacOS/GulfNav" || true
@@ -351,6 +356,175 @@ jobs:
             echo "|---|---|"
             echo "| Mac Catalyst build (generic/platform=macOS,variant=Mac Catalyst) | ${{ steps.build.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  mac-app-tests:
+    # Runtime checks of the Mac app: the hosted unit tests (GulfNavMacTests) and the UI tests (GulfNavMacUITests:
+    # the iOS UI tests with Mac conditions, plus the Mac-only MacUITests.swift) run directly on the runner, no
+    # simulator. Ad hoc signed ("Sign to Run Locally") so the sandbox entitlements apply. A CI Mac has no
+    # location fix, and MapKit may not draw without a GPU surface: the tests use the simulated GPS switch and
+    # read the map's state from `map.status`, not from pixels. Same log conventions as ios-app-tests.
+    name: Mac app (Mac Catalyst tests)
+    runs-on: macos-26
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: App
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+      - name: Allow UI automation
+        run: |
+          # macOS UI tests drive the app through the accessibility APIs; without automation mode a CI Mac may
+          # ask for permission and the tests time out. Not fatal if the tool is missing or refuses.
+          sudo automationmodetool enable-automationmode-without-authentication || echo "automationmodetool failed (continuing)"
+          automationmodetool || true
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+      - name: Resolve packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies -project GulfNav.xcodeproj -scheme GulfNavMac \
+            -derivedDataPath "$RUNNER_TEMP/MacTestDerivedData" 2>&1 | tee "$RUNNER_TEMP/mac-test-resolve.log"
+      - id: build
+        name: Build for testing (Mac Catalyst)
+        run: |
+          set +e
+          set -o pipefail
+          build() {
+            xcodebuild build-for-testing -project GulfNav.xcodeproj -scheme GulfNavMac \
+              -destination 'platform=macOS,variant=Mac Catalyst' \
+              -derivedDataPath "$RUNNER_TEMP/MacTestDerivedData" \
+              -skipMacroValidation -skipPackagePluginValidation \
+              "$@" > "$RUNNER_TEMP/mac-test-build.log" 2>&1
+          }
+          # Ad hoc signing first (needed to launch a sandboxed app and its UI test runner); on a signing error
+          # retry with signing off, which builds but may not launch.
+          signing="CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="
+          build CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+          status=$?
+          if [ $status -ne 0 ] && grep -qiE 'code ?sign|signing|provisioning' "$RUNNER_TEMP/mac-test-build.log"; then
+            echo "Ad hoc signing build failed with a signing error; retrying with CODE_SIGNING_ALLOWED=NO"
+            cp "$RUNNER_TEMP/mac-test-build.log" "$RUNNER_TEMP/mac-test-build-adhoc.log"
+            signing="CODE_SIGNING_ALLOWED=NO"
+            build CODE_SIGNING_ALLOWED=NO
+            status=$?
+          fi
+          echo "signing=$signing" >> "$GITHUB_OUTPUT"
+          echo "xcodebuild build-for-testing exit status: $status (signing: $signing)"
+          echo "----- last 40 log lines -----"
+          tail -n 40 "$RUNNER_TEMP/mac-test-build.log"
+          echo "----- lines containing 'error:' (3 lines of context) -----"
+          grep -n -B 3 -A 3 'error:' "$RUNNER_TEMP/mac-test-build.log" | head -n 400 || echo "(none)"
+          echo "----- error count: $(grep -c 'error:' "$RUNNER_TEMP/mac-test-build.log" || true) -----"
+          if [ $status -eq 0 ]; then
+            app=$(find "$RUNNER_TEMP/MacTestDerivedData/Build/Products" -maxdepth 2 -name 'GulfNav.app' -path '*maccatalyst*' | head -n 1)
+            if [ -n "$app" ]; then
+              echo "----- signature and entitlements of $app -----"
+              codesign -dv "$app" 2>&1 | grep -E 'Identifier|Signature|flags' || true
+              codesign -d --entitlements - "$app" 2>&1 | grep -oE 'com\.apple\.security\.[a-z.-]+' | sort -u || true
+            fi
+          fi
+          exit $status
+      - id: test
+        name: Run Mac unit and UI tests
+        env:
+          SIGNING: ${{ steps.build.outputs.signing }}
+        run: |
+          set +e
+          set -o pipefail
+          read -r -a signing <<<"$SIGNING"
+          rm -rf "$RUNNER_TEMP/GulfNavMacTests.xcresult"
+          # Everything goes to files (uploaded as artifacts); stdout gets only the compact summary at the end.
+          xcodebuild test-without-building -project GulfNav.xcodeproj -scheme GulfNavMac \
+            -destination 'platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath "$RUNNER_TEMP/MacTestDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/GulfNavMacTests.xcresult" \
+            -parallel-testing-enabled NO \
+            "${signing[@]}" > "$RUNNER_TEMP/mac-test-run.log" 2>&1
+          status=$?
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/GulfNavMacTests.xcresult" --compact \
+            > "$RUNNER_TEMP/mac-test-results-summary.json" 2>&1 || true
+          SUMMARY_TITLE="Mac app" SUMMARY_NOTES=1 bash Scripts/test-summary.sh "$RUNNER_TEMP/mac-test-run.log" "$status" \
+            > "$RUNNER_TEMP/mac-test-summary.txt"
+          echo "Full log, result bundle summary and app log are in the artifacts."
+          cat "$RUNNER_TEMP/mac-test-summary.txt"
+          exit $status
+      - name: Collect screenshots and logs
+        if: ${{ always() }}
+        run: |
+          # Output stays in files; only counts are printed.
+          mkdir -p "$RUNNER_TEMP/mac-screenshots" "$RUNNER_TEMP/mac-logs"
+          if [ -d "$RUNNER_TEMP/GulfNavMacTests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/GulfNavMacTests.xcresult" \
+              --output-path "$RUNNER_TEMP/mac-screenshots" > "$RUNNER_TEMP/mac-logs/attachments-export.log" 2>&1 || true
+          fi
+          log show --last 60m --style compact \
+            --predicate 'process == "GulfNav" OR process == "GulfNavMacUITests-Runner"' \
+            > "$RUNNER_TEMP/mac-logs/app.log" 2>&1 || true
+          find "$HOME/Library/Logs/DiagnosticReports" -name '*GulfNav*' -exec cp {} "$RUNNER_TEMP/mac-logs/" \; 2>/dev/null || true
+          echo "screenshots/attachments: $(find "$RUNNER_TEMP/mac-screenshots" -type f | wc -l | tr -d ' ') files"
+          echo "app log: $(wc -l < "$RUNNER_TEMP/mac-logs/app.log" | tr -d ' ') lines"
+          echo "crash reports: $(find "$RUNNER_TEMP/mac-logs" -name '*GulfNav*' | wc -l | tr -d ' ')"
+      - name: Upload test logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-app-test-logs
+          path: |
+            ${{ runner.temp }}/mac-test-resolve.log
+            ${{ runner.temp }}/mac-test-build.log
+            ${{ runner.temp }}/mac-test-build-adhoc.log
+            ${{ runner.temp }}/mac-test-run.log
+            ${{ runner.temp }}/mac-test-summary.txt
+            ${{ runner.temp }}/mac-test-results-summary.json
+            ${{ runner.temp }}/mac-logs
+          if-no-files-found: ignore
+      - name: Upload result bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-app-test-results
+          path: ${{ runner.temp }}/GulfNavMacTests.xcresult
+          if-no-files-found: ignore
+      - name: Upload screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-app-test-screenshots
+          path: ${{ runner.temp }}/mac-screenshots
+          if-no-files-found: ignore
+      - name: Report
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          {
+            echo "### Mac app tests"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Build for testing (${{ steps.build.outputs.signing }}) | ${{ steps.build.outcome }} |"
+            echo "| Unit + UI tests (Mac Catalyst, on the runner) | ${{ steps.test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Test summary (repeated as the last lines of the job)
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          if [ -f "$RUNNER_TEMP/mac-test-summary.txt" ]; then
+            cat "$RUNNER_TEMP/mac-test-summary.txt"
+          else
+            echo "No test summary: the job stopped before the tests ran (see the failing step above)."
+            if [ -f "$RUNNER_TEMP/mac-test-build.log" ]; then
+              echo "--- build-for-testing errors ---"
+              grep -E "error:" "$RUNNER_TEMP/mac-test-build.log" | cut -c1-300 | head -n 20
+            fi
+          fi
 
   ios-app-tests:
     # Runtime checks of the app: XCUITest UI tests (GulfNavUITests) and hosted unit tests (GulfNavTests) on a
