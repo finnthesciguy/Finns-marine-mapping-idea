@@ -3,7 +3,9 @@
 #   - every Python tool under pipeline/ installed from scratch and its offline tests run,
 #   - every Swift package built for iOS and tested on macOS,
 #   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing, and its UI and
-#     unit tests run on a booted simulator (job ios-app-tests).
+#     unit tests run on a booted simulator (job ios-app-tests),
+#   - the Mac app (target GulfNavMac: the same app as Mac Catalyst, MapKit chart map) built without signing
+#     (job mac-app).
 # Packages and tools are discovered at run time, so new ones are picked up without editing this file.
 name: CI
 
@@ -265,6 +267,89 @@ jobs:
             echo "| Check | Result |"
             echo "|---|---|"
             echo "| Simulator build (generic/platform=iOS Simulator) | ${{ steps.build.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  mac-app:
+    # The Mac app: target GulfNavMac in App/project.yml, the iOS app's sources built for Mac Catalyst without
+    # MapLibre (7.0.0 has no Mac Catalyst slice; the Mac chart map is MapKit). Built without signing; errors are
+    # printed compactly at the end of the build step, the full log is an artifact. See App/README-macOS.md.
+    name: Mac app (Mac Catalyst build)
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: App
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+      - name: Resolve packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies -project GulfNav.xcodeproj -scheme GulfNavMac \
+            -derivedDataPath "$RUNNER_TEMP/MacDerivedData" 2>&1 | tee "$RUNNER_TEMP/mac-resolve.log"
+      - id: build
+        name: Build for Mac Catalyst (no signing)
+        run: |
+          set +e
+          set -o pipefail
+          xcodebuild -project GulfNav.xcodeproj -scheme GulfNavMac \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath "$RUNNER_TEMP/MacDerivedData" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/mac-build.log" 2>&1
+          status=$?
+          echo "xcodebuild exit status: $status"
+          echo "----- last 40 log lines -----"
+          tail -n 40 "$RUNNER_TEMP/mac-build.log"
+          echo "----- lines containing 'error:' (3 lines of context) -----"
+          grep -n -B 3 -A 3 'error:' "$RUNNER_TEMP/mac-build.log" | head -n 400 || echo "(none)"
+          echo "----- error count: $(grep -c 'error:' "$RUNNER_TEMP/mac-build.log" || true) -----"
+          echo "----- warnings in Mac-specific files (first 60) -----"
+          grep -E 'warning:' "$RUNNER_TEMP/mac-build.log" \
+            | grep -E 'ChartMapViewMac|PlatformSupport|MacCommands|MacUITests|ChartMapShared|AppPathsMac|CoreLocationService' \
+            | sort -u | cut -c1-300 | head -n 60 || echo "(none)"
+          app=$(find "$RUNNER_TEMP/MacDerivedData/Build/Products" -maxdepth 2 -name 'GulfNav.app' -path '*maccatalyst*' | head -n 1)
+          if [ -n "$app" ]; then
+            echo "Built: $app"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" || true
+            lipo -info "$app/Contents/MacOS/GulfNav" || true
+            if otool -L "$app/Contents/MacOS/GulfNav" | grep -q MapLibre; then
+              echo "::error::The Mac app links MapLibre, which has no Mac Catalyst slice"
+              status=1
+            else
+              echo "MapLibre not linked (expected for the Mac build)"
+            fi
+          fi
+          exit $status
+      - name: Upload build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-app-build-log
+          path: |
+            ${{ runner.temp }}/mac-build.log
+            ${{ runner.temp }}/mac-resolve.log
+          if-no-files-found: ignore
+      - name: Report
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          {
+            echo "### Mac app"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Mac Catalyst build (generic/platform=macOS,variant=Mac Catalyst) | ${{ steps.build.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   ios-app-tests:

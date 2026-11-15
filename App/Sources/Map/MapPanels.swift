@@ -112,7 +112,7 @@ struct RouteEditBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(draft.isNew ? "New route: tap the map to add points" : "Editing \(draft.route.name): tap the map to add points")
+            Text(draft.isNew ? "New route: \(PlatformText.tapLower) the map to add points" : "Editing \(draft.route.name): \(PlatformText.tapLower) the map to add points")
                 .font(.subheadline.weight(.semibold))
             HStack {
                 Text("\(draft.route.points.count) points, "

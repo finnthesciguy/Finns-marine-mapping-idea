@@ -1,3 +1,6 @@
+// The iOS map (MapLibre Native). The Mac Catalyst build has no MapLibre (7.0.0 ships no Mac Catalyst slice) and
+// uses the MapKit map in ChartMapViewMac.swift, which has the same `ChartMapView` interface.
+#if !targetEnvironment(macCatalyst)
 import AppServices
 import ChartKit
 import MapLibre
@@ -70,29 +73,6 @@ struct ChartMapView: UIViewRepresentable {
 
     func updateUIView(_ container: ChartMapContainerView, context: Context) {
         context.coordinator.update(with: self)
-    }
-}
-
-/// A waypoint a tap can hit.
-struct MapTapTarget: Equatable {
-    var id: UUID
-    var coordinate: Coordinate
-}
-
-/// Accessibility identifiers the UI tests rely on.
-enum MapAccessibility {
-    static let mapIdentifier = "chart-map"
-    static let statusIdentifier = "map.status"
-
-    /// Machine-readable map state for the UI tests (`AppServices.MapDiagnostics.statusValue`), e.g.
-    /// `style=loaded; chartLayers=1; overlayLayers=0; styleVia=attach; willStartLoading=0; ...`.
-    static func statusValue(_ diagnostics: MapDiagnostics) -> String {
-        diagnostics.statusValue
-    }
-
-    /// The value before anything has happened.
-    static var initialStatusValue: String {
-        statusValue(MapDiagnostics())
     }
 }
 
@@ -554,15 +534,4 @@ enum ChartMapLayers {
     }
 }
 
-/// The bundled offline style (Resources/offline-style.json), with an inline copy as a fallback.
-enum OfflineStyle {
-    static let fallbackJSON: String = """
-    {"version":8,"name":"Gulf Nav offline base","sources":{},"layers":[{"id":"water-background","type":"background","paint":{"background-color":"#b7d3e6"}}]}
-    """
-
-    static func load(bundle: Bundle = .main) -> String {
-        guard let url = bundle.url(forResource: "offline-style", withExtension: "json") else { return fallbackJSON }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return fallbackJSON }
-        return text
-    }
-}
+#endif

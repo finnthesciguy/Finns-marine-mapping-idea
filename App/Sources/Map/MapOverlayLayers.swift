@@ -1,3 +1,6 @@
+// MapLibre style layers (iOS). The Mac Catalyst build draws the same layers with MapKit from
+// AppServices.OverlayStyling (ChartMapViewMac.swift).
+#if !targetEnvironment(macCatalyst)
 import AppServices
 import Foundation
 import MapLibre
@@ -151,3 +154,4 @@ enum MapOverlayLayers {
         }
     }
 }
+#endif

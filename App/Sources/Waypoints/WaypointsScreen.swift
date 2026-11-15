@@ -72,9 +72,7 @@ struct WaypointsScreen: View {
                 WaypointEditor(original: waypoint, plotter: plotter, boat: boat, onClose: { editing = nil },
                                onLeaveForMap: onCloseAll)
             }
-            .sheet(item: exportBinding(plotter)) { file in
-                ShareSheet(url: file.url)
-            }
+            .gpxExport(plotter)
         }
     }
 }
@@ -220,9 +218,7 @@ struct WaypointEditor: View {
                 .accessibilityIdentifier("waypoint.edit.confirmDelete")
                 Button("Cancel", role: .cancel) {}
             }
-            .sheet(item: exportBinding(plotter)) { file in
-                ShareSheet(url: file.url)
-            }
+            .gpxExport(plotter)
             .onAppear {
                 guard !loaded else { return }
                 loaded = true

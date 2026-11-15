@@ -55,7 +55,7 @@ struct TracksScreen: View {
                 } header: {
                     Text("Recording")
                 } footer: {
-                    Text("Recording continues with the screen locked or another app in front, using GPS in the background: this uses noticeably more battery. Stop recording when you are done.")
+                    Text(PlatformText.recordingNote)
                 }
                 Section("Saved tracks") {
                     if rows.isEmpty {
@@ -116,9 +116,7 @@ struct TracksScreen: View {
                 }
                 Button("Cancel", role: .cancel) { renaming = nil }
             }
-            .sheet(item: exportBinding(plotter)) { file in
-                ShareSheet(url: file.url)
-            }
+            .gpxExport(plotter)
         }
     }
 }

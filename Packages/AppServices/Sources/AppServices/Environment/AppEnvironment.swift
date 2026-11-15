@@ -20,11 +20,21 @@ public struct AppPaths: Sendable, Equatable {
         self.libraryDirectory = libraryDirectory.standardizedFileURL
     }
 
-    /// The app sandbox's `Library/` directory.
+    /// The app sandbox's `Library/` directory on iOS. On the Mac (Mac Catalyst build) the app's own folder in
+    /// Application Support (`AppPaths.macRoot`): inside the sandbox container when the app is sandboxed, and
+    /// still a folder of its own when it is run unsandboxed (an unsigned build), instead of `~/Library` itself.
     public static func live() throws -> AppPaths {
+        #if targetEnvironment(macCatalyst)
+        let support: URL = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                       appropriateFor: nil, create: true)
+        let root: URL = AppPaths.macRoot(applicationSupport: support, bundleIdentifier: Bundle.main.bundleIdentifier)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return AppPaths(libraryDirectory: root)
+        #else
         let library: URL = try FileManager.default.url(for: .libraryDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
         return AppPaths(libraryDirectory: library)
+        #endif
     }
 
     public var chartsDirectory: URL { libraryDirectory.appendingPathComponent("Charts", isDirectory: true) }

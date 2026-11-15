@@ -134,6 +134,151 @@ targets:
       - package: GPXKit
       - package: RoutingKit
 
+  # The Mac app (Mac Catalyst): the same sources, resources and packages as GulfNav, built as a Mac app. It is
+  # a separate target because MapLibre Native 7.0.0's xcframework has no Mac Catalyst slice: this target does
+  # not link MapLibre, and the chart map is the MapKit one in Sources/Map/ChartMapViewMac.swift (the MapLibre
+  # files compile to nothing under `targetEnvironment(macCatalyst)`). Same bundle identifier, so the owner can
+  # ship it under the iOS app's App Store record. Build: `-scheme GulfNavMac -destination
+  # 'platform=macOS,variant=Mac Catalyst'`. See README-macOS.md.
+  GulfNavMac:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: ../Packages/ChartKit/Samples/gulf-manifest.sample.json
+        buildPhase: resources
+        group: Resources
+      - path: ../Packages/AppServices/Tests/AppServicesTests/Resources/tiny-a.mbtiles
+        buildPhase: resources
+        group: TestSupport
+      - path: ../testdata/routing/sarasota.pack
+        buildPhase: resources
+        group: TestSupport
+      - path: Mac/GulfNav-macOS.entitlements
+        buildPhase: none
+        group: Mac
+    info:
+      path: Info-macOS.plist
+      properties:
+        CFBundleDisplayName: Gulf Nav
+        CFBundleName: Gulf Nav
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.navigation
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Location on a Mac comes from Wi-Fi positioning (no GPS), if Location Services allows it. The app is
+        # fully usable without it. NSLocationUsageDescription is the macOS key; the when-in-use key is the one
+        # CoreLocation reads for Mac Catalyst apps. No UIBackgroundModes: a Mac app is not suspended in the
+        # background, so recording needs no background mode.
+        NSLocationWhenInUseUsageDescription: Gulf Nav shows your position on the chart and records your track when you ask it to, when your Mac can determine its location. Your location stays on this Mac.
+        NSLocationUsageDescription: Gulf Nav shows your position on the chart and records your track when you ask it to, when your Mac can determine its location. Your location stays on this Mac.
+        # GPX files: open from Finder ("Open With" > Gulf Nav, or double-click once Gulf Nav is the default) and
+        # drag onto the window.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: GPX file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.topografix.gpx
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.topografix.gpx
+            UTTypeDescription: GPS Exchange Format (GPX)
+            UTTypeConformsTo:
+              - public.xml
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - gpx
+              public.mime-type:
+                - application/gpx+xml
+        LSSupportsOpeningDocumentsInPlace: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav
+        PRODUCT_NAME: GulfNav
+        # 6 = "Optimize Interface for Mac" (native Mac controls and text size, no 77 % iPad scaling).
+        TARGETED_DEVICE_FAMILY: "1,2,6"
+        SUPPORTS_MACCATALYST: YES
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        # Same bundle id on the Mac (no "maccatalyst." prefix): one App Store record for iOS and Mac.
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        CODE_SIGN_ENTITLEMENTS: Mac/GulfNav-macOS.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ENABLE_PREVIEWS: YES
+      configs:
+        Debug:
+          # Off for Debug so hosted unit tests can be injected into an ad hoc signed app on CI.
+          ENABLE_HARDENED_RUNTIME: NO
+        Release:
+          # Required for notarisation (Developer ID) and used for the Mac App Store.
+          ENABLE_HARDENED_RUNTIME: YES
+          EXCLUDED_SOURCE_FILE_NAMES: "tiny-a.mbtiles sarasota.pack"
+    dependencies:
+      - package: NavCore
+      - package: ChartKit
+      - package: AppServices
+      - package: Persistence
+      - package: GPXKit
+      - package: RoutingKit
+
+  GulfNavMacTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UnitTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SUPPORTS_MACCATALYST: YES
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        TARGETED_DEVICE_FAMILY: "1,2,6"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+    dependencies:
+      - target: GulfNavMac
+
+  # The iOS UI tests run against the Mac app (with platform conditions where a Mac differs), plus
+  # MacUITests.swift, which is Mac-only (#if targetEnvironment(macCatalyst)).
+  GulfNavMacUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.gulfnav.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SUPPORTS_MACCATALYST: YES
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        TARGETED_DEVICE_FAMILY: "1,2,6"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TEST_TARGET_NAME: GulfNavMac
+    dependencies:
+      - target: GulfNavMac
+
   # Unit tests of app-target helpers, hosted in the app (TEST_HOST is set by XcodeGen from the dependency).
   GulfNavTests:
     type: bundle.unit-test
@@ -187,5 +332,24 @@ schemes:
       targets:
         - name: GulfNavTests
         - name: GulfNavUITests
+    archive:
+      config: Release
+  GulfNavMac:
+    build:
+      targets:
+        GulfNavMac: all
+        GulfNavMacTests: [test]
+        GulfNavMacUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      captureScreenshotsAutomatically: true
+      deleteScreenshotsWhenEachTestSucceeds: true
+      preferredScreenCaptureFormat: screenshots
+      targets:
+        - name: GulfNavMacTests
+        - name: GulfNavMacUITests
     archive:
       config: Release

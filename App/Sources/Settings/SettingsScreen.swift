@@ -52,7 +52,7 @@ struct SettingsScreen: View {
                         Text("Course up").tag(MapOrientation.courseUp)
                     }
                     .accessibilityIdentifier("settings.orientation")
-                    Toggle("Keep the screen on", isOn: binding(\.keepScreenOn))
+                    Toggle(PlatformText.keepScreenOn, isOn: binding(\.keepScreenOn))
                         .accessibilityIdentifier("settings.keepScreenOn")
                 }
                 Section {
@@ -65,7 +65,7 @@ struct SettingsScreen: View {
                 } header: {
                     Text("Track recording")
                 } footer: {
-                    Text("A point is also skipped until the boat has moved \(Int(settings.trackMinimumDistance)) m. Shorter intervals give smoother tracks; background recording uses GPS continuously either way.")
+                    Text("A point is also skipped until the boat has moved \(Int(settings.trackMinimumDistance)) m. " + PlatformText.intervalNote)
                 }
                 Section("About") {
                     Text(Disclaimer.title)

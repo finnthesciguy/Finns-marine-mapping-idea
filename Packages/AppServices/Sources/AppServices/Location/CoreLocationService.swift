@@ -88,10 +88,15 @@ public final class CoreLocationService: NSObject, LocationService, CLLocationMan
                                                                  authorization: authorization)
         manager.pausesLocationUpdatesAutomatically = settings.pausesAutomatically
         manager.activityType = settings.usesNavigationActivityType ? CLActivityType.otherNavigation : CLActivityType.other
+        #if !targetEnvironment(macCatalyst)
         // Setting this to true without the `location` background mode raises an exception; the policy
         // only returns true when the mode is declared.
         manager.allowsBackgroundLocationUpdates = settings.allowsBackgroundUpdates
         manager.showsBackgroundLocationIndicator = settings.showsBackgroundIndicator
+        #endif
+        // Mac (Catalyst): a Mac app keeps running and receiving locations when it is not frontmost, so no
+        // background mode is involved, and `showsBackgroundLocationIndicator` is marked unavailable on macOS
+        // in CLLocationManager.h. The Mac Info.plist declares no `UIBackgroundModes`.
     }
 
     private func authorizationDidChange(_ status: LocationAuthorization) {

@@ -72,7 +72,17 @@ struct MapScreen: View {
                 if plotter.guidance.isActive {
                     GuidancePanel(guidance: plotter.guidance, units: units)
                 }
+                #if targetEnvironment(macCatalyst)
+                // A Mac usually has no GPS: show "no position" rather than a stale fix (re-evaluated every 5 s).
+                TimelineView(.periodic(from: Date(), by: 5)) { context in
+                    InstrumentStrip(readout: navigation.readout, speedUnit: units.speed,
+                                    positionState: PositionStatus.state(lastFix: navigation.readout.lastFix,
+                                                                        authorization: navigation.authorization,
+                                                                        now: context.date))
+                }
+                #else
                 InstrumentStrip(readout: navigation.readout, speedUnit: units.speed)
+                #endif
                 Text("Chart data: NOAA. Not for navigation.")
                     .font(.caption2)
                     .foregroundStyle(Color.secondary)
@@ -128,10 +138,10 @@ struct MapScreen: View {
             if editing { model.map.follow = false }
         }
         .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = model.plotter.data.settings.keepScreenOn
+            KeepScreenOn.set(model.plotter.data.settings.keepScreenOn)
         }
         .onChange(of: plotter.data.settings.keepScreenOn) { _, keepOn in
-            UIApplication.shared.isIdleTimerDisabled = keepOn
+            KeepScreenOn.set(keepOn)
         }
     }
 
@@ -215,7 +225,7 @@ struct MapScreen: View {
                 model.autoRoute.picking = nil
                 sheet = .autoRoute
             } label: {
-                Banner(text: "Tap the chart to set the \(end == .start ? "start" : "destination"). Tap here to cancel.",
+                Banner(text: "\(PlatformText.tap) the chart to set the \(end == .start ? "start" : "destination"). \(PlatformText.tap) here to cancel.",
                        systemImage: "hand.tap")
             }
             .buttonStyle(.plain)
@@ -225,7 +235,7 @@ struct MapScreen: View {
             Button {
                 sheet = .autoRoute
             } label: {
-                Banner(text: "Planned route not saved yet. Tap to review, save or discard it.",
+                Banner(text: "Planned route not saved yet. \(PlatformText.tap) to review, save or discard it.",
                        systemImage: "point.topleft.down.to.point.bottomright.curvepath")
             }
             .buttonStyle(.plain)
@@ -242,11 +252,11 @@ struct MapScreen: View {
         }
         if !navigation.authorization.allowsUpdates && navigation.authorization != .notDetermined {
             Button {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
+                if let url = URL(string: PlatformText.locationSettingsURL) {
                     openURL(url)
                 }
             } label: {
-                Banner(text: "Location access is off. Tap to open Settings.", systemImage: "location.slash")
+                Banner(text: PlatformText.locationOff, systemImage: "location.slash")
             }
             .buttonStyle(.plain)
         }
@@ -254,7 +264,7 @@ struct MapScreen: View {
             Button {
                 sheet = .charts
             } label: {
-                Banner(text: "No charts installed. Tap to download a region.", systemImage: "map")
+                Banner(text: "No charts installed. \(PlatformText.tap) to download a region.", systemImage: "map")
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("map.noChartsBanner")
@@ -372,15 +382,36 @@ enum GPXDocumentTypes {
 struct InstrumentStrip: View {
     let readout: NavigationReadout
     let speedUnit: SpeedUnit
+    /// Mac: whether there is a current position (nil on iOS, which shows the values as they are).
+    var positionState: PositionState? = nil
 
     var body: some View {
-        let position = InstrumentFormat.position(readout.lastFix?.coordinate)
+        let showsValues: Bool = positionState.map { PositionStatus.showsValues($0) } ?? true
+        let position = InstrumentFormat.position(showsValues ? readout.lastFix?.coordinate : nil)
+        let sog: String = showsValues
+            ? InstrumentFormat.sog(metersPerSecond: readout.speedOverGround, unit: speedUnit) : InstrumentFormat.placeholder
+        let cog: String = showsValues ? InstrumentFormat.cog(degrees: readout.courseOverGround) : InstrumentFormat.placeholder
+        VStack(alignment: .leading, spacing: 4) {
+            if let state = positionState, let message = PositionStatus.message(state) {
+                Label(message, systemImage: "location.slash")
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+                    .padding(.horizontal, 10)
+                    .accessibilityIdentifier("instrument.positionStatus")
+            }
+            values(sog: sog, cog: cog, position: position)
+        }
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("instrument.strip")
+    }
+
+    private func values(sog: String, cog: String, position: (latitude: String, longitude: String)) -> some View {
         HStack(spacing: 0) {
-            cell(title: "SOG", value: InstrumentFormat.sog(metersPerSecond: readout.speedOverGround, unit: speedUnit),
-                 identifier: "instrument.sog")
+            cell(title: "SOG", value: sog, identifier: "instrument.sog")
             Divider().frame(height: 36)
-            cell(title: "COG", value: InstrumentFormat.cog(degrees: readout.courseOverGround),
-                 identifier: "instrument.cog")
+            cell(title: "COG", value: cog, identifier: "instrument.cog")
             Divider().frame(height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text("POSITION")
@@ -396,10 +427,6 @@ struct InstrumentStrip: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("instrument.strip")
     }
 
     private func cell(title: String, value: String, identifier: String) -> some View {

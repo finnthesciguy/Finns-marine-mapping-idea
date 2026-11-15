@@ -32,7 +32,7 @@ struct RoutesScreen: View {
                         .accessibilityIdentifier("routes.autoRoute")
                     }
                 } footer: {
-                    Text("Tap the chart to add points, then Save. Routes are not checked for depth or hazards: check every leg against the chart.")
+                    Text("\(PlatformText.tap) the chart to add points, then Save. Routes are not checked for depth or hazards: check every leg against the chart.")
                 }
                 Section("Routes") {
                     if rows.isEmpty {
@@ -218,9 +218,7 @@ struct RouteDetailScreen: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
-            .sheet(item: exportBinding(plotter)) { file in
-                ShareSheet(url: file.url)
-            }
+            .gpxExport(plotter)
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
