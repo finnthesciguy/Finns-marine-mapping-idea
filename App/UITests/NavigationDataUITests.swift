@@ -613,12 +613,21 @@ extension GulfNavUITests {
         // reach their buttons, and a Mac button's text can be in `title` rather than `label`. Match any button in
         // any window by identifier, label or title.
         let predicate = NSPredicate(format: "identifier == %@ OR label == %@ OR title == %@", identifier, label, label)
-        let macButton: XCUIElement = app.descendants(matching: .button).matching(predicate).firstMatch
-        if macButton.waitForExistence(timeout: GulfNavUITests.stepTimeout) {
-            print("GULFNAV-NOTE confirmation '\(label)' found as \(macButton.identifier.isEmpty ? "label/title" : "identifier \(macButton.identifier)")")
-            macButton.click()
-            return
-        }
+        // Only inside windows, sheets, dialogs and alerts: an app-wide query also matches the Touch Bar's copy
+        // of the button, which cannot be clicked.
+        let scopes: [XCUIElementQuery] = [app.windows, app.sheets, app.dialogs, app.alerts]
+        let deadline: Date = Date().addingTimeInterval(GulfNavUITests.stepTimeout)
+        repeat {
+            for scope in scopes {
+                let macButton: XCUIElement = scope.descendants(matching: .button).matching(predicate).firstMatch
+                if macButton.exists && macButton.isHittable {
+                    print("GULFNAV-NOTE confirmation '\(label)' found as \(macButton.identifier.isEmpty ? "label/title" : "identifier \(macButton.identifier)")")
+                    macButton.click()
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        } while Date() < deadline
         logDialogs(app)
         #endif
         // A confirmation dialog can expose its button more than once in the accessibility tree,

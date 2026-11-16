@@ -97,7 +97,8 @@ extension GulfNavUITests {
         let legs: XCUIElement = scrollTo(app, "route.check.legs")
         XCTAssertEqual(legs.label, "28 legs: 28 green, 0 yellow")
         #if targetEnvironment(macCatalyst)
-        scrollTo(app, "route.check.distance")
+        // "Distance" is the row above "Legs": scrolling to "Legs" can push it off the top.
+        scrollTo(app, "route.check.distance", downwards: true)
         #endif
         XCTAssertEqual(GulfNavUITests.element(app, "route.check.distance").label, "5.70 nm")
         #if targetEnvironment(macCatalyst)
