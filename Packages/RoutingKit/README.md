@@ -66,16 +66,17 @@ do {
   - The decoder is strict: it checks the zlib header, the exact output length and the Adler-32 trailer, and it rejects trailing bytes.
   - It uses a 10-bit lookup table with a canonical slow path. The pilot pack inflates and decodes in 0.25 s in release.
 - **Memory layout.**
-  - Flat `ContiguousArray`s of fixed-width integers: 4-byte vertex coordinates; 4-byte vertex indices and neighbours; the 17 bytes per triangle of `ATTR`; the grid ids; and the `GEOM` pool. There are no per-triangle objects.
-  - Derived adjacency uses per-vertex buckets of outgoing edges (8 bytes per edge, transient), not a hash map.
-  - Per-query search state is 13 bytes per triangle (cost, entry edge, closed flag). Positions are recomputed from the entry edge, never stored.
-  - Classification (B.3–B.5) is computed on demand per triangle. No per-profile arrays are built.
+  - Flat `ContiguousArray`s of fixed-width integers: 4-byte vertex coordinates; 4-byte vertex indices and neighbours; the grid ids; and the `GEOM` pool. There are no per-triangle objects.
+  - `ATTR` rows are deduplicated into **attribute classes** at load (a Gulf region pack has about 35,000 classes for 3 million triangles): a triangle costs a 4-byte class number instead of 17–19 bytes. `ATTR` is decoded first, so its inflated rows are freed before the mesh arrays exist.
+  - Derived adjacency uses the triangle corners around each vertex (compressed rows, 4 bytes per corner plus 4 per vertex, transient), not a hash map.
+  - Per-query search state is 13 bytes per touched triangle (cost, entry edge, closed flag), allocated in pages of 4096 triangles on first touch; triangles are in a space-filling order, so a search touches compact runs of pages. Positions are recomputed from the entry edge, never stored.
+  - Classification (B.3–B.5) and the B.9 reason masks are computed once per attribute class for the profile, not per triangle.
 - **Exactness.**
   - All geometry predicates are Int64. The reader rejects packs whose bounding box spans more than 2^30 units, which keeps every A.8 product exact.
   - Integer division uses `floorDiv`.
   - Floating-point expressions follow the spec's operation order, and the reference's where the spec is silent.
 - **Validation on load.**
-  - Every A.4 check of format 1.1, in the spec's order: header fields, the section-table CRC, the exact layout with zero padding (so every byte of the file is covered by a check), section CRCs, tags, encodings, and the content checks. Format 1.0 files (no table CRC) are accepted.
+  - Every A.4 check of format 1.2, in the spec's order: header fields, the section-table CRC, the exact layout with zero padding (so every byte of the file is covered by a check), section CRCs, tags, encodings, and the content checks (including `ADVS` and the `advisory` column). Format 1.0 and 1.1 files (no table CRC; no `ADVS`, 17-byte `ATTR` rows) are accepted.
   - Every count and length, and every index range: vertices, neighbours, grid ids, `CHAN`, `OVHD` and `AREA` references, `GEOM` ranges and string ids.
   - The A.9 orientation check, stored-adjacency consistency, and directed-edge uniqueness when deriving adjacency.
   - GEOM points inside the header bbox, which keeps every A.8 and B.10 orientation exact in Int64.
@@ -86,7 +87,7 @@ do {
 `swift test` (swift-testing) finds `testdata/routing` relative to the package through `#filePath`. It runs 43 tests in about 10 s (debug).
 
 - **Records.** Every field in both `*.records.json` files and the A.10 worked examples. On the synthetic pack, stored and derived adjacency must be equal. Adjacency must be symmetric. Grid location must agree with a brute-force search.
-- **Vectors.** Every query in both `*.vectors.json` files (13 + 9) must reproduce exactly under the part D rules: integers and sequences exactly, distances to 1e-6 m, `snap_m` to 1e-3 m. A negative control checks that the comparator really detects differences.
+- **Vectors.** Every query in both `*.vectors.json` files (15 + 9) must reproduce exactly under the part D rules: integers and sequences exactly, distances to 1e-6 m, `snap_m` to 1e-3 m. A negative control checks that the comparator really detects differences.
 - **Properties.** These run over all 992 ordered point pairs on the synthetic pack under 6 profiles. Each query is also run in reverse and repeated, 17,856 queries in all:
   - **Determinism:** the same query always gives the same result.
   - **Symmetry:** the outcome class (route, no route, leg-validation failure) is the same in both directions, and no query fails leg validation.
@@ -100,7 +101,7 @@ do {
   - Mutations that keep the checksums valid: a test-only re-encoder writes every section raw, then the section contents or section-table fields are mutated and the CRCs fixed.
   - Corrupt zlib streams with a valid section CRC.
 
-  Every bit flip must give a typed error (format 1.1 leaves no byte unchecked). Mutations with every checksum fixed up must give a typed error or load; packs that load are routed once, to show routing cannot crash either. Specific checks (table CRC, padding, `header_size`, `section_table_offset`, duplicate tags, flag bit 0, STRS and GRID counts) have typed-error tests, and a 1.0 copy of each pack must load with identical content.
+  Every bit flip must give a typed error (format 1.1 leaves no byte unchecked). Mutations with every checksum fixed up must give a typed error or load; packs that load are routed once, to show routing cannot crash either. Specific checks (table CRC, padding, `header_size`, `section_table_offset`, duplicate tags, flag bit 0, STRS and GRID counts) have typed-error tests, and `synthetic-v11.pack` (format 1.1) and a 1.0 copy of it must load with the same content as `synthetic.pack` minus the advisories; a 1.2 file relabelled 1.1 is rejected.
 - **Cancellation and timeouts.**
   - Pre-cancelled async and synchronous queries.
   - Cancellation from inside a running search.

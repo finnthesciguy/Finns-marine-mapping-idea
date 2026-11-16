@@ -169,14 +169,19 @@ public struct Channel: Hashable, Sendable {
 
 /// `AREA` record: a regulated area.
 public struct RegulatedArea: Hashable, Sendable {
-    /// 1 prohibited, 2 restricted, 3 caution.
+    /// 1 prohibited, 2 restricted, 3 caution, 4 lock or navigable floodgate (format 1.2).
     public var kind: UInt8
-    /// 1 RESARE, 2 CTNARE.
+    /// 1 RESARE, 2 CTNARE, 3 GATCON (a lock or floodgate zone), 4 a chart-datum note (format 1.2).
     public var source: UInt8
+    /// Bit 0: an area-wide advisory, listed once in the route summary (format 1.2; 0 in older files).
+    public var flags: UInt8 = 0
     public var name: UInt32
     public var text: UInt32
     public var lon: Int32
     public var lat: Int32
+
+    /// An area-wide advisory (flags bit 0): reported once per route, never on a leg.
+    public var isAreaWide: Bool { flags & 1 != 0 }
 }
 
 /// The per-triangle `ATTR` columns of one triangle (spec A.5).
@@ -190,6 +195,8 @@ public struct TriangleAttributes: Hashable, Sendable {
     public var overhead: UInt16
     public var area: UInt16
     public var quality: UInt8
+    /// Index of the triangle's set of area-wide advisories in `ADVS` (0 = none; always 0 before format 1.2).
+    public var advisory: UInt16 = 0
 
     /// CATZOC code (0 unknown, 1 A1, 2 A2, 3 B, 4 C, 5 D, 6 U).
     public var catzoc: Int { Int(quality & 7) }
@@ -218,6 +225,8 @@ public struct TriangleFlags: OptionSet, Hashable, Sendable {
     public static let prohibited = TriangleFlags(rawValue: 1 << 8)
     public static let outside = TriangleFlags(rawValue: 1 << 9)
     public static let soundingRefined = TriangleFlags(rawValue: 1 << 10)
+    /// In a lock or navigable floodgate zone (format 1.2).
+    public static let lock = TriangleFlags(rawValue: 1 << 13)
 }
 
 /// Sentinels used in the pack.

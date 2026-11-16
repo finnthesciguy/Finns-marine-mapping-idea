@@ -83,12 +83,19 @@ func put32(_ b: inout [UInt8], _ o: Int, _ v: UInt32) {
 
 /// Same decoded content (used when a flip lands in padding that no checksum covers).
 func sameContent(_ a: RoutingPack, _ b: RoutingPack) -> Bool {
-    a.lon == b.lon && a.lat == b.lat && a.tris == b.tris && a.nbr == b.nbr && a.depth == b.depth && a.band == b.band
-        && a.maint == b.maint && a.clr == b.clr && a.flags == b.flags && a.chan == b.chan && a.ovhd == b.ovhd
-        && a.area == b.area && a.quality == b.quality && a.gridOffsets == b.gridOffsets && a.gridIDs == b.gridIDs
+    a.lon == b.lon && a.lat == b.lat && a.tris == b.tris && a.nbr == b.nbr && sameAttributes(a, b)
+        && a.gridOffsets == b.gridOffsets && a.gridIDs == b.gridIDs
         && a.geom == b.geom && a.stringBlob == b.stringBlob && a.stringOffsets == b.stringOffsets
         && a.overheadObjects == b.overheadObjects && a.hazards == b.hazards && a.channels == b.channels
         && a.areas == b.areas && a.sources == b.sources && a.header.dataDate == b.header.dataDate
+        && a.advisorySets == b.advisorySets
+}
+
+/// Same `ATTR` row for every triangle.
+func sameAttributes(_ a: RoutingPack, _ b: RoutingPack) -> Bool {
+    guard a.triangleCount == b.triangleCount else { return false }
+    for t in 0..<a.triangleCount where a.attributes(t) != b.attributes(t) { return false }
+    return true
 }
 
 /// Loads a (possibly corrupt) pack; on success, routes once to show routing cannot crash either.
@@ -136,7 +143,7 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
 
         b = try Fixtures.bytes("synthetic.pack")
         b[8] = 2
-        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 1)) { try RoutingPack(bytes: b) }
+        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 2)) { try RoutingPack(bytes: b) }
 
         b = try Fixtures.bytes("synthetic.pack")
         b[200] ^= 1
@@ -210,21 +217,36 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
         #expect(throws: PackError.self) { try RoutingPack(bytes: []) }
     }
 
-    /// A 1.1 reader accepts a 1.0 file: the same bytes with minor 0 and no section-table CRC.
-    @Test func acceptsFormat1_0() throws {
-        for name in ["synthetic", "sarasota"] {
-            var b = try Fixtures.bytes("\(name).pack")
-            b[10] = 0
-            b[11] = 0
-            put32(&b, 108, 0)
-            let crc: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
-            put32(&b, 252, crc)
-            let old = try RoutingPack(bytes: b)
-            let new = try RoutingPack(bytes: try Fixtures.bytes("\(name).pack"))
-            #expect(old.header.formatMinor == 0 && new.header.formatMinor == 1)
-            #expect(old.header.tableCRC32 == 0)
-            #expect(sameContent(old, new), "\(name)")
+    /// A 1.2 reader accepts 1.1 and 1.0 files: `synthetic-v11.pack` is the synthetic pack written as format 1.1
+    /// (no ADVS, 17-byte ATTR rows), and the same bytes patched to minor 0 without a section-table CRC.
+    @Test func acceptsFormats1_0And1_1() throws {
+        let current = try RoutingPack(bytes: try Fixtures.bytes("synthetic.pack"))
+        var b = try Fixtures.bytes("synthetic-v11.pack")
+        let v11 = try RoutingPack(bytes: b)
+        b[10] = 0
+        b[11] = 0
+        put32(&b, 108, 0)
+        let crc: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
+        put32(&b, 252, crc)
+        let v10 = try RoutingPack(bytes: b)
+        #expect(current.header.formatMinor == 2 && v11.header.formatMinor == 1 && v10.header.formatMinor == 0)
+        #expect(v10.header.tableCRC32 == 0)
+        #expect(sameContent(v10, v11))
+        #expect(v11.advisorySets == [[]])
+        #expect(current.advisorySets == [[], [4], [4, 5]])
+        for t in 0..<current.triangleCount {
+            var want: TriangleAttributes = current.attributes(t)
+            want.advisory = 0
+            #expect(v11.attributes(t) == want)
         }
+    }
+
+    /// A file that claims 1.1 but holds 1.2 rows is rejected (the ATTR length no longer matches).
+    @Test func rejectsVersionMismatch() throws {
+        var b = try Fixtures.bytes("synthetic.pack")
+        b[10] = 1
+        fixTableAndHeaderCRC(&b)
+        #expect(throws: PackError.self) { try RoutingPack(bytes: b) }
     }
 
     @Test func truncationAlwaysThrows() throws {

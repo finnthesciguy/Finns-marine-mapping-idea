@@ -32,6 +32,7 @@ FMIN = 0.8
 OPENING_PENALTY_M = 1500.0
 UNKNOWN_CLR_PENALTY_M = 3000.0
 RESTRICTED_PENALTY_M = 1000.0
+LOCK_PENALTY_M = 2000.0             # entering a lock or floodgate zone (format 1.2)
 BLOCKED_FACTOR = 50.0
 BLOCKED_PENALTY_M = 100000.0
 MAX_SNAP_M = 750.0
@@ -43,9 +44,11 @@ OVERHEAD_POINT_M = 1.0              # spec B.10: a point object within this dist
 # block reasons (spec B.3), in precedence order
 BLOCK_REASONS = ["PROHIBITED", "OPEN_GULF", "DEPTH", "CLEARANCE", "UNKNOWN_CLEARANCE"]
 # yellow reasons (spec B.9), in report order
-YELLOW_REASONS = ["MAINTAINED_DEPTH", "SOUNDING_DEPTH", "BRIDGE_OPENING", "UNKNOWN_CLEARANCE",
+YELLOW_REASONS = ["MAINTAINED_DEPTH", "SOUNDING_DEPTH", "BRIDGE_OPENING", "LOCK", "UNKNOWN_CLEARANCE",
                   "RESTRICTED_AREA", "CAUTION_AREA", "HAZARD_PROXIMITY", "LOW_DATA_QUALITY",
                   "THIN_MARGIN"]
+LOW_QUALITY_CATZOC = (0, 5, 6)      # unknown, D, U
+THIN_MARGIN_CATZOC = (0, 4, 5, 6)   # unknown, C, D, U
 
 
 def req_dm(feet: float) -> int:
@@ -139,6 +142,17 @@ class Classified:
         self.needs_opening = opening & has_ovh & ((clr == P.CLR_UNKNOWN) | (clr < air))
         self.unknown_used = unk & ~opening & has_ovh
         self.restricted = (fl & P.F_RESTRICTED) > 0
+        self.lock = (fl & P.F_LOCK) > 0
+        # spec B.9: the yellow reasons of each triangle as a bit mask (bit k = YELLOW_REASONS[k])
+        cz = (a["quality"] & 7).astype(np.int64)
+        conds = [self.via_maint, self.via_sound, self.needs_opening, self.lock, self.unknown_used,
+                 self.restricted, (fl & P.F_CAUTION) > 0, (fl & P.F_HAZARD_DEPTH) > 0,
+                 np.isin(cz, LOW_QUALITY_CATZOC),
+                 ~self.via_maint & ((depth - req) < THIN_MARGIN_DM) & np.isin(cz, THIN_MARGIN_CATZOC)]
+        bits = np.zeros(len(depth), np.int64)
+        for k, c in enumerate(conds):
+            bits |= np.where(c, 1 << k, 0)
+        self.ybits = bits
         # cost factor, multiplied in the spec's order
         f = np.ones(len(depth))
         hw = (fl & P.F_HIGHWAY) > 0
@@ -277,12 +291,13 @@ class Router:
         b = self._tri_l[t][(k + 1) % 3]
         return ((self._vx[a] + self._vx[b]) / 2e7, (self._vy[a] + self._vy[b]) / 2e7)
 
-    def astar(self, s, gt, S, G, ok, factor, pen_open, pen_unk, pen_rest, extra_pen=None):
+    def astar(self, s, gt, S, G, ok, factor, pen_open, pen_unk, pen_rest, pen_lock, extra_pen=None):
         ok = ok.tolist() if isinstance(ok, np.ndarray) else ok
         factor = factor.tolist()
         po = pen_open.tolist()
         pu = pen_unk.tolist()
         pr = pen_rest.tolist()
+        pk = pen_lock.tolist()
         pb = extra_pen.tolist() if extra_pen is not None else None
         gx, gy = G
         gcost = {s: 0.0}
@@ -316,6 +331,8 @@ class Router:
                     step += UNKNOWN_CLR_PENALTY_M
                 if pr[u] and not pr[t]:
                     step += RESTRICTED_PENALTY_M
+                if pk[u] and not pk[t]:
+                    step += LOCK_PENALTY_M
                 if pb is not None and pb[u] and not pb[t]:
                     step += BLOCKED_PENALTY_M
                 ng = gt_ + step
@@ -440,14 +457,21 @@ class Router:
         S = (ends[0]["x"] / UNITS, ends[0]["y"] / UNITS)
         G = (ends[1]["x"] / UNITS, ends[1]["y"] / UNITS)
         corridor, expanded = self.astar(s, g, S, G, cls.ok, cls.factor, cls.needs_opening,
-                                        cls.unknown_used, cls.restricted)
+                                        cls.unknown_used, cls.restricted, cls.lock)
         res["expanded"] = expanded
         if corridor is None:
             res["error"] = "NO_ROUTE"
             res.update(self.blocked_report(s, g, S, G, cls, prof))
             return res
-        pts = funnel((ends[0]["x"], ends[0]["y"]), (ends[1]["x"], ends[1]["y"]), self.portals(corridor))
-        legs, violations = self.grade(corridor, pts, cls, prof)
+        S_u, G_u = (ends[0]["x"], ends[0]["y"]), (ends[1]["x"], ends[1]["y"])
+        if S_u == G_u:  # start equal to goal: one waypoint, no legs, the B.7 corridor
+            pts, leg_tris = [(S_u, len(corridor))], []
+        else:
+            pts, leg_tris = self.plan_legs(S_u, G_u, corridor, cls)
+            corridor = [corridor[0]]
+            for lt in leg_tris:
+                corridor += lt[1:]
+        legs, violations = self.grade(corridor, pts, leg_tris, cls, prof)
         if violations:
             res["error"] = "LEG_VALIDATION"
             res["violations"] = violations
@@ -465,56 +489,131 @@ class Router:
         a, b, c = self._tri_l[t]
         return ((self._vx[a] + self._vx[b] + self._vx[c]) // 3, (self._vy[a] + self._vy[b] + self._vy[c]) // 3)
 
+    # ----------------------------------------------------------- B.8 leg planning
+    def contains_strictly(self, t, p) -> bool:
+        a, b, c = self._tri_l[t]
+        vx, vy = self._vx, self._vy
+        x, y = p
+        return (orient(vx[a], vy[a], vx[b], vy[b], x, y) > 0 and orient(vx[b], vy[b], vx[c], vy[c], x, y) > 0
+                and orient(vx[c], vy[c], vx[a], vy[a], x, y) > 0)
+
+    def walk(self, A, tA, B, tB, admissible):
+        """Spec B.8 straight walk from point A in triangle tA to point B, which must end in
+        triangle tB. Returns the triangles crossed, in order, or None."""
+        tl, nb, vx, vy = self._tri_l, self._nbr_l, self._vx, self._vy
+        t = tA
+        out = [t]
+        ax, ay = A
+        bx, by = B
+        for _ in range(len(tl)):
+            if t == tB:
+                return out
+            if self.contains(t, bx, by):
+                return None  # B reached in another triangle
+            v = tl[t]
+            o = [orient(ax, ay, bx, by, vx[x], vy[x]) for x in v]
+            k = -1
+            for e in range(3):
+                if o[e] < 0 and o[(e + 1) % 3] > 0:
+                    k = e
+                    break
+            if k < 0:
+                return None  # the segment meets a vertex, or leaves backwards
+            u = nb[t][k]
+            if u < 0 or not admissible(u):
+                return None
+            out.append(u)
+            t = u
+        return None
+
+    def plan_legs(self, S, G, corridor, cls: Classified):
+        """Spec B.8: legs by greedy visibility over the corridor's portal midpoints (exact straight
+        walks through passable triangles that add no yellow reason), with the funnel as fallback.
+        Returns (waypoints [(point, portal index)], per-leg triangle lists)."""
+        n = len(corridor)
+        ports = self.portals(corridor)
+        P_ = [(S, S)] + ports + [(G, G)]
+        ok = cls.ok.tolist()
+        yb = cls.ybits.tolist()
+
+        def target(j):
+            if j == n:
+                return G
+            (xl, yl), (xr, yr) = P_[j]
+            t = corridor[j]
+            o = [v for v in self._tri_l[t] if (self._vx[v], self._vy[v]) not in ((xl, yl), (xr, yr))][0]
+            # barycentric (0.4, 0.4, 0.2): just inside c[j], next to the middle of the portal
+            m = ((2 * xl + 2 * xr + self._vx[o]) // 5, (2 * yl + 2 * yr + self._vy[o]) // 5)
+            return m if self.contains_strictly(t, m) else None
+
+        A, ia, tA = S, 0, corridor[0]
+        pts, legs = [(S, 0)], []
+        while True:
+            def visible(j):
+                T = target(j)
+                if T is None or T == A:
+                    return None
+                Y = 0
+                for t in corridor[ia:min(j, n - 1) + 1]:
+                    Y |= yb[t]
+                tT = corridor[min(j, n - 1)]
+                return self.walk(A, tA, T, tT, lambda u: ok[u] and (yb[u] & ~Y) == 0)
+            seq = visible(ia + 1)
+            if seq is not None:
+                lo, step = ia + 1, 1
+                while lo + step <= n:
+                    w = visible(lo + step)
+                    if w is None:
+                        break
+                    lo, seq = lo + step, w
+                    step *= 2
+                hi = min(lo + step, n + 1)
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    w = visible(mid)
+                    if w is None:
+                        hi = mid
+                    else:
+                        lo, seq = mid, w
+                B, jb = target(lo), lo
+            else:
+                f = funnel(A, G, P_[ia + 1:n])
+                B, k = f[1]
+                jb = ia + k
+                seq = list(corridor[ia:min(jb, n - 1) + 1])
+            pts.append((B, jb))
+            legs.append(seq)
+            if jb == n:
+                return pts, legs
+            A, ia, tA = B, jb, corridor[jb]
+
     # ----------------------------------------------------------- B.9 grading
-    def grade(self, corridor, pts, cls: Classified, prof: Profile):
+    def grade(self, corridor, pts, leg_tris, cls: Classified, prof: Profile):
         a = self.p.attrs
         legs, violations = [], []
-        n = len(corridor)
-        cz = (a["quality"] & 7).astype(int)
-        for j in range(len(pts) - 1):
-            (A, pa), (B, pb) = pts[j], pts[j + 1]
-            lo, hi = pa, max(pa, pb - 1)
-            hi = min(hi, n - 1)
-            tl = corridor[lo: hi + 1]
+        lo = 0
+        for j, tl in enumerate(leg_tris):
+            (A, _), (B, _) = pts[j], pts[j + 1]
+            hi = lo + len(tl) - 1
             tt = np.array(tl, dtype=np.int64)
-            reasons = []
+            bits = int(np.bitwise_or.reduce(cls.ybits[tt]))
+            reasons = [r for k, r in enumerate(YELLOW_REASONS) if bits >> k & 1]
             depth = a["depth_dm"][tt].astype(int)
-            fl = a["flags"][tt].astype(int)
-            if cls.via_maint[tt].any():
-                reasons.append("MAINTAINED_DEPTH")
-            if cls.via_sound[tt].any():
-                reasons.append("SOUNDING_DEPTH")
-            if cls.needs_opening[tt].any():
-                reasons.append("BRIDGE_OPENING")
-            if cls.unknown_used[tt].any():
-                reasons.append("UNKNOWN_CLEARANCE")
-            if (fl & P.F_RESTRICTED).any():
-                reasons.append("RESTRICTED_AREA")
-            if (fl & P.F_CAUTION).any():
-                reasons.append("CAUTION_AREA")
-            if (fl & P.F_HAZARD_DEPTH).any():
-                reasons.append("HAZARD_PROXIMITY")
-            q = cz[tt]
-            if np.isin(q, [0, 5, 6]).any():
-                reasons.append("LOW_DATA_QUALITY")
             charted = ~cls.via_maint[tt]
-            thin = charted & ((depth - cls.req) < THIN_MARGIN_DM) & np.isin(q, [0, 4, 5, 6])
-            if thin.any():
-                reasons.append("THIN_MARGIN")
             v, cr = self.validate_leg(A, B, prof)
             for x in v:
                 x["leg"] = j
             violations += v
             length = dist_m(A[0] / UNITS, A[1] / UNITS, B[0] / UNITS, B[1] / UNITS)
-            mi = int(np.argmin(depth))
             legs.append({
                 "from": [A[0] / UNITS, A[1] / UNITS], "to": [B[0] / UNITS, B[1] / UNITS],
                 "triangles": [lo, hi], "length_m": length,
                 "grade": "yellow" if reasons else "green", "reasons": reasons,
-                "min_depth_dm": int(depth[mi]),
+                "min_depth_dm": int(depth.min()),
                 "min_spare_dm": int((depth[charted] - cls.req).min()) if charted.any() else None,
                 "crossings": cr,
             })
+            lo = hi
         return legs, violations
 
     def summary(self, corridor, legs, cls: Classified):
@@ -535,17 +634,27 @@ class Router:
                    "name": p.string(int(p.overhead[ov]["name"])) if ov != P.ID_NONE else "",
                    "opening": bool(a["flags"][tt[m]] & P.F_OPENING)}
 
-        def runs(mask):
+        def runs(mask, item):
             out, prev = [], False
             for i, t in enumerate(tt.tolist()):
                 if mask[t] and not prev:
-                    ov = int(a["overhead"][t])
                     x, y = self.tri_centroid(t)
-                    out.append({"corridor_index": i, "overhead": ov, "clearance_dm": int(a["clearance_dm"][t]),
-                                "name": p.string(int(p.overhead[ov]["name"])) if ov != P.ID_NONE else "",
-                                "lon": x / UNITS, "lat": y / UNITS})
+                    out.append({"corridor_index": i, **item(t), "lon": x / UNITS, "lat": y / UNITS})
                 prev = bool(mask[t])
             return out
+
+        def overhead_item(t):
+            ov = int(a["overhead"][t])
+            return {"overhead": ov, "clearance_dm": int(a["clearance_dm"][t]),
+                    "name": p.string(int(p.overhead[ov]["name"])) if ov != P.ID_NONE else ""}
+
+        def lock_item(t):
+            ar = int(a["area"][t])
+            return {"area": ar, "name": p.string(int(p.areas[ar]["name"])) if ar != P.ID_NONE else ""}
+        adv = sorted({i for k in set(a["advisory"][tt].tolist()) for i in p.advisory_sets[k]})
+        advisories = [{"area": i, "kind": int(p.areas[i]["kind"]), "source": int(p.areas[i]["source"]),
+                       "name": p.string(int(p.areas[i]["name"])), "text": p.string(int(p.areas[i]["text"]))}
+                      for i in adv]
         total = sum((l["length_m"] for l in legs), 0.0)
         return {
             "distance_m": total, "distance_nm": total / 1852.0, "legs": len(legs),
@@ -554,8 +663,10 @@ class Router:
             "shallowest": {"depth_dm": int(depth[k]), "triangle": int(tt[k]), "lon": cx / UNITS, "lat": cy / UNITS,
                            "maintained": bool(cls.via_maint[tt[k]])},
             "lowest_clearance": low,
-            "openings": runs(cls.needs_opening),
-            "unknown_clearances": runs(cls.unknown_used),
+            "openings": runs(cls.needs_opening, overhead_item),
+            "unknown_clearances": runs(cls.unknown_used, overhead_item),
+            "locks": runs(cls.lock, lock_item),
+            "advisories": advisories,
             "maintained_triangles": int(cls.via_maint[tt].sum()),
             "data_date": int(p.data_date),
         }
@@ -566,7 +677,7 @@ class Router:
         blocked = ~cls.ok
         factor = np.where(blocked, BLOCKED_FACTOR, cls.factor)
         corridor, _ = self.astar(s, g, S, G, ok, factor, cls.needs_opening, cls.unknown_used, cls.restricted,
-                                 extra_pen=blocked)
+                                 cls.lock, extra_pen=blocked)
         if corridor is None:
             # Disconnected water: no option can connect it, so every hint is false (no search needed).
             hints = {opt: False for opt in ("use_maintained", "accept_unknown_clearance") if not getattr(prof, opt)}
@@ -592,7 +703,8 @@ class Router:
             if not (c2.ok[s] and c2.ok[g]):
                 hints[opt] = False
                 continue
-            cor2, _ = self.astar(s, g, S, G, c2.ok, c2.factor, c2.needs_opening, c2.unknown_used, c2.restricted)
+            cor2, _ = self.astar(s, g, S, G, c2.ok, c2.factor, c2.needs_opening, c2.unknown_used, c2.restricted,
+                                 c2.lock)
             hints[opt] = cor2 is not None
         return {"reason": out[0]["reason"] if out else "NOT_CONNECTED", "blocked": out, "hints": hints}
 

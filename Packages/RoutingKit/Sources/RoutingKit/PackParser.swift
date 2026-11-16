@@ -16,15 +16,11 @@ struct PackContents {
     var lat = ContiguousArray<Int32>()
     var tris = ContiguousArray<Int32>()
     var nbr = ContiguousArray<Int32>()
-    var depth = ContiguousArray<Int16>()
-    var band = ContiguousArray<Int16>()
-    var maint = ContiguousArray<Int16>()
-    var clr = ContiguousArray<UInt16>()
-    var flags = ContiguousArray<UInt16>()
-    var chan = ContiguousArray<UInt16>()
-    var ovhd = ContiguousArray<UInt16>()
-    var area = ContiguousArray<UInt16>()
-    var quality = ContiguousArray<UInt8>()
+    /// Attribute class of each triangle (distinct `ATTR` rows, numbered in order of first appearance).
+    var attrClass = ContiguousArray<UInt32>()
+    var classes = AttributeClasses()
+    /// `ADVS` (format 1.2): sets of area-wide `AREA` indices; set 0 is empty.
+    var advisorySets: [[Int]] = [[]]
     var gridOffsets = ContiguousArray<UInt32>()
     var gridIDs = ContiguousArray<Int32>()
     var geom = ContiguousArray<Int32>()
@@ -38,7 +34,7 @@ struct PackContents {
 enum Tag {
     static let info = "INFO", strs = "STRS", srcs = "SRCS", vert = "VERT", tris = "TRIS", adjc = "ADJC"
     static let attr = "ATTR", grid = "GRID", ovhd = "OVHD", hazd = "HAZD", chan = "CHAN", area = "AREA"
-    static let geom = "GEOM"
+    static let geom = "GEOM", advs = "ADVS"
     static let required = [info, strs, srcs, vert, tris, attr, grid, ovhd, hazd, chan, area, geom]
 }
 
@@ -101,6 +97,8 @@ struct PackParser {
             byTag[s.tag] = s
         }
         for t in Tag.required where byTag[t] == nil { throw .missingSection(tag: t) }
+        if header.formatMinor >= 2 && byTag[Tag.advs] == nil { throw .missingSection(tag: Tag.advs) }
+        if header.formatMinor < 2 { byTag[Tag.advs] = nil }  // an unknown tag before format 1.2
         guard (byTag[Tag.adjc] != nil) == header.hasStoredAdjacency else {
             throw .invalidHeader("flag bit 0 (ADJC present) disagrees with the section table")
         }
@@ -182,14 +180,25 @@ struct PackParser {
             return rec
         }
         c.areas = try records(byTag[Tag.area]!, size: 32) { (r: ByteView, o: Int, i: Int) throws(PackError) -> RegulatedArea in
-            let rec = RegulatedArea(kind: r.u8(o)!, source: r.u8(o + 1)!, name: r.u32(o + 4)!, text: r.u32(o + 8)!,
-                                    lon: r.i32(o + 12)!, lat: r.i32(o + 16)!)
+            let rec = RegulatedArea(kind: r.u8(o)!, source: r.u8(o + 1)!, flags: r.u8(o + 2)!, name: r.u32(o + 4)!,
+                                    text: r.u32(o + 8)!, lon: r.i32(o + 12)!, lat: r.i32(o + 16)!)
             try checkString(rec.name, Tag.area)
             try checkString(rec.text, Tag.area)
             return rec
         }
+        if let advs = byTag[Tag.advs] {
+            let areas = c.areas
+            c.advisorySets = try withSection(advs) { p throws(PackError) in try Self.decodeAdvisorySets(p, section: advs, areas: areas) }
+        }
         c.hazardBoxes = boxes(c.hazards.map { ($0.geomFirst, $0.geomCount) }, geom: c.geom)
         c.overheadBoxes = boxes(c.overheads.map { ($0.geomFirst, $0.geomCount) }, geom: c.geom)
+
+        // Attributes first: their inflated rows (19 bytes per triangle) are the largest transient buffer, so they are
+        // decoded into attribute classes before the mesh arrays exist.
+        let at = byTag[Tag.attr]!
+        guard at.count == T else { throw .malformedSection(tag: Tag.attr, reason: "count \(at.count) != triangle_count \(T)") }
+        let rowBytes = header.formatMinor >= 2 ? 19 : 17
+        try withSection(at) { p throws(PackError) in try Self.decodeAttributes(p, T: T, rowBytes: rowBytes, into: &c) }
 
         // Vertices.
         let vs = byTag[Tag.vert]!
@@ -213,11 +222,6 @@ struct PackParser {
             c.nbr = try Self.deriveAdjacency(tris: c.tris, vertexCount: V)
             c.adjacencyWasDerived = true
         }
-
-        // Attributes.
-        let at = byTag[Tag.attr]!
-        guard at.count == T else { throw .malformedSection(tag: Tag.attr, reason: "count \(at.count) != triangle_count \(T)") }
-        try withSection(at) { p throws(PackError) in try Self.decodeAttributes(p, T: T, into: &c) }
 
         // Point-location grid.
         try withSection(byTag[Tag.grid]!) { p throws(PackError) in
@@ -509,33 +513,39 @@ struct PackParser {
     }
 
     /// Derived adjacency (spec A.5): the neighbour across directed edge p→q is the triangle owning q→p.
-    /// Uses a per-vertex bucket of outgoing edges (compressed rows) instead of a hash map: 8 bytes per edge.
+    /// Uses the triangles around each vertex (compressed rows, 4 bytes per triangle corner plus 4 per vertex),
+    /// which is about half the transient memory of a table of directed edges.
     static func deriveAdjacency(tris: ContiguousArray<Int32>, vertexCount V: Int) throws(PackError) -> ContiguousArray<Int32> {
         let E = tris.count
         var start = ContiguousArray<Int32>(repeating: 0, count: V + 1)
         for e in 0..<E { start[Int(tris[e]) + 1] += 1 }
         for i in 0..<V { start[i + 1] += start[i] }
-        var fill = start
-        var target = ContiguousArray<Int32>(repeating: 0, count: E)
-        var edge = ContiguousArray<Int32>(repeating: 0, count: E)
-        for e in 0..<E {
-            let t = e / 3, k = e % 3
-            let p = Int(tris[e]), q = tris[3 * t + (k + 1) % 3]
-            let slot = Int(fill[p])
-            fill[p] += 1
-            target[slot] = q
-            edge[slot] = Int32(e)
+        // incident[start[v] ..< start[v+1]] = the corners (3·t + k) at vertex v
+        var incident = ContiguousArray<Int32>(repeating: 0, count: E)
+        do {
+            var fill = start
+            for e in 0..<E {
+                let v = Int(tris[e])
+                incident[Int(fill[v])] = Int32(e)
+                fill[v] += 1
+            }
         }
         var nbr = ContiguousArray<Int32>(repeating: -1, count: E)
         for e in 0..<E {
             let t = e / 3, k = e % 3
-            let p = tris[e], q = Int(tris[3 * t + (k + 1) % 3])
-            // Directed edge p→q must be unique (A.9 guarantee 2).
+            let p = tris[e], q = tris[3 * t + (k + 1) % 3]
+            // Directed edge p→q must be unique (A.9 guarantee 2): count the corners at p whose next vertex is q.
             var same = 0
-            for s in Int(start[Int(p)])..<Int(start[Int(p) + 1]) where target[s] == Int32(q) { same += 1 }
+            for s in Int(start[Int(p)])..<Int(start[Int(p) + 1]) {
+                let c = Int(incident[s])
+                if tris[3 * (c / 3) + (c % 3 + 1) % 3] == q { same += 1 }
+            }
             guard same == 1 else { throw .malformedSection(tag: Tag.tris, reason: "directed edge occurs twice (triangle \(t))") }
-            for s in Int(start[q])..<Int(start[q + 1]) where target[s] == p {
-                let u = Int(edge[s]) / 3
+            // The neighbour owns q→p: a corner at q whose next vertex is p.
+            for s in Int(start[Int(q)])..<Int(start[Int(q) + 1]) {
+                let c = Int(incident[s])
+                guard tris[3 * (c / 3) + (c % 3 + 1) % 3] == p else { continue }
+                let u = c / 3
                 guard u != t else { throw .malformedSection(tag: Tag.tris, reason: "triangle \(t) is its own neighbour") }
                 nbr[e] = Int32(u)
                 break
@@ -544,38 +554,77 @@ struct PackParser {
         return nbr
     }
 
-    static func decodeAttributes(_ p: UnsafeBufferPointer<UInt8>, T: Int, into c: inout PackContents) throws(PackError) {
-        guard p.count == 17 * T else { throw .malformedSection(tag: Tag.attr, reason: "length \(p.count) != 17 * \(T)") }
+    /// `ADVS` (format 1.2): u32 offsets[K+1], then u16 AREA ids. Set 0 is empty, each set strictly ascending,
+    /// and every id names an area-wide `AREA` record.
+    static func decodeAdvisorySets(_ p: UnsafeBufferPointer<UInt8>, section: PackSection,
+                                   areas: [RegulatedArea]) throws(PackError) -> [[Int]] {
         let v = ByteView(p)
-        func i16col(_ j: Int) -> ContiguousArray<Int16> {
-            var a = ContiguousArray<Int16>(repeating: 0, count: T)
-            let base = 2 * j * T
-            for t in 0..<T { a[t] = v.i16(base + 2 * t)! }
-            return a
+        let K = section.count
+        guard K >= 1, v.has(0, 4 * (K + 1)) else { throw .malformedSection(tag: Tag.advs, reason: "set count \(K)") }
+        var offsets: [Int] = []
+        offsets.reserveCapacity(K + 1)
+        for k in 0...K { offsets.append(Int(v.u32(4 * k)!)) }
+        let M = offsets[K]
+        guard offsets[0] == 0, offsets[1] == 0, p.count == 4 * (K + 1) + 2 * M else {
+            throw .malformedSection(tag: Tag.advs, reason: "offsets (set 0 must be empty)")
         }
-        func u16col(_ j: Int) -> ContiguousArray<UInt16> {
-            var a = ContiguousArray<UInt16>(repeating: 0, count: T)
-            let base = 2 * j * T
-            for t in 0..<T { a[t] = v.u16(base + 2 * t)! }
-            return a
+        var sets: [[Int]] = []
+        sets.reserveCapacity(K)
+        for k in 0..<K {
+            guard offsets[k + 1] >= offsets[k] else { throw .malformedSection(tag: Tag.advs, reason: "offsets not ascending") }
+            var set: [Int] = []
+            for i in offsets[k]..<offsets[k + 1] {
+                let id = Int(v.u16(4 * (K + 1) + 2 * i)!)
+                guard id < areas.count, areas[id].isAreaWide else {
+                    throw .malformedSection(tag: Tag.advs, reason: "set \(k): id \(id) is not an area-wide AREA record")
+                }
+                guard set.last.map({ id > $0 }) ?? true else {
+                    throw .malformedSection(tag: Tag.advs, reason: "set \(k) not strictly ascending")
+                }
+                set.append(id)
+            }
+            sets.append(set)
         }
-        c.depth = i16col(0)
-        c.band = i16col(1)
-        c.maint = i16col(2)
-        c.clr = u16col(3)
-        c.flags = u16col(4)
-        c.chan = u16col(5)
-        c.ovhd = u16col(6)
-        c.area = u16col(7)
-        c.quality = ContiguousArray(UnsafeBufferPointer(rebasing: p[(16 * T)..<(17 * T)]))
-        let nc = c.channels.count, no = c.overheads.count, na = c.areas.count
+        return sets
+    }
+
+    /// `ATTR`: rows of 17 bytes (format 1.0, 1.1) or 19 bytes (1.2, with the advisory column), stored as columns.
+    /// Distinct rows become attribute classes, so a triangle costs 4 bytes here instead of 17–19.
+    static func decodeAttributes(_ p: UnsafeBufferPointer<UInt8>, T: Int, rowBytes: Int,
+                                 into c: inout PackContents) throws(PackError) {
+        guard p.count == rowBytes * T else {
+            throw .malformedSection(tag: Tag.attr, reason: "length \(p.count) != \(rowBytes) * \(T)")
+        }
+        let v = ByteView(p)
+        let nc = c.channels.count, no = c.overheads.count, na = c.areas.count, ns = c.advisorySets.count
+        var index: [AttributeRow: UInt32] = [:]
+        var classes = AttributeClasses()
+        var attrClass = ContiguousArray<UInt32>(repeating: 0, count: T)
         for t in 0..<T {
-            guard c.chan[t] == PackSentinel.noIndex || Int(c.chan[t]) < nc,
-                  c.ovhd[t] == PackSentinel.noIndex || Int(c.ovhd[t]) < no,
-                  c.area[t] == PackSentinel.noIndex || Int(c.area[t]) < na else {
+            let row = AttributeRow(
+                depth: v.i16(2 * t)!, band: v.i16(2 * T + 2 * t)!, maint: v.i16(4 * T + 2 * t)!,
+                clr: v.u16(6 * T + 2 * t)!, flags: v.u16(8 * T + 2 * t)!, chan: v.u16(10 * T + 2 * t)!,
+                ovhd: v.u16(12 * T + 2 * t)!, area: v.u16(14 * T + 2 * t)!, quality: v.u8(16 * T + t)!,
+                advisory: rowBytes == 19 ? v.u16(17 * T + 2 * t)! : 0)
+            if let k = index[row] {
+                attrClass[t] = k
+                continue
+            }
+            guard row.chan == PackSentinel.noIndex || Int(row.chan) < nc,
+                  row.ovhd == PackSentinel.noIndex || Int(row.ovhd) < no,
+                  row.area == PackSentinel.noIndex || Int(row.area) < na else {
                 throw .malformedSection(tag: Tag.attr, reason: "triangle \(t) refers to a missing CHAN/OVHD/AREA record")
             }
+            guard Int(row.advisory) < ns else {
+                throw .malformedSection(tag: Tag.attr, reason: "triangle \(t) advisory set \(row.advisory) out of range")
+            }
+            let k = UInt32(classes.count)
+            index[row] = k
+            classes.append(row)
+            attrClass[t] = k
         }
+        c.attrClass = attrClass
+        c.classes = classes
     }
 
     static func decodeGrid(_ p: UnsafeBufferPointer<UInt8>, section: PackSection, header h: PackHeader,

@@ -188,6 +188,65 @@ struct MinHeap {
     }
 }
 
+/// A* state per triangle (cost so far, entry edge, closed), in pages of 4096 triangles allocated on first touch.
+/// Triangles are stored in a space-filling order, so a search touches compact runs of pages; a search that reaches
+/// the whole region costs 13 bytes per triangle, as a flat layout would.
+struct SearchState {
+    static let shift = 12
+    static let pageSize = 1 << shift
+    var costs: [ContiguousArray<Double>] = []
+    var entries: [ContiguousArray<Int32>] = []
+    var closedFlags: [ContiguousArray<Bool>] = []
+    var pageOf: ContiguousArray<Int32>
+
+    init(triangleCount: Int) {
+        pageOf = ContiguousArray(repeating: -1, count: (triangleCount + Self.pageSize - 1) >> Self.shift)
+    }
+
+    @inline(__always) mutating func page(_ t: Int) -> Int {
+        let p = t >> Self.shift
+        let q = Int(pageOf[p])
+        if q >= 0 { return q }
+        let n = costs.count
+        costs.append(ContiguousArray(repeating: .infinity, count: Self.pageSize))
+        entries.append(ContiguousArray(repeating: -1, count: Self.pageSize))
+        closedFlags.append(ContiguousArray(repeating: false, count: Self.pageSize))
+        pageOf[p] = Int32(n)
+        return n
+    }
+
+    @inline(__always) func cost(_ t: Int) -> Double {
+        let q = Int(pageOf[t >> Self.shift])
+        return q < 0 ? .infinity : costs[q][t & (Self.pageSize - 1)]
+    }
+
+    @inline(__always) func entry(_ t: Int) -> Int32 {
+        let q = Int(pageOf[t >> Self.shift])
+        return q < 0 ? -1 : entries[q][t & (Self.pageSize - 1)]
+    }
+
+    @inline(__always) func isClosed(_ t: Int) -> Bool {
+        let q = Int(pageOf[t >> Self.shift])
+        return q < 0 ? false : closedFlags[q][t & (Self.pageSize - 1)]
+    }
+
+    @inline(__always) mutating func setCost(_ t: Int, _ c: Double) {
+        let q = page(t)
+        costs[q][t & (Self.pageSize - 1)] = c
+    }
+
+    @inline(__always) mutating func reach(_ t: Int, cost c: Double, entry e: Int32) {
+        let q = page(t)
+        costs[q][t & (Self.pageSize - 1)] = c
+        entries[q][t & (Self.pageSize - 1)] = e
+    }
+
+    @inline(__always) mutating func close(_ t: Int) {
+        let q = page(t)
+        closedFlags[q][t & (Self.pageSize - 1)] = true
+    }
+}
+
 /// How the search treats triangles.
 enum SearchMode {
     /// B.7: only passable triangles.
@@ -246,14 +305,24 @@ struct RouteEngine {
         }
 
         // B.8 – B.10.
-        let points = funnel(corridor: corridor, S: start.point, G: goal.point)
-        let (legs, violations) = grade(corridor: corridor, points: points, cls: cls)
-        if !violations.isEmpty {
-            throw .legValidation(LegValidationReport(violations: violations, corridor: corridor))
+        var points: [Waypoint]
+        var legTriangles: [[Int]]
+        var route = corridor
+        if start.point == goal.point {
+            points = [Waypoint(point: start.point, index: corridor.count)]
+            legTriangles = []
+        } else {
+            (points, legTriangles) = planLegs(corridor: corridor, S: start.point, G: goal.point, cls: cls)
+            route = [corridor[0]]
+            for lt in legTriangles { route.append(contentsOf: lt.dropFirst()) }
         }
-        let summary = summarize(corridor: corridor, legs: legs, cls: cls)
+        let (legs, violations) = grade(points: points, legTriangles: legTriangles, cls: cls)
+        if !violations.isEmpty {
+            throw .legValidation(LegValidationReport(violations: violations, corridor: route))
+        }
+        let summary = summarize(corridor: route, legs: legs, cls: cls)
         return RouteResult(profile: profile, requiredDepthDm: cls.req, requiredAirDm: cls.air, start: start, goal: goal,
-                           corridor: corridor, waypointsUnits: points.map(\.point), legs: legs, summary: summary,
+                           corridor: route, waypointsUnits: points.map(\.point), legs: legs, summary: summary,
                            dataDate: pack.dataDate, regionID: pack.regionID, expanded: search.expanded)
     }
 
@@ -278,21 +347,19 @@ struct RouteEngine {
         let s = start.triangle, g = goal.triangle
         let S = (Double(start.point.x) / 1e7, Double(start.point.y) / 1e7)
         let gx = Double(goal.point.x) / 1e7, gy = Double(goal.point.y) / 1e7
-        var gcost = ContiguousArray<Double>(repeating: .infinity, count: T)
-        // The edge (3·t + k) through which each triangle was last reached; its midpoint is pos[u], t is came[u].
-        var entry = ContiguousArray<Int32>(repeating: -1, count: T)
-        var closed = ContiguousArray<Bool>(repeating: false, count: T)
+        // Per-triangle search state, allocated in pages on first touch (a search rarely reaches most of a region).
+        var state = SearchState(triangleCount: T)
         var heap = MinHeap()
         var seq = 0
-        gcost[s] = 0
+        state.setCost(s, 0)
         heap.push(HeapEntry(priority: fMin * distMeters(S.0, S.1, gx, gy), seq: 0, t: Int32(s)))
         var expanded = 0
         var found = false
         let relaxed = mode == .relaxed
         while let top = heap.pop() {
             let t = Int(top.t)
-            if closed[t] { continue }
-            closed[t] = true
+            if state.isClosed(t) { continue }
+            state.close(t)
             expanded += 1
             if expanded & 4095 == 0 {
                 try checkInterrupt(expanded: expanded)
@@ -302,30 +369,30 @@ struct RouteEngine {
                 found = true
                 break
             }
-            let (px, py) = t == s ? S : edgeMid(Int(entry[t]))
-            let gt = gcost[t]
+            let (px, py) = t == s ? S : edgeMid(Int(state.entry(t)))
+            let gt = state.cost(t)
             let bt = cls.bits(t)
             let blockedT = relaxed && !cls.ok(t)
-            let ft = blockedT ? 50.0 : cls.factor(t, bt)
+            let ft = blockedT ? 50.0 : cls.factor(t)
             for k in 0..<3 {
                 let u = Int(nbr[3 * t + k])
-                if u < 0 || closed[u] { continue }
+                if u < 0 || state.isClosed(u) { continue }
                 let okU = cls.ok(u)
                 if !relaxed && !okU { continue }
                 let bu = cls.bits(u)
                 let blockedU = relaxed && !okU
-                let fu = blockedU ? 50.0 : cls.factor(u, bu)
+                let fu = blockedU ? 50.0 : cls.factor(u)
                 let e = 3 * t + k
                 let (mx, my) = edgeMid(e)
                 var step = distMeters(px, py, mx, my) * ((ft + fu) * 0.5)
                 if bu.contains(.needsOpening) && !bt.contains(.needsOpening) { step += 1500.0 }
                 if bu.contains(.unknownUsed) && !bt.contains(.unknownUsed) { step += 3000.0 }
                 if bu.contains(.restricted) && !bt.contains(.restricted) { step += 1000.0 }
+                if bu.contains(.lock) && !bt.contains(.lock) { step += 2000.0 }
                 if blockedU && !blockedT { step += 100_000.0 }
                 let ng = gt + step
-                if ng < gcost[u] {
-                    gcost[u] = ng
-                    entry[u] = Int32(e)
+                if ng < state.cost(u) {
+                    state.reach(u, cost: ng, entry: Int32(e))
                     seq += 1
                     heap.push(HeapEntry(priority: ng + fMin * distMeters(mx, my, gx, gy), seq: seq, t: Int32(u)))
                 }
@@ -335,7 +402,7 @@ struct RouteEngine {
         var path = [g]
         var cur = g
         while cur != s {
-            cur = Int(entry[cur]) / 3
+            cur = Int(state.entry(cur)) / 3
             path.append(cur)
         }
         path.reverse()
@@ -349,8 +416,9 @@ struct RouteEngine {
         var index: Int
     }
 
-    func funnel(corridor: [Int], S: GridPoint, G: GridPoint) -> [Waypoint] {
-        // Portals: (left, right) = (v[k+1], v[k]) of the edge of t shared with the next triangle.
+    /// Portals of a corridor (spec B.8): `(left, right) = (v[k+1], v[k])` of the edge of t shared with the next triangle,
+    /// framed by `(S, S)` and `(G, G)`.
+    func portals(corridor: [Int], S: GridPoint, G: GridPoint) -> [(GridPoint, GridPoint)] {
         var portals: [(GridPoint, GridPoint)] = [(S, S)]
         portals.reserveCapacity(corridor.count + 1)
         for i in 0..<(corridor.count - 1) {
@@ -361,7 +429,13 @@ struct RouteEngine {
             portals.append((GridPoint(x: lon[b], y: lat[b]), GridPoint(x: lon[a], y: lat[a])))
         }
         portals.append((G, G))
-        let n = corridor.count
+        return portals
+    }
+
+    /// The B.8 funnel over `portals` (`portals[0] = (S, S)`, the last `(G, G)`).
+    func funnel(portals: [(GridPoint, GridPoint)]) -> [Waypoint] {
+        let S = portals[0].0, G = portals[portals.count - 1].0
+        let n = portals.count - 1
 
         @inline(__always) func tri2(_ a: GridPoint, _ b: GridPoint, _ c: GridPoint) -> Int64 {
             orient(Int64(a.x), Int64(a.y), Int64(b.x), Int64(b.y), Int64(c.x), Int64(c.y))
@@ -416,54 +490,152 @@ struct RouteEngine {
 
     // MARK: B.9 grading and B.10 validation
 
-    func grade(corridor: [Int], points: [Waypoint], cls: Classifier) -> ([RouteLeg], [LegViolation]) {
+    // MARK: B.8 leg planning
+
+    @inline(__always) func vertexPoint(_ v: Int) -> GridPoint { GridPoint(x: lon[v], y: lat[v]) }
+
+    @inline(__always) func tri2(_ a: GridPoint, _ b: GridPoint, _ c: GridPoint) -> Int64 {
+        orient(Int64(a.x), Int64(a.y), Int64(b.x), Int64(b.y), Int64(c.x), Int64(c.y))
+    }
+
+    func strictlyInside(_ t: Int, _ p: GridPoint) -> Bool {
+        let a = vertexPoint(Int(tris[3 * t])), b = vertexPoint(Int(tris[3 * t + 1])), c = vertexPoint(Int(tris[3 * t + 2]))
+        return tri2(a, b, p) > 0 && tri2(b, c, p) > 0 && tri2(c, a, p) > 0
+    }
+
+    /// Spec B.8 straight walk from A (in triangle tA) to B, which must end in triangle tB. Every triangle entered
+    /// must satisfy `admissible`. Nil if the segment meets a vertex, leaves the mesh or enters a forbidden triangle.
+    func walk(from A: GridPoint, in tA: Int, to B: GridPoint, endingIn tB: Int, admissible: (Int) -> Bool) -> [Int]? {
+        var t = tA
+        var out = [t]
+        for _ in 0..<pack.triangleCount {
+            if t == tB { return out }
+            if pack.triangle(t, contains: B) { return nil }
+            let o0 = tri2(A, B, vertexPoint(Int(tris[3 * t])))
+            let o1 = tri2(A, B, vertexPoint(Int(tris[3 * t + 1])))
+            let o2 = tri2(A, B, vertexPoint(Int(tris[3 * t + 2])))
+            var k = -1
+            if o0 < 0 && o1 > 0 {
+                k = 0
+            } else if o1 < 0 && o2 > 0 {
+                k = 1
+            } else if o2 < 0 && o0 > 0 {
+                k = 2
+            }
+            if k < 0 { return nil }
+            let u = Int(nbr[3 * t + k])
+            if u < 0 || !admissible(u) { return nil }
+            out.append(u)
+            t = u
+        }
+        return nil
+    }
+
+    /// Spec B.8: legs by greedy visibility over targets next to the corridor's portal midpoints, with the funnel
+    /// as fallback. Returns the waypoints and, per leg, the triangles it crosses.
+    func planLegs(corridor: [Int], S: GridPoint, G: GridPoint, cls: Classifier) -> ([Waypoint], [[Int]]) {
+        let n = corridor.count
+        let P = portals(corridor: corridor, S: S, G: G)
+        func target(_ j: Int) -> GridPoint? {
+            if j == n { return G }
+            let (l, r) = P[j]
+            let t = corridor[j]
+            var o = vertexPoint(Int(tris[3 * t]))
+            for k in 0..<3 {
+                let q = vertexPoint(Int(tris[3 * t + k]))
+                if q != l && q != r { o = q }
+            }
+            let mx = floorDiv(2 * Int64(l.x) + 2 * Int64(r.x) + Int64(o.x), 5)
+            let my = floorDiv(2 * Int64(l.y) + 2 * Int64(r.y) + Int64(o.y), 5)
+            let m = GridPoint(x: Int32(mx), y: Int32(my))
+            return strictlyInside(t, m) ? m : nil
+        }
+        var A = S, ia = 0, tA = corridor[0]
+        var points = [Waypoint(point: S, index: 0)]
+        var legs: [[Int]] = []
+        while true {
+            func visible(_ j: Int) -> [Int]? {
+                guard let T = target(j), T != A else { return nil }
+                var Y: UInt16 = 0
+                for pos in ia...min(j, n - 1) { Y |= cls.yellowMask(corridor[pos]) }
+                let mask = Y
+                return walk(from: A, in: tA, to: T, endingIn: corridor[min(j, n - 1)]) { u in
+                    cls.ok(u) && cls.yellowMask(u) & ~mask == 0
+                }
+            }
+            var B: GridPoint
+            var jb: Int
+            var seq: [Int]
+            if var best = visible(ia + 1) {
+                var lo = ia + 1, step = 1
+                while lo + step <= n {
+                    guard let w = visible(lo + step) else { break }
+                    lo += step
+                    best = w
+                    step *= 2
+                }
+                var hi = min(lo + step, n + 1)
+                while hi - lo > 1 {
+                    let mid = (lo + hi) / 2
+                    if let w = visible(mid) {
+                        lo = mid
+                        best = w
+                    } else {
+                        hi = mid
+                    }
+                }
+                B = target(lo)!
+                jb = lo
+                seq = best
+            } else {
+                var sub: [(GridPoint, GridPoint)] = [(A, A)]
+                if ia + 1 <= n - 1 { sub.append(contentsOf: P[(ia + 1)...(n - 1)]) }
+                sub.append((G, G))
+                let f = funnel(portals: sub)
+                B = f[1].point
+                jb = ia + f[1].index
+                seq = Array(corridor[ia...min(jb, n - 1)])
+            }
+            points.append(Waypoint(point: B, index: jb))
+            legs.append(seq)
+            if jb == n { return (points, legs) }
+            A = B
+            ia = jb
+            tA = corridor[jb]
+        }
+    }
+
+    // MARK: B.9 grading and B.10 validation
+
+    func grade(points: [Waypoint], legTriangles: [[Int]], cls: Classifier) -> ([RouteLeg], [LegViolation]) {
         var legs: [RouteLeg] = []
         var violations: [LegViolation] = []
-        let n = corridor.count
-        let depth = pack.depth, flags = pack.flags, quality = pack.quality
-        for j in 0..<max(points.count - 1, 0) {
-            let A = points[j].point, pa = points[j].index
-            let B = points[j + 1].point, pb = points[j + 1].index
-            let lo = min(pa, n - 1)  // pa <= n - 1 for every leg start; the clamp only guards odd corridors
-            let hi = max(min(max(pa, pb - 1), n - 1), lo)
-            var any = TriBits()
-            var restricted = false, caution = false, hazard = false, lowQuality = false, thin = false
+        var lo = 0
+        for (j, tl) in legTriangles.enumerated() {
+            let A = points[j].point
+            let B = points[j + 1].point
+            let hi = lo + tl.count - 1
+            var mask: UInt16 = 0
             var minDepth = Int.max
             var minSpare: Int?
-            for pos in lo...hi {
-                let t = corridor[pos]
-                let b = cls.bits(t)
-                any.formUnion(b)
-                let fl = flags[t]
-                if fl & TriangleFlags.restricted.rawValue != 0 { restricted = true }
-                if fl & TriangleFlags.caution.rawValue != 0 { caution = true }
-                if fl & TriangleFlags.hazardDepth.rawValue != 0 { hazard = true }
-                let cz = Int(quality[t] & 7)
-                if cz == 0 || cz == 5 || cz == 6 { lowQuality = true }
-                let d = Int(depth[t])
+            for t in tl {
+                mask |= cls.yellowMask(t)
+                let d = Int(pack.depth(t))
                 minDepth = min(minDepth, d)
-                if !b.contains(.viaMaint) {
+                if !cls.bits(t).contains(.viaMaint) {
                     let spare = d - cls.req
                     minSpare = min(minSpare ?? spare, spare)
-                    if spare < 3 && (cz == 0 || cz == 4 || cz == 5 || cz == 6) { thin = true }
                 }
             }
             var reasons: [CautionReason] = []
-            if any.contains(.viaMaint) { reasons.append(.maintainedDepth) }
-            if any.contains(.viaSound) { reasons.append(.soundingDepth) }
-            if any.contains(.needsOpening) { reasons.append(.bridgeOpening) }
-            if any.contains(.unknownUsed) { reasons.append(.unknownClearance) }
-            if restricted { reasons.append(.restrictedArea) }
-            if caution { reasons.append(.cautionArea) }
-            if hazard { reasons.append(.hazardProximity) }
-            if lowQuality { reasons.append(.lowDataQuality) }
-            if thin { reasons.append(.thinMargin) }
+            for (k, r) in CautionReason.allCases.enumerated() where mask & (1 << UInt16(k)) != 0 { reasons.append(r) }
             let (v, crossings) = validateLeg(A, B, cls: cls, leg: j)
             violations += v
             let length = distMeters(Double(A.x) / 1e7, Double(A.y) / 1e7, Double(B.x) / 1e7, Double(B.y) / 1e7)
             legs.append(RouteLeg(from: A, to: B, corridorRange: lo...hi, lengthMeters: length,
                                  grade: reasons.isEmpty ? .green : .yellow, reasons: reasons, minDepthDm: minDepth,
                                  minSpareDm: minSpare, crossings: crossings))
+            lo = hi
         }
         return (legs, violations)
     }
@@ -569,23 +741,22 @@ struct RouteEngine {
     }
 
     func summarize(corridor: [Int], legs: [RouteLeg], cls: Classifier) -> RouteSummary {
-        let depth = pack.depth, clr = pack.clr, ovhd = pack.ovhd, flags = pack.flags
         var k = 0
-        for i in 1..<corridor.count where depth[corridor[i]] < depth[corridor[k]] { k = i }
+        for i in 1..<corridor.count where pack.depth(corridor[i]) < pack.depth(corridor[k]) { k = i }
         let st = corridor[k]
-        let shallowest = ShallowestPoint(depthDm: Int(depth[st]), triangle: st, centroid: pack.centroid(of: st),
+        let shallowest = ShallowestPoint(depthDm: Int(pack.depth(st)), triangle: st, centroid: pack.centroid(of: st),
                                          maintained: cls.bits(st).contains(.viaMaint))
         var low: LowestClearance?
         var lowIndex = -1
         for i in 0..<corridor.count {
-            let c = clr[corridor[i]]
-            if c < 0xFFFE && (lowIndex < 0 || c < clr[corridor[lowIndex]]) { lowIndex = i }
+            let c = pack.clearance(corridor[i])
+            if c < 0xFFFE && (lowIndex < 0 || c < pack.clearance(corridor[lowIndex])) { lowIndex = i }
         }
         if lowIndex >= 0 {
             let t = corridor[lowIndex]
-            let ov = ovhd[t]
-            low = LowestClearance(clearanceDm: Int(clr[t]), overhead: ov == PackSentinel.noIndex ? nil : Int(ov),
-                                  name: overheadName(ov), opening: flags[t] & TriangleFlags.openingBridge.rawValue != 0)
+            let ov = pack.overheadIndex(t)
+            low = LowestClearance(clearanceDm: Int(pack.clearance(t)), overhead: ov == PackSentinel.noIndex ? nil : Int(ov),
+                                  name: overheadName(ov), opening: pack.flags(t) & TriangleFlags.openingBridge.rawValue != 0)
         }
         func runs(_ bit: TriBits) -> [OverheadRun] {
             var out: [OverheadRun] = []
@@ -593,13 +764,33 @@ struct RouteEngine {
             for (i, t) in corridor.enumerated() {
                 let on = cls.bits(t).contains(bit)
                 if on && !prev {
-                    let ov = ovhd[t]
+                    let ov = pack.overheadIndex(t)
                     out.append(OverheadRun(corridorIndex: i, overhead: ov == PackSentinel.noIndex ? nil : Int(ov),
-                                           clearanceDm: Int(clr[t]), name: overheadName(ov), centroid: pack.centroid(of: t)))
+                                           clearanceDm: Int(pack.clearance(t)), name: overheadName(ov),
+                                           centroid: pack.centroid(of: t)))
                 }
                 prev = on
             }
             return out
+        }
+        var locks: [LockRun] = []
+        var prevLock = false
+        var advisoryIDs = Set<Int>()
+        for (i, t) in corridor.enumerated() {
+            let on = cls.bits(t).contains(.lock)
+            if on && !prevLock {
+                let ar = pack.areaIndex(t)
+                locks.append(LockRun(corridorIndex: i, area: ar == PackSentinel.noIndex ? nil : Int(ar),
+                                     name: ar == PackSentinel.noIndex ? "" : pack.string(pack.areas[Int(ar)].name),
+                                     centroid: pack.centroid(of: t)))
+            }
+            prevLock = on
+            for a in pack.advisorySets[pack.advisorySet(t)] { advisoryIDs.insert(a) }
+        }
+        let advisories: [AreaAdvisory] = advisoryIDs.sorted().map { a in
+            let r = pack.areas[a]
+            return AreaAdvisory(area: a, kind: Int(r.kind), source: Int(r.source), name: pack.string(r.name),
+                                text: pack.string(r.text))
         }
         var total = 0.0
         for l in legs { total += l.lengthMeters }
@@ -609,7 +800,8 @@ struct RouteEngine {
                             greenLegs: legs.filter { $0.grade == .green }.count,
                             yellowLegs: legs.filter { $0.grade == .yellow }.count,
                             shallowest: shallowest, lowestClearance: low, openings: runs(.needsOpening),
-                            unknownClearances: runs(.unknownUsed), maintainedTriangles: maintained, dataDate: pack.dataDate)
+                            unknownClearances: runs(.unknownUsed), locks: locks, advisories: advisories,
+                            maintainedTriangles: maintained, dataDate: pack.dataDate)
     }
 
     // MARK: B.11 no route
@@ -630,11 +822,11 @@ struct RouteEngine {
             let r = cls.reason(t)
             let isBlocked = r >= 0
             if isBlocked && !prev {
-                let ar = pack.area[t]
+                let ar = pack.areaIndex(t)
                 blocked.append(BlockedPlace(corridorIndex: i, triangle: t, reason: BlockReason.allCases[r],
-                                            centroid: pack.centroid(of: t), depthDm: Int(pack.depth[t]),
-                                            maintDm: Int(pack.maint[t]), clearanceDm: Int(pack.clr[t]),
-                                            overheadName: overheadName(pack.ovhd[t]),
+                                            centroid: pack.centroid(of: t), depthDm: Int(pack.depth(t)),
+                                            maintDm: Int(pack.maint(t)), clearanceDm: Int(pack.clearance(t)),
+                                            overheadName: overheadName(pack.overheadIndex(t)),
                                             areaName: ar == PackSentinel.noIndex ? "" : pack.string(pack.areas[Int(ar)].name)))
             }
             prev = isBlocked

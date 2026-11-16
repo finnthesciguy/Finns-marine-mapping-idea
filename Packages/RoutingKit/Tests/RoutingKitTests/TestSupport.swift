@@ -129,6 +129,22 @@ struct VectorRun: Decodable {
     var lat: Double
 }
 
+struct VectorLock: Decodable {
+    var corridorIndex: Int
+    var area: Int
+    var name: String
+    var lon: Double
+    var lat: Double
+}
+
+struct VectorAdvisory: Decodable {
+    var area: Int
+    var kind: Int
+    var source: Int
+    var name: String
+    var text: String
+}
+
 struct VectorSummary: Decodable {
     var distanceM: Double
     var distanceNm: Double
@@ -139,6 +155,8 @@ struct VectorSummary: Decodable {
     var lowestClearance: VectorLowest?
     var openings: [VectorRun]
     var unknownClearances: [VectorRun]
+    var locks: [VectorLock]
+    var advisories: [VectorAdvisory]
     var maintainedTriangles: Int
     var dataDate: Int
 }
@@ -282,6 +300,24 @@ struct VectorComparator {
         for (i, p) in zip(g.openings, w.openings).enumerated() { run(p.0, p.1, "openings[\(i)]") }
         int(g.unknownClearances.count, w.unknownClearances.count, "unknown_clearances.count")
         for (i, p) in zip(g.unknownClearances, w.unknownClearances).enumerated() { run(p.0, p.1, "unknown_clearances[\(i)]") }
+        int(g.locks.count, w.locks.count, "locks.count")
+        for (i, p) in zip(g.locks, w.locks).enumerated() {
+            let gl: LockRun = p.0
+            let wl: VectorLock = p.1
+            int(gl.corridorIndex, wl.corridorIndex, "locks[\(i)].corridor_index")
+            int(gl.area ?? 0xFFFF, wl.area, "locks[\(i)].area")
+            check(gl.name == wl.name, "locks[\(i)].name: got \(gl.name), want \(wl.name)")
+            degrees(gl.centroid, wl.lon, wl.lat, "locks[\(i)].lon/lat")
+        }
+        int(g.advisories.count, w.advisories.count, "advisories.count")
+        for (i, p) in zip(g.advisories, w.advisories).enumerated() {
+            let ga: AreaAdvisory = p.0
+            let wa: VectorAdvisory = p.1
+            int(ga.area, wa.area, "advisories[\(i)].area")
+            int(ga.kind, wa.kind, "advisories[\(i)].kind")
+            int(ga.source, wa.source, "advisories[\(i)].source")
+            check(ga.name == wa.name && ga.text == wa.text, "advisories[\(i)] name/text")
+        }
         int(g.maintainedTriangles, w.maintainedTriangles, "maintained_triangles")
         int(Int(g.dataDate.rawValue), w.dataDate, "summary.data_date")
     }

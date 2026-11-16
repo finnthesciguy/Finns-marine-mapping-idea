@@ -130,12 +130,13 @@ def depth_areas(merged) -> gpd.GeoDataFrame:
             "cls": layer, "DRVAL1": pd.to_numeric(g.DRVAL1, errors="coerce").values,
             "DRVAL2": pd.to_numeric(g.DRVAL2, errors="coerce").values,
             "cell": g.cell.values, "cscale": g.cscale.values, "OBJNAM": g.OBJNAM.values,
-            "SORDAT": g.SORDAT.values, "geometry": g.geometry.values}))
+            "SORDAT": g.SORDAT.values, "fkey": _fkeys(g), "geometry": g.geometry.values}))
     if not frames:
         return gpd.GeoDataFrame({"cls": pd.Series([], dtype=object), "DRVAL1": pd.Series([], dtype=float),
                                  "DRVAL2": pd.Series([], dtype=float), "cell": pd.Series([], dtype=object),
                                  "cscale": pd.Series([], dtype=int), "OBJNAM": pd.Series([], dtype=object),
-                                 "SORDAT": pd.Series([], dtype=object), "d1": pd.Series([], dtype=np.int32),
+                                 "SORDAT": pd.Series([], dtype=object), "fkey": pd.Series([], dtype=object),
+                                 "d1": pd.Series([], dtype=np.int32),
                                  "d2": pd.Series([], dtype=np.int32), "geometry": gpd.GeoSeries([])},
                                 geometry="geometry")
     df = pd.concat(frames, ignore_index=True)
@@ -189,8 +190,13 @@ def shore_parts(merged, split_fenders: bool = False):
     fender = np.array([bool(int_set(v) & FENDER_CATSLC) for v in sl.CATSLC]) if len(sl) else np.zeros(0, bool)
     fenders = list(sl.geometry.values[fender]) if split_fenders else []
     parts += list(sl.geometry.values[~fender] if split_fenders else sl.geometry.values)
-    for layer in ["PONTON", "HULKES", "FLODOC", "DRYDOC", "DAMCON", "GATCON", "DYKCON", "PILPNT"]:
+    for layer in ["PONTON", "HULKES", "FLODOC", "DRYDOC", "DAMCON", "DYKCON", "PILPNT"]:
         parts += list(_get(merged, layer).geometry.values)
+    # gates: navigable lock and flood gates are not obstacles (spec C.2a); every other gate is
+    from .derived import navigable_gate_mask
+    gc = _get(merged, "GATCON")
+    if len(gc):
+        parts += list(gc.geometry.values[~navigable_gate_mask(gc)])
     parts += list(_polys(_get(merged, "UNSARE")).geometry.values)
     # A causeway polygon is charted straight across its bridge span (e.g. the
     # bascule span of Welch Causeway over the ICW): cut the bridge footprint out.
@@ -322,19 +328,28 @@ def channels(merged, ncf_reach, ncf_line, crs, p) -> tuple[gpd.GeoDataFrame, gpd
 
 
 def reg_areas(merged) -> gpd.GeoDataFrame:
+    """Regulated areas (RESARE, CTNARE), lock and floodgate zones (derived layer LOCKZN, kind 4) and
+    chart-datum notes (derived layer DATUMN, area-wide caution). Column `areawide`: an area-wide advisory
+    (spec C.7a), set by derived.py on RESARE / CTNARE."""
     rows = []
     for layer in ("RESARE", "CTNARE"):
         g = _polys(_get(merged, layer))
-        for r in g.itertuples():
+        aw = g["areawide"].values if "areawide" in g.columns else np.zeros(len(g), bool)
+        for r, w in zip(g.itertuples(), aw):
             k = area_kind(layer, getattr(r, "RESTRN", None), getattr(r, "CATREA", None))
             if k == 0:
                 continue
             rows.append({"kind": k, "cls": layer, "OBJNAM": r.OBJNAM, "INFORM": r.INFORM,
                          "RESTRN": str(getattr(r, "RESTRN", "") or ""), "fkey": getattr(r, "fkey", f"{layer}:{r.Index}"),
-                         "geometry": r.geometry})
+                         "areawide": bool(w) and k != 1, "geometry": r.geometry})
+    for layer, cls, aw in (("LOCKZN", "GATCON", False), ("DATUMN", "DATUM", True)):
+        g = _polys(_get(merged, layer))
+        for r in g.itertuples():
+            rows.append({"kind": int(r.kind), "cls": cls, "OBJNAM": r.OBJNAM, "INFORM": r.INFORM, "RESTRN": "",
+                         "fkey": r.fkey, "areawide": aw, "geometry": r.geometry})
     if not rows:
         return gpd.GeoDataFrame({"kind": [], "cls": [], "OBJNAM": [], "INFORM": [], "RESTRN": [], "fkey": [],
-                                 "geometry": []}, geometry="geometry")
+                                 "areawide": pd.Series([], dtype=bool), "geometry": []}, geometry="geometry")
     return gpd.GeoDataFrame(rows, geometry="geometry").sort_values("fkey", kind="stable").reset_index(drop=True)
 
 

@@ -187,16 +187,22 @@ def channel_table(source, keys, st: SideTables):
     return np.array(recs, dtype=P.CHAN_DT), index_of
 
 
+AREA_SOURCE = {"RESARE": P.AREA_SRC_RESARE, "CTNARE": P.AREA_SRC_CTNARE, "GATCON": P.AREA_SRC_GATCON,
+               "DATUM": P.AREA_SRC_DATUM}
+
+
 def area_table(source, keys, st: SideTables):
-    regs = L.reg_areas(_subset(source, ["RESARE", "CTNARE"], keys))
+    regs = L.reg_areas(_subset(source, ["RESARE", "CTNARE", "LOCKZN", "DATUMN"], keys))
+    regs = regs.sort_values("fkey", kind="stable") if len(regs) else regs
     recs, index_of = [], {}
     for row in regs.itertuples():
         rp = _rep_units(row.geometry)
-        name = row.OBJNAM if isinstance(row.OBJNAM, str) and row.OBJNAM else (
-            {1: "Entry prohibited area", 2: "Restricted area", 3: "Caution area"}[row.kind])
+        name = row.OBJNAM if isinstance(row.OBJNAM, str) and row.OBJNAM and row.OBJNAM != "nan" else (
+            {1: "Entry prohibited area", 2: "Restricted area", 3: "Caution area", 4: "Lock"}[row.kind])
+        text = row.INFORM if isinstance(row.INFORM, str) and row.INFORM != "nan" else ""
         index_of[row.fkey] = len(recs)
-        recs.append((row.kind, 1 if row.cls == "RESARE" else 2, 0, st.S(name), st.S(row.INFORM), rp[0], rp[1],
-                     (0, 0, 0)))
+        recs.append((row.kind, AREA_SOURCE[row.cls], P.AREA_F_AREA_WIDE if row.areawide else 0, 0, st.S(name),
+                     st.S(text), rp[0], rp[1], (0, 0, 0)))
     return np.array(recs, dtype=P.AREA_DT), index_of
 
 
@@ -248,6 +254,7 @@ def assemble(region, tile_keys: dict, source, merged_entries, load_tile, build_s
     # per-triangle attributes, references remapped to the region tables
     cols = {k: [] for k, _ in P.ATTR_COLUMNS}
     missing = {"overhead": 0}
+    adv_index = {(): 0}
     for r, n in tri_local:
         a = r["attrs"]
         for k in ("depth_dm", "band_depth_dm", "maint_dm", "clearance_dm", "flags", "quality"):
@@ -257,7 +264,20 @@ def assemble(region, tile_keys: dict, source, merged_entries, load_tile, build_s
         missing["overhead"] += sum(1 for k in r["over_keys"] if k not in ov_first)
         cols["overhead"].append(_remap(a["overhead"], r["over_keys"], ov_index))
         cols["area"].append(_remap(a["area"], r["area_keys"], ar_index))
+        # advisory sets: tile set of feature keys -> sorted region AREA indices
+        tile_sets = [tuple(sorted(ar_index[k] for k in ks)) for ks in r.get("adv_sets", [()])]
+        cols["advisory"].append(np.array([adv_index.setdefault(ts, len(adv_index)) for ts in tile_sets],
+                                         np.int64)[np.asarray(a.get("advisory", np.zeros(n, np.int64)), np.int64)])
     attrs = {k: np.concatenate(v) for k, v in cols.items()}
+    # renumber the sets in sorted order (set 0 = empty), independent of tile order
+    order = sorted(adv_index, key=lambda t: (len(t) > 0, t))
+    renum = np.zeros(len(adv_index), np.int64)
+    for new, t in enumerate(order):
+        renum[adv_index[t]] = new
+    attrs["advisory"] = renum[attrs["advisory"]]
+    advisory_sets = [list(t) for t in order]
+    if len(advisory_sets) >= LIMIT_U16:
+        raise FormatLimit(f"region {region.rid}: {len(advisory_sets)} advisory sets; the format addresses 65535")
     # seams: split T-junctions where neighbouring tiles' vertices differ
     tris, src, n_split = topology.fix_tjunctions(uniq, tris, np.arange(len(tris)))
     attrs = {k: v[src] for k, v in attrs.items()}
@@ -302,10 +322,12 @@ def assemble(region, tile_keys: dict, source, merged_entries, load_tile, build_s
                   clearance_dm=int(round(p.clearance_m * 10)), check_dm=int(round((p.clearance_m - 1.0) * 10)),
                   shore_rings_m=tuple(int(x) for x in (list(p.shore_rings_m[:2]) + [0, 0])[:2]),
                   vertices=verts, tris=ctris, attrs=attrs, strings=S.items, overhead=ovh, hazards=hzd,
-                  channels=chn, areas=ars, sources=sources, geom=geom, info=info, nbr=nbr, grid=grid)
+                  channels=chn, areas=ars, sources=sources, geom=geom, info=info, nbr=nbr, grid=grid,
+                  advisory_sets=advisory_sets)
     report = {"topology": topo, "vertices": int(len(verts)), "triangles": int(len(ctris)),
               "tiles": len(tile_keys), "tiles_with_water": sum(1 for v in tile_tri.values() if v),
               "records": {"OVHD": len(ovh), "HAZD": len(hzd), "CHAN": len(chn), "AREA": len(ars), "GEOM": len(geom),
+                          "ADVS": len(advisory_sets),
                           "SRCS": len(sources)},
               "overhead_keys_missing": missing["overhead"], "assemble_seconds": round(time.time() - t0, 1)}
     return pack, report

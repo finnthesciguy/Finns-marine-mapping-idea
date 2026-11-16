@@ -1,12 +1,12 @@
 {
  "file": "synthetic.pack",
- "sha256": "e32df39fd14943412827390e9c79a600e2dbe02506e2749ca27b06dd4816f32d",
+ "sha256": "da3f5d68cd4b5ff1298973b030f63059075047c94a3612125983551802041ae9",
  "header": {
   "major": 1,
-  "minor": 1,
+  "minor": 2,
   "header_size": 256,
-  "file_size": 1824,
-  "section_count": 13,
+  "file_size": 2048,
+  "section_count": 14,
   "section_table_offset": 256,
   "flags": 1,
   "region_id": "synthetic",
@@ -23,33 +23,33 @@
   "check_dm": 110,
   "shore_ring0_m": 50,
   "shore_ring1_m": 150,
-  "table_crc32": 59179533,
-  "header_crc32": 882906909
+  "table_crc32": 2925415649,
+  "header_crc32": 3806939901
  },
  "sections": [
   {
    "name": "INFO",
    "count": 0,
    "encoding": 0,
-   "offset": 672,
+   "offset": 704,
    "stored_length": 51,
    "raw_length": 51,
    "crc32": 4276614975
   },
   {
    "name": "STRS",
-   "count": 14,
+   "count": 20,
    "encoding": 1,
-   "offset": 728,
-   "stored_length": 168,
-   "raw_length": 232,
-   "crc32": 1387643729
+   "offset": 760,
+   "stored_length": 277,
+   "raw_length": 408,
+   "crc32": 4019087558
   },
   {
    "name": "SRCS",
    "count": 1,
    "encoding": 0,
-   "offset": 896,
+   "offset": 1040,
    "stored_length": 24,
    "raw_length": 24,
    "crc32": 4085256812
@@ -58,7 +58,7 @@
    "name": "VERT",
    "count": 45,
    "encoding": 1,
-   "offset": 920,
+   "offset": 1064,
    "stored_length": 63,
    "raw_length": 182,
    "crc32": 1613663742
@@ -67,7 +67,7 @@
    "name": "TRIS",
    "count": 62,
    "encoding": 1,
-   "offset": 984,
+   "offset": 1128,
    "stored_length": 116,
    "raw_length": 186,
    "crc32": 3009574474
@@ -76,7 +76,7 @@
    "name": "ADJC",
    "count": 62,
    "encoding": 1,
-   "offset": 1104,
+   "offset": 1248,
    "stored_length": 131,
    "raw_length": 186,
    "crc32": 1012292422
@@ -85,16 +85,16 @@
    "name": "ATTR",
    "count": 62,
    "encoding": 1,
-   "offset": 1240,
-   "stored_length": 202,
-   "raw_length": 1054,
-   "crc32": 4165949614
+   "offset": 1384,
+   "stored_length": 222,
+   "raw_length": 1178,
+   "crc32": 680435187
   },
   {
    "name": "GRID",
    "count": 8,
    "encoding": 1,
-   "offset": 1448,
+   "offset": 1608,
    "stored_length": 98,
    "raw_length": 192,
    "crc32": 1808985301
@@ -103,7 +103,7 @@
    "name": "OVHD",
    "count": 4,
    "encoding": 1,
-   "offset": 1552,
+   "offset": 1712,
    "stored_length": 95,
    "raw_length": 160,
    "crc32": 3236895071
@@ -112,7 +112,7 @@
    "name": "HAZD",
    "count": 1,
    "encoding": 0,
-   "offset": 1648,
+   "offset": 1808,
    "stored_length": 32,
    "raw_length": 32,
    "crc32": 3657197025
@@ -121,25 +121,34 @@
    "name": "CHAN",
    "count": 1,
    "encoding": 0,
-   "offset": 1680,
+   "offset": 1840,
    "stored_length": 32,
    "raw_length": 32,
    "crc32": 2311523809
   },
   {
    "name": "AREA",
+   "count": 6,
+   "encoding": 1,
+   "offset": 1872,
+   "stored_length": 95,
+   "raw_length": 192,
+   "crc32": 2994000763
+  },
+  {
+   "name": "ADVS",
    "count": 3,
    "encoding": 1,
-   "offset": 1712,
-   "stored_length": 55,
-   "raw_length": 96,
-   "crc32": 2478541044
+   "offset": 1968,
+   "stored_length": 21,
+   "raw_length": 22,
+   "crc32": 3651474738
   },
   {
    "name": "GEOM",
    "count": 8,
    "encoding": 1,
-   "offset": 1768,
+   "offset": 1992,
    "stored_length": 50,
    "raw_length": 64,
    "crc32": 3458843118
@@ -150,7 +159,7 @@
   "note": "synthetic test pack"
  },
  "strings": {
-  "count": 14,
+  "count": 20,
   "first": {
    "0": "",
    "1": "Test Opening Bridge",
@@ -210,7 +219,8 @@
    "channel": 65535,
    "overhead": 65535,
    "area": 65535,
-   "quality": 85
+   "quality": 85,
+   "advisory": 0
   },
   {
    "index": 1,
@@ -232,7 +242,8 @@
    "channel": 65535,
    "overhead": 65535,
    "area": 65535,
-   "quality": 85
+   "quality": 85,
+   "advisory": 0
   },
   {
    "index": 2,
@@ -254,7 +265,8 @@
    "channel": 65535,
    "overhead": 65535,
    "area": 2,
-   "quality": 85
+   "quality": 85,
+   "advisory": 0
   },
   {
    "index": 31,
@@ -276,7 +288,8 @@
    "channel": 65535,
    "overhead": 65535,
    "area": 65535,
-   "quality": 85
+   "quality": 85,
+   "advisory": 0
   },
   {
    "index": 61,
@@ -298,7 +311,8 @@
    "channel": 65535,
    "overhead": 65535,
    "area": 65535,
-   "quality": 85
+   "quality": 85,
+   "advisory": 0
   }
  ],
  "grid": {
@@ -503,6 +517,7 @@
   {
    "kind": 1,
    "source": 1,
+   "flags": 0,
    "name": 8,
    "text": 0,
    "lon": -819935000,
@@ -512,6 +527,7 @@
   {
    "kind": 2,
    "source": 1,
+   "flags": 0,
    "name": 9,
    "text": 0,
    "lon": -819935000,
@@ -520,12 +536,26 @@
   },
   {
    "kind": 3,
-   "source": 2,
-   "name": 10,
-   "text": 11,
-   "lon": -819985000,
-   "lat": 270005000,
-   "index": 2
+   "source": 4,
+   "flags": 1,
+   "name": 18,
+   "text": 19,
+   "lon": -819980000,
+   "lat": 270035000,
+   "index": 5
   }
- ]
+ ],
+ "advisory_sets": {
+  "count": 3,
+  "sets": [
+   [],
+   [
+    4
+   ],
+   [
+    4,
+    5
+   ]
+  ]
+ }
 }

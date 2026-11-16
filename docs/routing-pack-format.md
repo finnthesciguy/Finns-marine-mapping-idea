@@ -1,6 +1,6 @@
-# Routing pack format and routing algorithm, version 1.1
+# Routing pack format and routing algorithm, version 1.2
 
-Status: Wave 2, 2026-11-12. Format 1.1 adds a checksum over the section table and makes every reader check explicit; the routing algorithm was corrected where the independent Swift port showed the 1.0 text to be wrong or incomplete (see "Changes from 1.0" at the end). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
+Status: Wave 4 round 2, 2026-11-15. Format 1.2 adds locks and navigable floodgates (a triangle flag, an `AREA` kind and a yellow reason), area-wide advisories (an `ATTR` column and the `ADVS` section, reported once per route instead of on every leg), and replaces the leg construction (B.8: legs follow real turns, not the triangles); see "Changes from 1.1" at the end. Format 1.1 added a checksum over the section table and made every reader check explicit (see "Changes from 1.0"). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
 
 This document has four parts:
 
@@ -45,9 +45,9 @@ The layout is exact, and readers check it (A.4 check 7): section 0 starts at the
 
 Writers store sections in this order. They are identified by their four-character tag, never by position:
 
-`INFO STRS SRCS VERT TRIS [ADJC] ATTR GRID OVHD HAZD CHAN AREA GEOM`
+`INFO STRS SRCS VERT TRIS [ADJC] ATTR GRID OVHD HAZD CHAN AREA ADVS GEOM`
 
-`ADJC` is optional. All the others are required. A reader must ignore sections with unknown tags. A file is memory-mappable: section offsets are 8-byte aligned. A raw (encoding 0) section can be used in place. A compressed section must be inflated into a buffer of `raw_length` bytes. Fixed-width arrays (`ATTR`, the record tables and `GEOM`) can then be used without parsing. Varint sections (`VERT`, `TRIS`, `ADJC`, `GRID`) must be decoded once into arrays.
+`ADJC` is optional. `ADVS` is required from format 1.2 on and is an unknown tag (ignored) in a file of an older minor version. All the others are required. A reader must ignore sections with unknown tags. A file is memory-mappable: section offsets are 8-byte aligned. A raw (encoding 0) section can be used in place. A compressed section must be inflated into a buffer of `raw_length` bytes. Fixed-width arrays (`ATTR`, the record tables and `GEOM`) can then be used without parsing. Varint sections (`VERT`, `TRIS`, `ADJC`, `GRID`) must be decoded once into arrays.
 
 ### A.3 Header (256 bytes)
 
@@ -55,7 +55,7 @@ Writers store sections in this order. They are identified by their four-characte
 |---|---|---|---|
 | 0 | u8[8] | magic | ASCII `GCRTPACK` |
 | 8 | u16 | format_major | 1. A reader must reject any other major version. |
-| 10 | u16 | format_minor | 1. A newer minor version only adds sections or fields that are zero in older files; a reader accepts any minor version (A.4). |
+| 10 | u16 | format_minor | 2. A reader accepts minor versions 0, 1 and 2 (A.4); a 1.0 or 1.1 file reads as a pack without locks and without area-wide advisories. A 1.1 reader rejects a 1.2 file (its `ATTR` rows are 19 bytes). |
 | 12 | u32 | header_size | 256. Any other value is rejected. |
 | 16 | u32 | file_size | total file size in bytes. Must equal the actual size. |
 | 20 | u32 | section_count | number of section table entries, 1..4096 |
@@ -103,24 +103,25 @@ A writer sets `encoding = 0` and stores the section raw when zlib does not make 
 6. If `format_minor ≥ 1`: `table_crc32` equals the CRC-32 of the section table. (A 1.0 file has no table CRC, and this check is skipped; every other check applies to it.)
 7. Layout (A.2): every section starts exactly where A.2 says, lies inside the file, every padding byte is zero, and the file ends at the padded end of the last section.
 8. Every section's stored bytes match its `crc32` (sections with unknown tags included).
-9. Tags: no tag occurs twice; every required section is present; flag bit 0 is set if and only if `ADJC` is present. Sections with unknown tags are ignored from here on (their encoding is not checked).
+9. Tags: no tag occurs twice; every required section is present (`ADVS` too when `format_minor ≥ 2`); flag bit 0 is set if and only if `ADJC` is present. Sections with unknown tags are ignored from here on (their encoding is not checked); before format 1.2, `ADVS` is an unknown tag.
 10. Encoding is 0 or 1. Raw: `raw_length == stored_length`. zlib: the stored bytes are exactly one complete zlib stream (nothing after its Adler-32 trailer) that inflates to exactly `raw_length` bytes.
 11. Section contents (A.5), in any order:
-    - **counts**: `count` equals the stated item count for every section (`STRS`: N, the first u32; `VERT`: V; `TRIS`, `ADJC`, `ATTR`: T; `GRID`: nx·ny; record sections and `GEOM`: raw length / record size, with no remainder);
+    - **counts**: `count` equals the stated item count for every section (`STRS`: N, the first u32; `VERT`: V; `TRIS`, `ADJC`, `ATTR`: T; `GRID`: nx·ny; `ADVS`: K, the number of sets; record sections and `GEOM`: raw length / record size, with no remainder);
     - **varint sections**: exactly the stated number of uvarints with nothing left over, none longer than 10 bytes, no 64-bit overflow (the 10th byte is 0 or 1); over-long encodings of small values need not be rejected;
     - **STRS**: N ≥ 1, the offsets are non-decreasing, `offsets[0] == offsets[1] == 0` (string 0 is empty), `offsets[N]` equals the blob length, and every string is valid UTF-8;
     - **VERT**: every vertex lies inside the bounding box;
     - **TRIS**: `b − a > 0`, `c − a > 0`, `b ≠ c`, every index < V, and `orient(a, b, c) > 0` (A.9.1);
     - **ADJC** (when present): every neighbour n of (t, k) is in `[0, T)`, is not t, and owns the reversed edge (`v_t[k+1] → v_t[k]`) at some edge k' with `nbr[n][k'] == t`. When ADJC is absent, the derived adjacency must find no directed edge twice;
-    - **ATTR**: raw length `17·T`; `channel`, `overhead` and `area` are `0xFFFF` or a valid record index;
+    - **ATTR**: raw length `19·T` (format 1.2) or `17·T` (1.0 and 1.1, which have no `advisory` column: it reads as 0); `channel`, `overhead` and `area` are `0xFFFF` or a valid record index; `advisory` is < K (1 when there is no `ADVS`);
+    - **ADVS**: K ≥ 1; raw length `4·(K+1) + 2·M` with `M = offsets[K]`; offsets non-decreasing with `offsets[0] == offsets[1] == 0` (set 0 is empty); within each set the ids are strictly ascending, each < the number of `AREA` records and names a record whose flags bit 0 (area-wide) is set;
     - **GRID**: `origin == (min_lon, min_lat)`, `cell > 0`, `nx == max(1, ceil((max_lon − min_lon) / cell))`, `ny` likewise with latitudes; per cell the count is ≤ T, ids are strictly ascending and < T; nothing after the last cell;
     - **GEOM**: every point lies inside the bounding box;
     - **OVHD, HAZD**: `geom_type` is 1, 2 or 3; `geom_first + geom_count ≤` the number of GEOM points; a point has exactly 1 point, a polyline at least 2, a ring at least 3;
     - **string ids** in SRCS, OVHD, HAZD, CHAN and AREA are < N.
 
-INFO is never a reason to reject a file: readers decode it as UTF-8 replacing invalid sequences, and ignore lines without `=`. Readers ignore reserved bytes, reserved flag bits (header and ATTR flags bits 13..15) and record padding. The full A.9 guarantees (canonical order, GRID contents, ADJC equal to the derived adjacency) are checked by `enc_routing validate`; a reader need not check them.
+INFO is never a reason to reject a file: readers decode it as UTF-8 replacing invalid sequences, and ignore lines without `=`. Readers ignore reserved bytes, reserved flag bits (header bits 1..31, ATTR flags bits 14..15) and record padding. The full A.9 guarantees (canonical order, GRID contents, ADJC equal to the derived adjacency) are checked by `enc_routing validate`; a reader need not check them.
 
-**Compatibility.** Readers accept every minor version of major 1. A 1.0 file reads exactly like the same file in 1.1, except that it has no section-table checksum. Packs written before 1.1 need not be rebuilt, but every pack the builder writes now is 1.1.
+**Compatibility.** Readers accept minor versions 0, 1 and 2 of major 1. A 1.0 file reads exactly like the same file in 1.1, except that it has no section-table checksum. A 1.0 or 1.1 file has no `ADVS` and 17-byte `ATTR` rows: every `advisory` is 0, no triangle has the LOCK flag and no `AREA` record is area-wide, so it routes exactly as before except for the leg construction of B.8, which applies to every pack. Readers written for 1.1 reject 1.2 files (`ATTR` length), so the app must update RoutingKit before 1.2 packs are published. No pack has been published; every pack the builder writes now is 1.2. `testdata/routing/synthetic-v11.pack` is the synthetic pack written as 1.1, for the compatibility tests.
 
 ### A.5 Sections
 
@@ -128,7 +129,7 @@ All descriptions below are of the **raw** (inflated) bytes.
 
 #### INFO: build information
 
-UTF-8 text, one `key=value` line per entry, each terminated by `\n`. Keys seen in v1.0 and v1.1:
+UTF-8 text, one `key=value` line per entry, each terminated by `\n`. Keys seen in v1.0 to v1.2:
 
 - `builder`;
 - `params` (JSON of the build parameters, part C);
@@ -204,8 +205,9 @@ These are columns, each T elements long, stored one after another in this order.
 | 4 | flags | u16 | bits | see below |
 | 5 | channel | u16 | | index into CHAN, `0xFFFF` = none |
 | 6 | overhead | u16 | | index into OVHD of the representative overhead object (the lowest known clearance, else an unknown one), `0xFFFF` = none |
-| 7 | area | u16 | | index into AREA of the most restrictive regulated area (prohibited > restricted > caution, then the lowest index), `0xFFFF` = none |
+| 7 | area | u16 | | index into AREA of the most restrictive **local** regulated area or lock zone (prohibited > lock > restricted > caution, then the lowest index), `0xFFFF` = none. Area-wide advisories are never referenced here (column 9). |
 | 8 | quality | u8 | | bits 0–2: CATZOC code (0 unknown, 1 A1, 2 A2, 3 B, 4 C, 5 D, 6 U), the worst over the triangle. Bits 3–7: survey decade code d = 0 unknown, else the decade starts at `1850 + 10·d` (d is clamped to 1..31), the oldest over the triangle. |
+| 9 | advisory | u16 | | format 1.2 only: index into `ADVS` of the set of area-wide advisories the triangle lies in (C.7a); 0 = none |
 
 Flags:
 
@@ -215,15 +217,16 @@ Flags:
 | 1 | HIGHWAY | within 30 m of a USACE NCF centreline or the ENC Intracoastal Waterway recommended track. Always set together with CHANNEL. |
 | 2 | OPENING_BRIDGE | every overhead object over the triangle is an opening span (bascule, swing, lifting, draw, transporter, or generic opening) |
 | 3 | UNKNOWN_CLEARANCE | at least one overhead object over the triangle has no charted clearance (a cable or pipe without VERCLR, or an opening span without closed clearance) |
-| 4 | RESTRICTED | in a restricted area (entry restricted, area to be avoided, safety zone, military area, minefield) |
-| 5 | CAUTION | in a caution area (CTNARE, such as "shoal reported"), a nature reserve or a no-wake/speed area |
+| 4 | RESTRICTED | in a local restricted area (entry restricted, area to be avoided, safety zone, military area, minefield) that is not area-wide (C.7a) |
+| 5 | CAUTION | in a local caution area (CTNARE, such as "shoal reported", or a no-wake/speed area) that is not area-wide (C.7a) |
 | 6 | NEAR_HAZARD | within 30 m of any charted obstruction, wreck or rock |
 | 7 | HAZARD_DEPTH | within the clearance zone (12 m) of a hazard with **known** depth; depth_dm is then ≤ that hazard's VALSOU |
 | 8 | PROHIBITED | in an entry-prohibited area: never passable |
 | 9 | OUTSIDE | open Gulf (outside the barrier islands and bay mouths) |
 | 10 | SOUNDING_REFINED | depth_dm was raised above the depth-area least depth by the sounding rule (C.4) |
 | 11–12 | shore class | 0: within shore_ring0_m (50 m) of land, a structure or a blocking hazard; 1: within shore_ring1_m (150 m); 3: farther; 2: unused |
-| 13–15 | reserved | 0 |
+| 13 | LOCK | format 1.2: in the zone of a lock or navigable floodgate (C.2a); `area` names its AREA record (kind 4) |
+| 14–15 | reserved | 0 |
 
 #### GRID: point-location index (count = nx·ny)
 
@@ -305,14 +308,24 @@ Every charted obstruction, wreck and underwater rock in the region, except foul 
 
 | off | type | field |
 |---|---|---|
-| 0 | u8 | kind: 1 prohibited, 2 restricted, 3 caution |
-| 1 | u8 | source: 1 RESARE, 2 CTNARE |
-| 2 | u16 | 0 |
+| 0 | u8 | kind: 1 prohibited, 2 restricted, 3 caution, 4 lock or navigable floodgate (1.2) |
+| 1 | u8 | source: 1 RESARE, 2 CTNARE, 3 GATCON (a lock zone, C.2a), 4 a chart-datum note (C.7a) |
+| 2 | u8 | flags (1.2; 0 before): bit 0 area-wide advisory (C.7a). Other bits 0. |
+| 3 | u8 | 0 |
 | 4 | u32 | name (string id; a generic name if the chart has none) |
 | 8 | u32 | text (string id): the chart's INFORM text, e.g. `Shoal reported` |
 | 12 | i32 | lon (representative point) |
 | 16 | i32 | lat |
 | 20 | u8[12] | 0 |
+
+#### ADVS: area-wide advisory sets (format 1.2; count = K sets)
+
+```
+u32 offsets[K+1]      set k = ids[offsets[k] .. offsets[k+1])
+u16 ids[offsets[K]]   AREA indices, strictly ascending within a set, each an area-wide record
+```
+
+Set 0 is the empty set. The builder lists the other sets in lexicographic order of their id lists, so the section does not depend on tiling.
 
 #### GEOM: coordinate pool (count = points)
 
@@ -353,47 +366,47 @@ The bytes below are from `testdata/routing/synthetic.pack`. All values are littl
 **Header** (all 256 bytes; bytes 112..251 are zero and elided):
 
 ```
-0000  47 43 52 54 50 41 43 4B 01 00 01 00 00 01 00 00
-0010  20 07 00 00 0D 00 00 00 00 01 00 00 01 00 00 00
+0000  47 43 52 54 50 41 43 4B 01 00 02 00 00 01 00 00
+0010  00 08 00 00 0E 00 00 00 00 01 00 00 01 00 00 00
 0020  73 79 6E 74 68 65 74 69 63 00 00 00 00 00 00 00
 0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 0040  00 CB 1F CF 80 DF 17 10 80 03 21 CF C0 7B 18 10
 0050  ED 28 35 01 F8 28 35 01 C0 D4 01 00 2D 00 00 00
-0060  3E 00 00 00 78 00 6E 00 32 00 96 00 0D 02 87 03
+0060  3E 00 00 00 78 00 6E 00 32 00 96 00 E1 4C 5E AE
 ...
-00F0  00 00 00 00 00 00 00 00 00 00 00 00 1D 17 A0 34
+00F0  00 00 00 00 00 00 00 00 00 00 00 00 FD 4A E9 E2
 ```
 
-Decoded: magic `GCRTPACK`; version 1.1; header_size 256; file_size 1824 (`20 07 00 00`); section_count 13; table at 256; flags 1 (ADJC present); region `synthetic`; bbox lon -820000000 .. -819920000, lat 270000000 .. 270040000 (for example `00 CB 1F CF` = -820000000 = -82.0000000°); data_date 20261101 (`ED 28 35 01`); build 20261112 120000; V = 45, T = 62; clearance_dm 120 (`78 00`); check_dm 110 (`6E 00`); shore rings 50 / 150 m; table_crc32 0x0387020D (`0D 02 87 03`, the CRC-32 of the 416-byte table at 0x100); header_crc32 0x34A0171D.
+Decoded: magic `GCRTPACK`; version 1.2; header_size 256; file_size 2048 (`00 08 00 00`); section_count 14; table at 256; flags 1 (ADJC present); region `synthetic`; bbox lon -820000000 .. -819920000, lat 270000000 .. 270040000 (for example `00 CB 1F CF` = -820000000 = -82.0000000°); data_date 20261101 (`ED 28 35 01`); build 20261112 120000; V = 45, T = 62; clearance_dm 120 (`78 00`); check_dm 110 (`6E 00`); shore rings 50 / 150 m; table_crc32 0xAE5E4CE1 (`E1 4C 5E AE`, the CRC-32 of the 448-byte table at 0x100); header_crc32 0xE2E94AFD.
 
 **Section table** (the first five entries):
 
 ```
-0100  49 4E 46 4F 00 00 00 00 A0 02 00 00 00 00 00 00
+0100  49 4E 46 4F 00 00 00 00 C0 02 00 00 00 00 00 00
 0110  33 00 00 00 33 00 00 00 3F F7 E7 FE 00 00 00 00
-0120  53 54 52 53 01 00 00 00 D8 02 00 00 00 00 00 00
-0130  A8 00 00 00 E8 00 00 00 51 C3 B5 52 0E 00 00 00
-0140  53 52 43 53 00 00 00 00 80 03 00 00 00 00 00 00
+0120  53 54 52 53 01 00 00 00 F8 02 00 00 00 00 00 00
+0130  15 01 00 00 98 01 00 00 C6 68 8E EF 14 00 00 00
+0140  53 52 43 53 00 00 00 00 10 04 00 00 00 00 00 00
 0150  18 00 00 00 18 00 00 00 6C 12 80 F3 01 00 00 00
-0160  56 45 52 54 01 00 00 00 98 03 00 00 00 00 00 00
+0160  56 45 52 54 01 00 00 00 28 04 00 00 00 00 00 00
 0170  3F 00 00 00 B6 00 00 00 FE 8D 2E 60 2D 00 00 00
-0180  54 52 49 53 01 00 00 00 D8 03 00 00 00 00 00 00
+0180  54 52 49 53 01 00 00 00 68 04 00 00 00 00 00 00
 0190  74 00 00 00 BA 00 00 00 4A 76 62 B3 3E 00 00 00
 ```
 
-Entry 0: tag `INFO`, encoding 0, offset 672 (the first multiple of 8 after the 256 + 13·32 = 672-byte header and table), stored 51, raw 51, crc32 0xFEE7F73F, count 0. Its stored bytes end at 723, so bytes 723..727 are zero padding and entry 1 (`STRS`) starts at 728. Entry 3: tag `VERT`, encoding 1 (zlib), offset 920, stored 63, raw 182, count 45.
+Entry 0: tag `INFO`, encoding 0, offset 704 (the first multiple of 8 after the 256 + 14·32 = 704-byte header and table), stored 51, raw 51, crc32 0xFEE7F73F, count 0. Its stored bytes end at 755, so bytes 755..759 are zero padding and entry 1 (`STRS`) starts at 760. Entry 3: tag `VERT`, encoding 1 (zlib), offset 1064, stored 63, raw 182, count 45. Further on: `ATTR` raw 1178 bytes (19 · 62), `ADVS` count 3, raw 22 bytes.
 
 **INFO** raw starts `62 75 69 6C 64 65 72 3D 65 6E 63 5F 72 6F 75 74 69 6E 67 20 73 79 6E 74` = `builder=enc_routing synt`...
 
 **STRS** raw starts
 
 ```
-0000  0E 00 00 00 00 00 00 00 00 00 00 00 13 00 00 00
+0000  14 00 00 00 00 00 00 00 00 00 00 00 13 00 00 00
 0010  24 00 00 00 2E 00 00 00 38 00 00 00 44 00 00 00
 0020  49 00 00 00 55 00 00 00 64 00 00 00 73 00 00 00
 ```
 
-N = 14; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 of the blob = `Test Opening Bridge`. The blob starts at byte 4 + 4·(N+1) = 64.
+N = 20; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 of the blob = `Test Opening Bridge`. The blob starts at byte 4 + 4·(N+1) = 88.
 
 **SRCS** record 0 (24 bytes): `0C 00 00 00 03 00 01 00 ED 28 35 01 E0 2E 00 00 05 01 00 00 00 00 00 00`. name = string 12 (`US5TEST1`), edition 3, update 1, issue date 20261101 (`ED 28 35 01`), cscale 12000 (`E0 2E 00 00`), band 5, used 1.
 
@@ -403,7 +416,7 @@ N = 14; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 
 
 **ADJC** raw starts `00 04 02 01 06 00`. Triangle 0: uvarints [0, 4, 2] → zigzag [0, 2, 1] → neighbours [-1, 2, 1] (0 → none, −1).
 
-**ATTR** triangle 0 (T = 62, so column j starts at 2·j·T for the 16-bit columns and the quality byte column at 16·T):
+**ATTR** triangle 0 (T = 62, so column j starts at 2·j·T for the 16-bit columns 0–7, the quality byte column at 16·T and the advisory column at 17·T):
 
 - depth_dm @ 0: `06 00` = 6
 - band_depth_dm @ 124: `06 00` = 6
@@ -414,6 +427,7 @@ N = 14; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 
 - overhead @ 744: `FF FF` = 65535
 - area @ 868: `FF FF` = 65535
 - quality @ 992: `55` = 85
+- advisory @ 1054: `00 00` = 0
 
 flags 0x0000 = shore class 0. Quality 0x55 = CATZOC 5 (D), decade code 10 (1950s).
 
@@ -454,7 +468,9 @@ source=1, flags=1, maint_dm=27, auth_dm=27, name=5, ident=6, desc=7, date=202601
 0010  38 68 18 10 00 00 00 00 00 00 00 00 00 00 00 00
 ```
 
-kind=1, source=1, name=8, text=0, lon=-819935000, lat=270035000.
+kind=1, source=1, flags=0, name=8, text=0, lon=-819935000, lat=270035000. Record 4 (the area-wide sanctuary) starts `03 01 01 00`: kind 3, source 1, flags 1 (area-wide); record 3 (the lock) starts `04 03 00 00`.
+
+**ADVS** raw (22 bytes): `00 00 00 00 00 00 00 00 01 00 00 00 03 00 00 00 04 00 04 00 05 00`: K = 3, offsets [0, 0, 1, 3], ids [4, 4, 5], so set 0 = {}, set 1 = {4}, set 2 = {4, 5}.
 
 **GEOM** point 0: `D8 A1 20 CF 90 06 18 10` = (-819945000, 270010000).
 
@@ -538,7 +554,10 @@ via_sound     = depth_ok && (band == −32768 || band < req)  // passable only t
 needs_opening = opening && has_ovh && (clr == 0xFFFE || clr < air)
 unknown_used  = unknown && !opening && has_ovh
 restricted    = flags & RESTRICTED
+lock          = flags & LOCK                                // format 1.2
 ```
+
+A lock zone is passable like any other water (its depth, clearance and area rules apply); it is never a block reason.
 
 ### B.4 Shore class
 
@@ -572,6 +591,7 @@ Entry penalties are added, in metres, when the search steps from triangle t into
 | `needs_opening[u] && !needs_opening[t]` | +1500 |
 | `unknown_used[u] && !unknown_used[t]` | +3000 |
 | `restricted[u] && !restricted[t]` | +1000 |
+| `lock[u] && !lock[t]` (format 1.2) | +2000 |
 | `blocked[u] && !blocked[t]` (only in the no-route search, B.11) | +100000 |
 
 ### B.6 Snapping the start and goal
@@ -625,12 +645,16 @@ while heap not empty:
 
 If g is never closed, there is no route. The **corridor** is g, came[g], came[came[g]], … reversed, so it runs from s to g. If s == g, the corridor is [s].
 
-### B.8 Funnel (string pulling)
+### B.8 Legs
 
-Portals: for consecutive corridor triangles (t, u), let k be the edge of t with `nbr[t][k] == u`. Then `left = v[(k+1) mod 3]`, `right = v[k]`, as integer vertex coordinates. With n = corridor length, `P[0] = (S, S)`, `P[1..n−1]` are the portals and `P[n] = (G, G)`, all as integer units (S and G are the snapped (x, y)). `tri2 = orient` (A.8, exact Int64).
+The corridor of B.7 is a chain of triangles; its shortest path (the funnel below) hugs every corner of the chain, so in a mesh of small triangles it has hundreds of tiny legs. Format 1.2 builds the legs instead by **greedy visibility**: from the current point, the leg goes to the farthest point along the corridor that a straight line reaches through passable water without adding a caution reason. The funnel is kept as the fallback that always makes progress.
+
+**Portals.** For consecutive corridor triangles (t, u), let k be the edge of t with `nbr[t][k] == u`. Then `left = v[(k+1) mod 3]`, `right = v[k]`, as integer vertex coordinates. With n = corridor length, `P[0] = (S, S)`, `P[1..n−1]` are the portals and `P[n] = (G, G)`, all as integer units (S and G are the snapped (x, y)). Portal j lies between corridor triangles c[j−1] and c[j]. `tri2 = orient` (A.8, exact Int64).
+
+**Funnel** (string pulling) over a portal list `P[0..n]` (`P[0] = (A, A)` for a start point A):
 
 ```
-path = [(S, 0)]; apex = S; left = P[0].left; right = P[0].right; ai = li = ri = 0; i = 1
+path = [(A, 0)]; apex = A; left = P[0].left; right = P[0].right; ai = li = ri = 0; i = 1
 while i ≤ n:
     (pl, pr) = P[i]
     if tri2(apex, right, pr) ≥ 0:
@@ -640,22 +664,69 @@ while i ≤ n:
         if apex == left or tri2(apex, right, pl) > 0:  left = pl; li = i
         else:  path.append((right, ri)); apex = right; ai = ri; left = right = apex; li = ri = ai; i = ai + 1; continue
     i = i + 1
-if path.last.point ≠ G: path.append((G, n))
+if path.last.point ≠ P[n].left: path.append((P[n].left, n))
 remove each entry whose point equals the previous kept entry's point (keep the first)
 if path.last.index ≠ n: path.last.index = n
 ```
 
-The result is a list of waypoints `(point, portal index)`. The first has index 0 and the last has index n; when S == G the list has a single waypoint (with index n) and the route has no legs. **Leg j** runs from waypoint j (index pa) to waypoint j+1 (index pb). It covers corridor positions `lo = pa` to `hi = min(max(pa, pb − 1), n − 1)` inclusive. Every leg lies inside the union of its triangles: water is pre-shrunk by the safety clearance (part C), so the straightened path keeps the clearance without any further offset.
+**Reason masks.** For every passable triangle t, `Y(t)` is the set of B.9 yellow reasons that apply to t alone (a bit mask in the order of the B.9 table).
+
+**Targets.** For j = 1..n−1, let `(l, r) = P[j]` and o the vertex of c[j] that is neither l nor r. The target of portal j is `T_j = (floor((2·l.x + 2·r.x + o.x) / 5), floor((2·l.y + 2·r.y + o.y) / 5))` (the point with barycentric weights 0.4, 0.4, 0.2: just inside c[j], next to the middle of the portal). T_j is **valid** only if it lies strictly inside c[j] (all three orientations > 0). `T_n = G`.
+
+**Walk.** `walk(A, tA, B, tB, admissible)` follows the segment A→B from triangle tA (which contains A) and must end in triangle tB:
+
+```
+t = tA; out = [t]
+repeat at most T times:
+    if t == tB: return out
+    if t contains B (A.8): fail                      // B reached in another triangle
+    o_k = orient(A, B, v_t[k]) for k = 0, 1, 2
+    the exit edge is the edge k with o_k < 0 and o_(k+1 mod 3) > 0; if there is none: fail
+                                                     // the segment meets a vertex (or would leave backwards)
+    u = nbr[t][k]; if u < 0 or not admissible(u): fail
+    out.append(u); t = u
+fail
+```
+
+A segment that passes exactly through a vertex therefore fails; that only costs an extra leg.
+
+**Leg planning.** Start with `A = S`, `ia = 0`, `tA = c[0]`, waypoints `[(S, 0)]`.
+
+```
+loop:
+    visible(j):  T = T_j; if T is not valid or T == A: fail
+                 Ymax = OR of Y(c[p]) for p = ia .. min(j, n−1)
+                 return walk(A, tA, T, c[min(j, n−1)], admissible = (u passable and Y(u) ⊆ Ymax))
+    if visible(ia + 1) succeeds with triangles W:
+        lo = ia + 1; step = 1
+        while lo + step ≤ n and visible(lo + step) succeeds (with W'): lo = lo + step; W = W'; step = 2·step
+        hi = min(lo + step, n + 1)
+        while hi − lo > 1: mid = floor((lo + hi) / 2); if visible(mid) succeeds (W'): lo = mid; W = W' else hi = mid
+        B = T_lo; jb = lo; leg triangles = W
+    else:                                            // fallback: the first funnel waypoint from A
+        F = funnel over [(A, A)] + P[ia+1 .. n−1] + [(G, G)]
+        (B, k) = F[1]; jb = ia + k; leg triangles = c[ia .. min(jb, n−1)]
+    append (B, jb) to the waypoints and the leg triangles to the legs
+    if jb == n: stop
+    A = B; ia = jb; tA = c[jb]
+```
+
+Every leg lies inside the union of its triangles (the walk visits exactly the triangles the segment crosses; a funnel leg lies in its corridor triangles), which are passable and add no yellow reason that the corridor stretch it replaces did not already have. Water is pre-shrunk by the safety clearance (part C), so a leg keeps the clearance without any further offset. A leg may leave the B.7 corridor through other passable triangles.
+
+**The route's corridor** is then `legs[0] + legs[1][1:] + legs[2][1:] + …`: consecutive legs share the triangle where one ends and the next starts, and the result is again a chain of neighbouring triangles from s to g. **Leg j** covers positions `[lo_j, hi_j]` of that corridor, with `lo_0 = 0`, `hi_j = lo_j + len(leg_j) − 1` and `lo_{j+1} = hi_j`.
+
+If the snapped start and goal are the same point there are no legs: the waypoints are `[(S, n)]` and the corridor is the B.7 corridor.
 
 ### B.9 Leg grading
 
-For leg j, with TT = corridor[lo..hi], the **yellow reasons** are tested in this order and listed in this order:
+For leg j, with TT = its triangles (B.8), the **yellow reasons** are tested in this order and listed in this order:
 
 | reason | condition (any triangle in TT) |
 |---|---|
 | MAINTAINED_DEPTH | via_maint |
 | SOUNDING_DEPTH | via_sound |
 | BRIDGE_OPENING | needs_opening |
+| LOCK | lock (format 1.2) |
 | UNKNOWN_CLEARANCE | unknown_used |
 | RESTRICTED_AREA | flags & RESTRICTED |
 | CAUTION_AREA | flags & CAUTION |
@@ -663,7 +734,7 @@ For leg j, with TT = corridor[lo..hi], the **yellow reasons** are tested in this
 | LOW_DATA_QUALITY | CATZOC ∈ {0 unknown, 5 D, 6 U} |
 | THIN_MARGIN | !via_maint && depth − req < 3 && CATZOC ∈ {0, 4 C, 5 D, 6 U} |
 
-`grade = "yellow"` if there is any reason, else `"green"` (charted depth satisfies draft + margin and nothing else applies). **There are no red legs in a returned route.** Anything that would be red makes the whole query fail: no route (B.11) or leg validation failure (B.10).
+`grade = "yellow"` if there is any reason, else `"green"` (charted depth satisfies draft + margin and nothing else applies). **There are no red legs in a returned route.** Anything that would be red makes the whole query fail: no route (B.11) or leg validation failure (B.10). Area-wide advisories (C.7a) are never a leg reason: they are listed once in the summary (B.12).
 
 Per leg, also report:
 
@@ -721,7 +792,7 @@ The result is `{ok: false, error: "NO_ROUTE", reason, blocked, hints}`:
 
 ### B.12 Route summary
 
-From the corridor (all positions) and the legs. Every field comes from the source named here.
+From the corridor of B.8 (all positions) and the legs. Every field comes from the source named here.
 
 - `distance_m`: the sum of `length_m` over the legs, added in leg order starting from 0.0 (0.0 when there are no legs). `distance_nm = distance_m / 1852`.
 - `legs`, `green_legs`, `yellow_legs`: counts of legs.
@@ -729,6 +800,8 @@ From the corridor (all positions) and the legs. Every field comes from the sourc
 - `lowest_clearance`: among corridor triangles with ATTR `clearance_dm < 0xFFFE`, the first with the minimum value: `{clearance_dm, overhead, name, opening}`, where `overhead` is the triangle's ATTR overhead index (0xFFFF possible), `name` the name of that OVHD record (`""` if 0xFFFF) and `opening` the triangle's ATTR flag OPENING_BRIDGE (not the record's flag). null if there is none.
 - `openings`: bridges that must open. Each maximal run of consecutive needs_opening corridor triangles gives one entry, from the run's first triangle: `{corridor_index, overhead, clearance_dm, name, lon, lat}` with `overhead` and `clearance_dm` from its ATTR, `name` as above and lon/lat its centroid.
 - `unknown_clearances`: the same for runs of unknown_used.
+- `locks` (format 1.2): each maximal run of consecutive `lock` corridor triangles gives `{corridor_index, area, name, lon, lat}` from the run's first triangle: `area` its ATTR area index (the lock's AREA record; 0xFFFF possible), `name` that record's name (`""` if 0xFFFF), lon/lat its centroid.
+- `advisories` (format 1.2): the union of the ADVS sets of all corridor triangles (ATTR `advisory`), in ascending AREA index, each `{area, kind, source, name, text}` from that AREA record (name and text as strings). Empty for 1.0 and 1.1 packs.
 - `maintained_triangles`: the number of corridor triangles with via_maint.
 - `data_date`: from the header.
 
@@ -739,7 +812,7 @@ Every result has `ok` and `data_date` (header). The reference implementation als
 **Success:** `{ok: true, req_dm, air_dm, start, goal, corridor, waypoints_units, waypoints, legs, summary, data_date}`.
 
 - `start`, `goal`: `{x, y, lon, lat, triangle, snap_m, in_mesh}`. x, y is the snapped point in units and lon, lat the same in degrees (`units/1e7`). `snap_m` is reported rounded to 0.001 m (`round(d, 3)`, half-even; compare within 1e-3). `in_mesh` is false when step 3 of B.6 located no triangle.
-- `corridor`: triangle ids from s to g. `waypoints_units`: the B.8 points; `waypoints` the same in degrees.
+- `corridor`: triangle ids from s to g, as built by B.8 (the triangles the legs cross). `waypoints_units`: the B.8 points; `waypoints` the same in degrees.
 - `legs[j]`: `{from, to, triangles: [lo, hi], length_m, grade, reasons, min_depth_dm, min_spare_dm, crossings}` (B.8–B.10).
 - **Start equal to goal.** If the snapped start and goal are the same point, the funnel returns one waypoint, so `legs` is empty, `distance_m` is 0, and `corridor` is whatever B.7 returns (`[s]` when s == g).
 
@@ -751,7 +824,7 @@ Every result has `ok` and `data_date` (header). The reference implementation als
 | `START_OUTSIDE_PACK`, `START_NO_WATER_NEARBY` | B.6 on the start | `req_dm`, `air_dm`, `start: {error: "OUTSIDE_PACK"}` or `start: {error: "NO_WATER_NEARBY", located, nearest_m?}` (`located`: the impassable located triangle or null; `nearest_m`: only when a passable candidate existed but was farther than max_snap_m) |
 | `GOAL_OUTSIDE_PACK`, `GOAL_NO_WATER_NEARBY` | B.6 on the goal | `req_dm`, `air_dm`, `start` (the snapped start object), `goal` as above |
 | `NO_ROUTE` | B.7 finds no corridor | `req_dm`, `air_dm`, `start`, `goal`, `reason`, `blocked`, `hints` (B.11) |
-| `LEG_VALIDATION` | B.10 finds a violation | `req_dm`, `air_dm`, `start`, `goal`, `corridor`, `violations` (B.10 item 6) |
+| `LEG_VALIDATION` | B.10 finds a violation | `req_dm`, `air_dm`, `start`, `goal`, `corridor` (as B.8 builds it), `violations` (B.10 item 6) |
 
 An implementation may add its own failures outside this list (RoutingKit: cancelled, timed out); they are not part of the vectors.
 
@@ -761,19 +834,30 @@ An implementation may add its own failures outside this list (RoutingKit: cancel
 
 Builder: `python -m enc_routing build --region pilot`, with defaults from `enc_routing.config.BuildParams`.
 
-**C.1 Cells and merge.** The NOAA ENC catalog selects the active cells covering the region. Each cell is downloaded and read with GDAL (updates applied), and the result is cached per edition and update. Every location is served by exactly one cell: the best band, then the largest scale, then the newest issue date. Hairline slivers between harbour cells are closed (see the Wave 1 report).
+Builder version 3.1.1 (`enc_routing.config.BUILDER_VERSION`). The operator guide is [routing-build.md](routing-build.md).
+
+**C.1 Cells and merge.** The NOAA ENC catalog (via pipeline/catalog) selects the active cells covering the region; only cells of band 3 (coastal) and better are used (band 1–2 cells would only add open ocean at 1:1,000,000 and smaller). Each cell is downloaded and read with GDAL (updates applied), and the result is cached per edition and update. Every location is served by exactly one cell: the best band, then the largest scale, then the newest issue date. Each cell is clipped to its exclusive region on its own (the area claimed by higher-priority cells is closed by 5 m in a local transverse Mercator first, so hairline slivers between harbour cells go to the better cell); a cell without M_COVR falls back to its catalog coverage. A **routing region** is its chart region's box grown by 15 nautical miles on every side (30 nm before round 2), clipped to the Gulf area of interest; the pack holds the 0.2° tiles (C.10) that meet it.
 
 **C.2 Navigable water and the safety clearance.**
 
 - **Water** is the union of DEPARE and DRGARE with DRVAL1 ≥ 0, closed by 5 m.
-- **Obstacles** are LNDARE, SLCONS (except fenders), PONTON, HULKES, FLODOC, DRYDOC, DAMCON, GATCON, DYKCON, PILPNT, UNSARE, causeways minus bridge footprints, and every hazard that blocks every boat: VALSOU unknown or ≤ 0.
+- **Obstacles** are LNDARE, SLCONS (except fenders), PONTON, HULKES, FLODOC, DRYDOC, DAMCON, GATCON except navigable gates (C.2a), DYKCON, PILPNT, UNSARE, causeways minus bridge footprints, and every hazard that blocks every boat: VALSOU unknown or ≤ 0.
 - **Clearances.**
   - Obstacles are buffered by `clearance + 2·s`, with clearance = 12 m and s = 1 m.
   - **Near bridges** (within 60 m of any BRIDGE object touching water), obstacles are buffered by `4 m + 2·s` instead. Bascule and swing openings are 25–40 m wide between land, piers and fenders, so 12 m on each side would close them. In the pilot that closed Cortez, Blackburn Point and Manatee River.
+  - **In lock zones** (C.2a) the same reduced `4 m + 2·s` applies: lock chambers are 17–25 m wide between their walls.
+  - The reduced clearances apply to land and structures only: blocking hazards keep `clearance + 2·s` everywhere, so leg validation (B.10, 11 m) holds in bridge and lock zones too (builder 3.1.1).
   - Bridge fenders (SLCONS CATSLC 14) are buffered by `3 m + 2·s` everywhere.
   - The union is simplified with Douglas–Peucker tolerance s. That moves its boundary by at most s, so every point of the domain is at least the applicable clearance from the raw obstacle: 12 m, or 4 m near bridges, or 3 m from fenders. The 2·s allowance absorbs the simplification, and the remaining 1 m covers rounding.
 - **Water parts under 200 m²** are dropped.
 - **Exactness.** Depth-area boundaries are never simplified. All constraint lines are snap-rounded to the 1e-7° grid (≈1 cm).
+
+**C.2a Locks and navigable floodgates (format 1.2).** In the ENC a lock or floodgate is a GATCON (gate) feature, a line across the channel (sometimes a polygon), with CATGAT 4 (lock gate) or 2 (flood barrage gate); the chamber between two lock gates is ordinary water (DEPARE or DRGARE) between shoreline constructions; LOKBSN (lock basin) occurs once in the Gulf data (Clewiston, Lake Okeechobee) and is not used. Dams (DAMCON) and every other gate stay obstacles.
+
+- A gate is **navigable** when CATGAT contains 2 or 4 and its INFORM does not match `wall` (guide walls and floodwalls are charted as GATCON with CATGAT 2) or `closed` unless followed by `position` ("Closed", "Permanently closed to navigation" stay obstacles; "Floodgate closed position", the charted position of the gate leaves, does not count). A GATCON without CATGAT stays an obstacle.
+- Navigable gates within 500 m of each other form one lock. Its **zone** is the convex hull of its gates grown by 60 m (computed once for the whole Gulf in CONUS Albers, EPSG:5070, so every tile sees the same zone). The zone covers the chamber and both approaches.
+- A navigable gate is not an obstacle; inside a zone the reduced clearance of C.2 applies; triangles whose sample disk meets a zone get flag LOCK and their `area` refers to the zone's AREA record: kind 4, source 3, name = the first OBJNAM of its gates (feature-key order), else "Lock" if a lock gate is present, else "Floodgate"; text = the first INFORM.
+- The router grades every leg through a zone yellow (reason LOCK: operation, hours and restrictions are not known to the app), lists the locks in the summary and adds 2000 m on entry (B.5).
 
 **C.3 Depth (depth_dm).**
 
@@ -801,6 +885,17 @@ Soundings are applied through octagons that circumscribe the 12 m disk, and haza
 
 The router grades a leg that relies on a raised depth yellow (SOUNDING_DEPTH, B.9). The depth is real charted evidence, but between soundings it is inferred.
 
+**C.4b Extended raise for bands starting at or near zero (builder 3.1.0).** Large areas charted as one band from 0 (Lake Pontchartrain is a 0–5 m DEPARE over most of its southern half) are closed to every keel boat by C.4, because their soundings are about 1 km apart. The extension is computed once for the whole Gulf from the merged cells (CONUS Albers, EPSG:5070), cached, and used only where C.4 does not apply:
+
+1. A is a depth area with `0 ≤ DRVAL1 ≤ 0.6 m` (2 ft) and `DRVAL2 > DRVAL1`. DEPARE features of the same band that touch (one area cut by chart cells) form one area A.
+2. Delaunay triangulation of the soundings that lie in such areas. τ qualifies if its three soundings lie inside the same A, its longest edge is longer than the C.4 limit (`min(0.02 · scale, 400 m)`, with the largest scale of the three soundings' cells) and at most 2000 m, its smallest angle is at least 25° (a line of soundings along a channel gives sliver triangles, which are rejected), the three depths differ by at most 1.0 m, and τ lies inside A.
+3. Nothing nearby could make it shallower: no hazard (OBSTRN, WRECKS, UWTROC, any VALSOU) within 200 m of τ; no sounding (of any cell) within 200 m of τ shallower than τ's least sounding; and no sounding within 1000 m shallower than the raised value (this catches banks between deeper basins, as in Florida Bay).
+4. Value = `min(DRVAL2, least of the three soundings) − 0.3 m` (1 ft), kept only if it exceeds DRVAL1.
+5. The raised region is τ minus 150 m from A's boundary (the shore and the neighbouring contours; the cuts between chart cells are not boundaries of the joined area).
+6. A mesh face takes the value as in C.4 (sample point inside, face touching only one depth area, which belongs to A) and gets SOUNDING_REFINED; a C.4 value wins where both apply. Lowering (C.3 step 3) applies on top.
+
+Legs relying on it are yellow with the same reason SOUNDING_DEPTH ("relies on spot soundings"). Drying soundings give values ≤ 0 and raise nothing.
+
 **C.5 Maintained depth.** The USACE National Channel Framework ChannelReach layer gives `depthmaintained` in feet, converted with `floor(ft·3.048)`. Reach polygons sit 1–30 m off the ENC channel, so they are grown by 15 m. Where reaches overlap, the minimum applies. Only reaches with a maintained depth > 0 count.
 
 **C.6 Overhead.** BRIDGE, CBLOHD and PIPOHD objects that touch water are included.
@@ -812,7 +907,7 @@ The router grades a leg that relies on a raised depth yellow (SOUNDING_DEPTH, B.
   - An opening span (CATBRG 2, 3, 4, 5, 7 or 8) uses VERCCL, or VERCLR if VERCCL is missing.
   - Other objects use VERCLR, or VERCSA for cables.
   - A bridge part with neither clearance counts as solid (0). In practice this is a fixed approach span next to the charted navigation span.
-- **Duplicates.** Duplicate cable geometries are dropped.
+- **Duplicates.** Duplicate cable geometries are dropped; the one with the smallest feature key is kept. Side tables are sorted by feature key (cell + LNAM), so "lowest index wins" ties do not depend on the tiling.
 - **Bounding box.** The header bbox is the region box grown to include every vertex and every GEOM point (A.3).
 
 **C.7 Regulated areas.** RESARE and CTNARE map to kinds as follows:
@@ -825,22 +920,34 @@ The router grades a leg that relies on a raised depth yellow (SOUNDING_DEPTH, B.
 
 Other RESAREs (for example anchoring prohibited) are ignored for routing. Membership uses any overlap with the 3 cm sample disk, so it is conservative.
 
+**C.7a Area-wide advisories (format 1.2).** A regulated area that covers a whole passage (the Florida Keys National Marine Sanctuary, a particularly sensitive sea area, the Mississippi River Regulated Navigation Area) made every leg yellow and so hid the local reasons. Such an area is **area-wide**; it sets no flag and no cost, and the route summary lists it once (B.12 `advisories`). The classification is computed once for the whole Gulf from the merged features:
+
+- prohibited areas are never area-wide (they stay impassable), nor are no-wake and speed areas (RESTRN 13 or 27, CATREA 24): they are local by nature;
+- a caution RESARE with an environmental category (CATREA 4 nature reserve, 5 bird sanctuary, 22 fish sanctuary, 23 ecological reserve, 27 environmentally sensitive sea area, 28 particularly sensitive sea area) is area-wide whatever its size;
+- any other restricted or caution area is area-wide when the connected part it belongs to covers at least 10 km². Parts join when they touch, within a group of the same object class, kind and OBJNAM (or the same INFORM text when unnamed), so an area cut by chart cells counts as one. A shoal-reported CTNARE or a security zone of a few km² stays local;
+- **chart-datum notes:** for each sounding datum other than MLLW (DSPM SDAT ≠ 12; in the Gulf data SDAT 24, local datum, in 56 harbour cells of the lower Mississippi River), one area-wide AREA record (kind 3, source 4, name "Chart datum", a text naming the datum) covers the exclusive regions of the cells that use it.
+
+Triangles store the set of area-wide AREA records their sample disk meets (ATTR `advisory`, ADVS); `area` and the RESTRICTED/CAUTION flags come from local areas only.
+
 **C.8 Channels and highway.**
 
 - **CHANNEL** means inside any of: an NCF reach (grown by 15 m), an ENC FAIRWY, an ENC DRGARE, or RECTRC/NAVLNE buffered by 15 m.
-- **HIGHWAY** means within 30 m of an NCF centreline or of an ENC RECTRC named Intracoastal Waterway.
+- **HIGHWAY** means within 30 m of an NCF centreline or of an ENC RECTRC named Intracoastal Waterway. The NCF has centrelines only in the Jacksonville district (Florida west coast); elsewhere only the ENC track counts.
 - The **channel id** is the containing channel with the best source: NCF first, then DRGARE, FAIRWY, track; the lowest index wins ties.
 
 **C.9 Quality.** Each triangle takes the worst CATZOC and the oldest SUREND year of the M_QUAL polygons containing its sample point. The M_QUAL polygons are simplified by 5 m.
 
 **C.10 Mesh.**
 
-- All constraint lines are transformed to 1e-7° units and snap-rounded together (GEOS OverlayNG, grid 1). The constraint lines are the boundaries of all of the above, the shore rings (50 m and 150 m, simplified by 5 m), the 30 m hazard proximity ring, the open-Gulf mask, and a 0.02° grid that bounds triangle size.
+- The mesh is built per fixed 0.2° tile (`tiles.py`), each in a transverse Mercator centred on the tile, with input features clipped to the tile plus 600 m and constraint lines to the tile plus 200 m; the tile edges are constraint lines, so neighbouring tiles meet on the same straight line. Tiles are joined by exact T-junction splitting, and the whole mesh must pass A.9 and the exact area check. A tile's result is cached by a hash of its inputs, so a changed cell rebuilds only its tiles and an overlap strip is built once for two regions.
+- All constraint lines are transformed to 1e-7° units and snap-rounded together (GEOS OverlayNG, grid 1). The constraint lines are the boundaries of all of the above, the shore rings (50 m and 150 m, simplified by 5 m), the 30 m hazard proximity ring, the open-Gulf mask, and a size grid that bounds triangle size: 0.02° in 0.1° cells within 3 km of land or structures, 0.1° elsewhere.
 - The lines are polygonized. Faces inside the domain are triangulated with GEOS's constrained Delaunay triangulation, which adds no Steiner points.
 - A face's attributes are sampled at the incentre of its fattest triangle.
 - Repairs run in exact integer arithmetic: flat triangles are removed by splitting the triangle across them, and T-junctions are split. The A.9 checks plus the exact area equality must pass, or the build fails.
 
-**C.11 Open Gulf.** The pilot sets OUTSIDE from a mask. The mask is the region box minus land closed by 1.5 km (which seals the passes) and a line across the Tampa Bay mouth, keeping the part connected to an offshore seed point. Other regions need their own seed and barrier lines (`places.GULF_MASK`).
+**C.10a Water no boat can use (builder 3.1.0).** A face is meshed only if it lies within 500 m of **live water**: depth areas with DRVAL1 ≥ 0.6 m (2 ft), sounding-raise regions (C.4, C.4b) of at least 0.6 m, and NCF reaches with a maintained depth of at least 0.6 m. Large marsh areas charted 0–1.8 m far from any channel are therefore left out (an estimated third of the triangles of the Louisiana packs were there, measured on the 30 nm Wave 4 packs). For a boat that needs 2 ft or more nothing changes in routing: those faces were impassable for it, so no route and no snap result changes. What changes: a point in such water is no longer "in the mesh" (B.6 `in_mesh` false, `located` null), and a no-route explanation (B.11) whose cheapest almost-route would have crossed more than 1 km of such water reports NOT_CONNECTED instead of DEPTH. A boat needing less than 2 ft could use some of that water and no longer can.
+
+**C.11 Open Gulf.** The open-Gulf mask is derived: on a 0.002° raster, water farther than 5 km from land, connected to water charted ≥ 30 ft deep and ≥ 10 km from land, grown back by 5 km (the opening of the open water by a 5 km disk). Passes and gaps narrower than 10 km are sealed; no hand-placed seeds or barrier lines.
 
 ---
 
@@ -848,13 +955,14 @@ Other RESAREs (for example anchoring prohibited) are ignored for routing. Member
 
 | file | content |
 |---|---|
-| `synthetic.pack` | hand-checkable 62-triangle pack with ADJC (layout in `enc_routing/synth.py` and below) |
+| `synthetic.pack` | hand-checkable 62-triangle pack with ADJC (layout in `enc_routing/synth.py` and below), format 1.2 |
+| `synthetic-v11.pack` | the same pack written as format 1.1 (no ADVS, 17-byte ATTR rows), for the compatibility tests |
 | `synthetic.records.json` | decoded header, section table and sample records of every section |
 | `synthetic.vectors.json` | queries and exact expected results |
-| `sarasota.pack` | real cut of the pilot pack (Sarasota Bay to Roberts Bay), **without** ADJC, so it exercises derived adjacency |
+| `sarasota.pack` | real cut of the pilot pack (Sarasota Bay to Roberts Bay; builder 3.1.0), **without** ADJC, so it exercises derived adjacency |
 | `sarasota.records.json`, `sarasota.vectors.json` | as above |
 | `sarasota.obstacles.wkb.gz` | raw land, structures and blocking hazards (WKB, EPSG:4326 degrees) clipped to the cut, for the "no route touches land" regression test |
-| `sarasota.bridge_zone.wkb.gz` | the 60 m bridge zones (C.2) where the reduced 4 m clearance applies, for the same test |
+| `sarasota.bridge_zone.wkb.gz` | the 60 m bridge zones and the lock zones (C.2, C.2a) where the reduced 4 m clearance applies, for the same test |
 
 The regression test (`pipeline/routing/tests/test_regression.py`, ported to RoutingKit as `ObstacleRegressionTests`) routes every successful Sarasota query forwards and reversed, maps the waypoints to an equirectangular frame about 27.35° N, and requires that the route does not touch any obstacle, stays ≥ 3.5 m from them everywhere and ≥ 11.5 m outside the bridge zones (the 4 m and 12 m clearances less 0.5 m for rounding and the metric).
 
@@ -863,11 +971,11 @@ The regression test (`pipeline/routing/tests/test_regression.py`, ported to Rout
 | row | contents |
 |---|---|
 | 0 | 6 dm, CATZOC D 1950, shore class 0. Column 1 is a caution area (AREA 2). Column 2 is missing (an island). |
-| 1 | the channel: 36 dm, maintained 27, CHANNEL+HIGHWAY, channel 0. Column 3 is shoaled to 9 dm. Column 5 is an opening bridge with closed clearance 18 dm (OVHD 0). |
+| 1 | the channel: 36 dm, maintained 27, CHANNEL+HIGHWAY, channel 0. Column 3 is shoaled to 9 dm. Column 5 is an opening bridge with closed clearance 18 dm (OVHD 0). Column 6 is a lock (LOCK, AREA 3). |
 | 2 | 21 dm. Column 2 has a cable of unknown clearance (OVHD 2). Column 4 is a known-depth wreck zone at 15 dm (HAZD 0, HAZARD_DEPTH), with an overhead point object of 50 m clearance (OVHD 3, referenced by no triangle) 4 units north of the row 1/row 2 boundary at column 4.5. Column 5 is a fixed bridge at 30 dm (OVHD 1). Column 6 is restricted (AREA 1). Column 7 has band 9 dm refined to 21 dm (SOUNDING_REFINED). |
 | 3 | 60 dm, with the cable at column 2, the fixed bridge at column 5, and a prohibited area at column 6 (AREA 0). |
 
-Everything else is CATZOC A2, 2010, shore class 3.
+Everything else is CATZOC A2, 2010, shore class 3. Area-wide advisories: columns 0–3 of row 2 are in ADVS set 1 = {AREA 4, "Test Sanctuary"}, columns 0–3 of row 3 in set 2 = {AREA 4, AREA 5, "Chart datum"}. AREA 3 is kind 4 (lock), source 3; AREA 4 kind 3, source 1, area-wide; AREA 5 kind 3, source 4, area-wide.
 
 Overhead lines (all N–S): OVHD 0 (opening span) from row 1's southern edge to row 2's southern edge at column 5.5; OVHD 1 (fixed bridge) from 0.0001° (11 m) north of row 2's southern edge to the top of the pack at column 5.5; OVHD 2 (cable) from row 2's southern edge to the top at column 2.5. The fixed bridge line starts inside its own footprint, as C.6 guarantees for real packs; a leg along the row 1/row 2 boundary therefore touches the ends of the opening-span and cable lines without passing under them (B.10 item 4).
 
@@ -883,7 +991,8 @@ Overhead lines (all N–S): OVHD 0 (opening span) from row 1's southern edge to 
   triangles:[{index, v:[a,b,c], nbr:[n0,n1,n2], depth_dm, band_depth_dm, maint_dm,
               clearance_dm, flags, channel, overhead, area, quality}],
   grid:     {origin_lon, origin_lat, cell, nx, ny, total_ids, cells:[{cell, ids:[...]}]},
-  sources|overhead|hazards|channels|areas: [{index, <every non-padding field by its A.5 name>, geom?:[[lon,lat],...]}] }
+  sources|overhead|hazards|channels|areas: [{index, <every non-padding field by its A.5 name>, geom?:[[lon,lat],...]}],
+  advisory_sets: {count, sets: [first 8 sets]} }
 ```
 
 **`*.vectors.json`**
@@ -899,13 +1008,27 @@ Overhead lines (all N–S): OVHD 0 (opening span) from row 1's southern edge to 
 
 All integers (triangle ids, corridor, waypoints_units, dm values, reasons, grades) must match exactly. Floating-point fields must match within the stated tolerances. `legs[].from/to` and `waypoints` are `units/1e7` and are informative; compare `waypoints_units`.
 
-`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
+`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The synthetic queries s14 (a lock: yellow LOCK leg, `summary.locks`) and s15 (two area-wide advisories, green legs) cover format 1.2. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
 
 **Properties checked by both implementations** (`tests/test_rules.py`, RoutingKit `PropertyTests`): over every ordered pair of the 32 square centres of the synthetic pack and six profiles, the outcome class (route / no route / leg-validation failure) is the same in both directions and no leg fails validation; every snapped point lies in its triangle; and no leg of any route enters the interior of an impassable triangle (RoutingKit, exact).
 
 *Informative: the Python reference reproduces every vector from the pack file alone (`pytest pipeline/routing -k vectors`).*
 
 ---
+
+## Changes from 1.1
+
+Wave 4 round 2. The routes of the five Gulf packs showed four problems a boater would hit; each is fixed in this document, the Python reference and RoutingKit together. 1.0 and 1.1 packs are still read (A.4); 1.1 readers reject 1.2 packs.
+
+| # | 1.1 | 1.2 |
+|---|---|---|
+| 1 | Locks and floodgates (GATCON) were obstacles: the Intracoastal Waterway was cut at New Orleans and in Texas. | Navigable gates (CATGAT 2 or 4, not closed) are passable; lock zones get the reduced clearance, flag LOCK (bit 13), an AREA record of kind 4, the yellow reason LOCK, a 2000 m entry penalty and the summary list `locks` (B.3, B.5, B.9, B.12, C.2a). |
+| 2 | Large areas charted 0–x m had no usable depth: Lake Pontchartrain was closed to every keel boat. | Builder only: extended sounding raise C.4b (legs relying on it stay yellow, SOUNDING_DEPTH). |
+| 3 | A large sanctuary or regulated navigation area made every leg yellow. | Area-wide advisories (C.7a) carry no flag and no cost; ATTR column 9 `advisory` and the ADVS section list them; the summary reports them once (`advisories`). Chart cells on a non-MLLW datum are reported the same way. |
+| 4 | Legs were the funnel path through the A* corridor: it hugs every corner of the triangle chain, so a 42 nm passage had 582 legs (median 14 m). | B.8 legs by greedy visibility walks over targets next to the portal midpoints, admitting only passable triangles that add no yellow reason; the funnel is the fallback. The route's corridor is the triangles the legs cross. |
+| 5 | AREA bytes 2–3 reserved. | Byte 2 = flags (bit 0 area-wide); kinds 4 (lock), sources 3 (GATCON) and 4 (chart datum). |
+
+Builder (part C) changes in the same round, which change no reader: Wave 4's tiled build (C.1, C.6, C.8, C.10, C.11 rewritten), faces far from live water dropped (C.10a), the overlap between packs cut from 30 to 15 nm.
 
 ## Changes from 1.0
 

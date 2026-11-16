@@ -66,7 +66,25 @@ def cut_pack(pack: P.Pack, bbox_deg, region_id: str) -> P.Pack:
     ovh = table(pack.overhead, "overhead", True, ["name"])
     hzd = table(pack.hazards, None, True, ["name"])
     chn = table(pack.channels, "channel", False, ["name", "ident", "desc"])
-    ars = table(pack.areas, "area", False, ["name", "text"])
+    # areas named by the kept triangles' advisory sets are kept too (format 1.2)
+    used_sets = sorted(set(int(x) for x in attrs["advisory"]) - {0})
+    adv_ids = sorted({i for k in used_sets for i in pack.advisory_sets[k]})
+    keep_areas = (pack.areas["lon"] >= b[0]) & (pack.areas["lon"] <= b[2]) & (pack.areas["lat"] >= b[1]) \
+        & (pack.areas["lat"] <= b[3])
+    keep_areas |= np.isin(np.arange(len(pack.areas)), adv_ids)
+    keep_areas |= np.isin(np.arange(len(pack.areas)), [int(x) for x in attrs["area"] if x != P.ID_NONE])
+    amap = {int(o): n for n, o in enumerate(np.flatnonzero(keep_areas))}
+    ars = pack.areas[keep_areas].copy()
+    for r in ars:
+        r["name"] = S(r["name"])
+        r["text"] = S(r["text"])
+    attrs["area"] = np.array([amap[int(x)] if x != P.ID_NONE else P.ID_NONE for x in attrs["area"]])
+    set_map = {0: 0}
+    adv_sets = [[]]
+    for k in used_sets:
+        set_map[k] = len(adv_sets)
+        adv_sets.append([amap[i] for i in pack.advisory_sets[k]])
+    attrs["advisory"] = np.array([set_map[int(x)] for x in attrs["advisory"]])
     src = pack.sources.copy()
     for r in src:
         r["name"] = S(r["name"])
@@ -84,7 +102,8 @@ def cut_pack(pack: P.Pack, bbox_deg, region_id: str) -> P.Pack:
                   build_time=pack.build_time, clearance_dm=pack.clearance_dm, check_dm=pack.check_dm,
                   shore_rings_m=pack.shore_rings_m, vertices=V, tris=T, attrs=attrs, strings=strings,
                   overhead=ovh, hazards=hzd, channels=chn, areas=ars, sources=src,
-                  geom=np.array(geom, np.int32).reshape(-1, 2), info=info, nbr=nbr, grid=grid)
+                  geom=np.array(geom, np.int32).reshape(-1, 2), info=info, nbr=nbr, grid=grid,
+                  advisory_sets=adv_sets)
 
 
 def clip_source_geometry(region, name, bbox_deg, margin_deg=0.01) -> bytes:
@@ -161,6 +180,7 @@ def dump_records(path) -> dict:
                            for c in pick_c]},
         "sources": side(p.sources), "overhead": side(p.overhead), "hazards": side(p.hazards),
         "channels": side(p.channels), "areas": side(p.areas),
+        "advisory_sets": {"count": len(p.advisory_sets), "sets": p.advisory_sets[:8]},
     }
 
 
@@ -249,6 +269,12 @@ SYNTH_QUERIES = [
     {"id": "s13_goal_out_of_range", "start": [-81.9995, 27.0015], "goal": [-81.9925, 95.0],
      "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
      "note": "latitude 95: GOAL_OUTSIDE_PACK, with the snapped start"},
+    {"id": "s14_lock", "start": [-81.9935, 27.0015], "goal": [-81.9922, 27.0012],
+     "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
+     "note": "through the lock square (col 6, row 1): yellow LOCK leg, listed in summary.locks"},
+    {"id": "s15_advisories", "start": [-81.9995, 27.0035], "goal": [-81.9985, 27.0025],
+     "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
+     "note": "rows 2-3, columns 0-1: green legs, the sanctuary and the datum note listed once in summary.advisories"},
 ]
 
 SARASOTA_QUERIES = [

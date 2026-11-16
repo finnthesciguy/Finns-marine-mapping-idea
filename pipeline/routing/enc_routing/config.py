@@ -50,7 +50,10 @@ CUTS = {
 # 3.0.0: tiled build (per-tile local transverse Mercator), adaptive size grid,
 #        derived open-Gulf mask, per-cell incremental merge, catalog via pipeline/catalog.
 # 3.0.1: invalid projected geometry repaired per tile; union retried on a 1 mm grid.
-BUILDER_VERSION = "3.0.1"
+# 3.1.0: format 1.2 (locks, area-wide advisories), extended sounding raise, dead-water faces dropped,
+#        15 nm overlap.
+# 3.1.1: blocking hazards keep the full 12 m clearance inside bridge and lock zones.
+BUILDER_VERSION = "3.1.1"
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,23 @@ class BuildParams:
     mask_seal_m: float = 5000.0        # passes and gaps narrower than twice this are sealed (inside)
     mask_seed_depth_dm: int = 91       # seeds: charted depth area of at least 30 ft (9.1 m) ...
     mask_seed_dist_m: float = 10000.0  # ... at least this far from land
+    # locks and navigable floodgates (derived.py, spec C.2a)
+    lock_group_m: float = 500.0        # navigable gates this close form one lock
+    lock_zone_m: float = 60.0          # the zone is the gates' convex hull grown by this
+    # area-wide advisories (derived.py, spec C.7a)
+    areawide_km2: float = 10.0         # a connected group of regulated areas at least this large is area-wide
+    # extended sounding raise for bands starting at or near zero (derived.py, spec C.4b)
+    ext_d1_max_dm: int = 6             # band lower bound at most 0.6 m (2 ft)
+    ext_edge_max_m: float = 2000.0     # longest TIN edge
+    ext_min_angle_deg: float = 25.0    # no sliver triangles (a line of soundings along a channel)
+    ext_spread_max_dm: int = 10        # the three soundings agree within 1 m
+    ext_margin_dm: int = 3             # raised value = least sounding - 1 ft
+    ext_clear_m: float = 200.0         # no hazard, no sounding shallower than tau's least sounding, no cell edge this close
+    ext_shoal_m: float = 1000.0        # no sounding shallower than the raised value this close (banks between basins)
+    ext_boundary_m: float = 150.0      # never within this of the depth area's boundary (shore, contours)
+    # water no boat can use (spec C.10a): faces kept only within this distance of live water
+    live_floor_dm: int = 6             # live water: least depth or maintained depth >= 0.6 m (2 ft)
+    live_distance_m: float = 500.0
 
     def key(self) -> str:
         return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:16]

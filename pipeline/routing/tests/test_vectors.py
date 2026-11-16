@@ -59,14 +59,16 @@ def test_synthetic_vectors_cover_the_cases():
     doc = json.loads((TESTDATA / "synthetic.vectors.json").read_text())
     exp = {q["id"]: q["expected"] for q in doc["queries"]}
     assert exp["s1_shoal_blocks"]["error"] == "NO_ROUTE"
-    assert exp["s2_maintained"]["legs"][0]["reasons"] == ["MAINTAINED_DEPTH", "BRIDGE_OPENING"]
+    assert exp["s2_maintained"]["legs"][0]["reasons"] == ["MAINTAINED_DEPTH", "BRIDGE_OPENING", "LOCK"]
+    assert [x["name"] for x in exp["s14_lock"]["summary"]["locks"]] == ["Test Lock"]
+    assert [x["area"] for x in exp["s15_advisories"]["summary"]["advisories"]] == [4, 5]
     assert exp["s4_too_deep"]["ok"] is False or all(
         l["min_depth_dm"] >= 39 for l in exp["s4_too_deep"]["legs"])
     assert exp["s6_outside_pack"]["error"] == "START_OUTSIDE_PACK"
     assert exp["s7_island_snap"]["start"]["in_mesh"] is False
     reasons = {r for q in exp.values() for l in q.get("legs", []) for r in l["reasons"]}
     assert {"MAINTAINED_DEPTH", "BRIDGE_OPENING", "UNKNOWN_CLEARANCE", "RESTRICTED_AREA",
-            "HAZARD_PROXIMITY", "LOW_DATA_QUALITY", "SOUNDING_DEPTH"} <= reasons
+            "HAZARD_PROXIMITY", "LOW_DATA_QUALITY", "SOUNDING_DEPTH", "LOCK"} <= reasons
 
 
 def test_testdata_size_budget():

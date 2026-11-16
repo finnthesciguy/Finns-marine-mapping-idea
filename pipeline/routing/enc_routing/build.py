@@ -5,7 +5,7 @@ Stages and caches (all under the work directory, see config.work_dir):
   catalog/ENCProdCat.xml       conditional GET (pipeline/catalog)
   snapshots/snap-<date>.json   catalog snapshot per run (for `enc-catalog diff`)
   cache/cells/<cell>.zip       zips; re-downloaded only when edition/update changes
-  extract/v3/<cell>.<ed>.<upd>.pkl   S-57 read once per edition/update
+  extract/v4/<cell>.<ed>.<upd>.pkl   S-57 read once per edition/update
   merge/<cell>.<key>.pkl       the cell clipped to its exclusive region; key covers the cell and every
                                higher-priority cell overlapping it
   ncf/blocks/*.geojson         USACE NCF per 1 degree block
@@ -52,7 +52,7 @@ def _maxrss_mb():
 
 def prepare_sources(catalog_copy=None, offline: bool = False, workers: int = 4):
     """Catalog, downloads, extraction and merge for the whole Gulf.
-    Returns (catalog, cells, merged_entries, anomalies dict)."""
+    Returns (catalog, cells, merged_entries, anomalies dict, derived layers (derived.derive))."""
     from . import merge
     from .download import download_cells
     from .extract import cell_anomalies, extract_cells, load_cell
@@ -89,7 +89,11 @@ def prepare_sources(catalog_copy=None, offline: bool = False, workers: int = 4):
         if a:
             anomalies["cells"][c.name] = a
     del cell_anomalies
-    return cat, cells, merged, anomalies
+    from .config import BuildParams
+    from .derived import derive
+
+    dv = derive(merged, merge.load_merged, BuildParams(), log=log)
+    return cat, cells, merged, anomalies, dv
 
 
 def coverage_union(merged):
@@ -113,7 +117,9 @@ def write_checks(region, source, tiles, path):
     haz = L.hazards(sub)
     block = list(shore) + list(haz[haz.blocking].geometry.values)
     over = L.overhead(sub, None)
+    lz = sub.get("LOCKZN")
     checks = {"obstacles": shapely.to_wkb(block), "fenders": shapely.to_wkb(fenders),
+              "lock_zones": shapely.to_wkb(lz.geometry.values) if lz is not None and len(lz) else [],
               "bridges": shapely.to_wkb(sub["BRIDGE"].geometry.values) if "BRIDGE" in sub else [],
               "overhead": over.drop(columns=[c for c in over.columns if c == "foot"]) if len(over) else over}
     pd.to_pickle(checks, path)
@@ -128,7 +134,7 @@ def build(region: Region, force: bool = False, catalog_copy=None, workers: int =
 
     t0 = time.time()
     p = region.params
-    cat, cells, merged, anomalies = prepared or prepare_sources(catalog_copy, offline, workers)
+    cat, cells, merged, anomalies, dv = prepared or prepare_sources(catalog_copy, offline, workers)
     t_src = time.time() - t0
     cov = coverage_union(merged)
     tiles = tiles_for(region.geometry, cov, p)
@@ -139,7 +145,7 @@ def build(region: Region, force: bool = False, catalog_copy=None, workers: int =
     nc = ncf.load(tb, log=log, offline=offline)
     anomalies["ncf"] = nc.pop("anomalies", [])
     mk = M.build_mask(merged, merge.load_merged, p, log=log)
-    source = Source(merged, merge.load_merged, nc, mk, tb, p, log=log)
+    source = Source(merged, merge.load_merged, nc, mk, tb, p, log=log, derived=dv)
     t1 = time.time()
     tb_stats = build_tiles(source, tiles, workers=workers, log=log)
     t_tiles = time.time() - t1

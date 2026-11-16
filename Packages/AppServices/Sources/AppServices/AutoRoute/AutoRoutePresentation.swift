@@ -84,6 +84,9 @@ public struct AutoRouteReason: Sendable, Equatable {
         case CautionReason.bridgeOpening.rawValue:
             return AutoRouteReason(code: code, title: "Bridge must open",
                                    detail: "A bridge on this leg is lower than your air draft when closed. Check its opening schedule and call the bridge tender before you arrive.")
+        case CautionReason.lock.rawValue:
+            return AutoRouteReason(code: code, title: "Lock or floodgate",
+                                   detail: "This leg passes through a lock or floodgate. Its operation, hours and restrictions are not known to the app: call the lock or check the local notices before you go, and expect to wait.")
         case CautionReason.unknownClearance.rawValue:
             return AutoRouteReason(code: code, title: "Clearance not charted",
                                    detail: "This leg passes under a bridge or cable whose clearance is not on the chart. Find out the clearance before you go under.")
@@ -148,8 +151,8 @@ public struct AutoRouteLegRow: Sendable, Equatable, Identifiable {
 
 /// One line of the route summary card.
 public struct AutoRouteSummaryLine: Sendable, Equatable, Identifiable {
-    /// Stable key: `distance`, `time`, `legs`, `shallowest`, `clearance`, `openings`, `unknownClearance`,
-    /// `startSnap`, `goalSnap`, `data`, `pack`, `boat`.
+    /// Stable key: `distance`, `time`, `legs`, `shallowest`, `clearance`, `openings`, `unknownClearance`, `locks`,
+    /// `advisory-<AREA index>` (one per area-wide advisory), `startSnap`, `goalSnap`, `data`, `pack`, `boat`.
     public var id: String
     public var label: String
     public var value: String
@@ -380,6 +383,22 @@ public enum AutoRoutePresenter {
         return "Under \(name) (\(clearance))"
     }
 
+    /// An area-wide advisory (a sanctuary, a regulated navigation area, a chart on a non-MLLW datum): shown once for
+    /// the whole route instead of on every leg.
+    static func advisoryLine(_ a: AreaAdvisory) -> AutoRouteSummaryLine {
+        let label: String
+        if a.source == 4 {
+            label = "Chart datum"
+        } else if a.kind == 2 {
+            label = "Regulated area on the route"
+        } else {
+            label = "Area-wide caution on the route"
+        }
+        var value: String = a.name.isEmpty ? "Unnamed area" : a.name
+        if !a.text.isEmpty && a.text != a.name { value += ": " + a.text }
+        return AutoRouteSummaryLine(id: "advisory-\(a.area)", label: label, value: value, isWarning: a.source == 4 || a.kind == 2)
+    }
+
     /// "65.0 ft", "not charted", "none".
     static func clearanceText(_ dm: Int, units: UnitPreferences) -> String {
         if dm == 0xFFFF { return "none" }
@@ -430,6 +449,18 @@ public enum AutoRoutePresenter {
             }
             lines.append(AutoRouteSummaryLine(id: "unknownClearance", label: "Clearance not charted",
                                               value: "\(s.unknownClearances.count): " + names.joined(separator: "; "), isWarning: true))
+        }
+        if !s.locks.isEmpty {
+            let names: [String] = s.locks.map { run in
+                run.name.isEmpty ? "lock or floodgate at " + NavFormat.position(run.centroid.coordinate) : run.name
+            }
+            lines.append(AutoRouteSummaryLine(id: "locks", label: "Locks and floodgates",
+                                              value: "\(s.locks.count): " + names.joined(separator: "; ")
+                                                  + " (operation, hours and restrictions not known to the app)",
+                                              isWarning: true))
+        }
+        for advisory in s.advisories {
+            lines.append(advisoryLine(advisory))
         }
         lines.append(snapLine(id: "startSnap", label: "Start", meters: result.start.snapMeters, units: units))
         lines.append(snapLine(id: "goalSnap", label: "Destination", meters: result.goal.snapMeters, units: units))

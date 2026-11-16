@@ -135,10 +135,29 @@ def test_grading_reasons(rt):
     res = rt.route((-81.9995, 27.0015), (-81.9925, 27.0015), Profile(4, 1, 20, use_maintained=True))
     assert res["ok"] and len(res["legs"]) == 1
     leg = res["legs"][0]
-    assert leg["grade"] == "yellow" and leg["reasons"] == ["MAINTAINED_DEPTH", "BRIDGE_OPENING"]
+    assert leg["grade"] == "yellow" and leg["reasons"] == ["MAINTAINED_DEPTH", "BRIDGE_OPENING", "LOCK"]
     s = res["summary"]
     assert s["openings"][0]["name"] == "Test Opening Bridge" and s["shallowest"]["depth_dm"] == 9
     assert s["shallowest"]["maintained"] is True
+    assert [x["name"] for x in s["locks"]] == ["Test Lock"] and s["locks"][0]["area"] == 3
+    assert s["advisories"] == []
+
+
+def test_advisories_listed_once_and_not_on_legs(rt):
+    res = rt.route((-81.9995, 27.0035), (-81.9985, 27.0025), Profile(1, 0.5, 5))
+    assert res["ok"] and all(leg["grade"] == "green" for leg in res["legs"])
+    assert [(a["area"], a["name"]) for a in res["summary"]["advisories"]] == [(4, "Test Sanctuary"), (5, "Chart datum")]
+    assert res["summary"]["advisories"][1]["source"] == 4
+
+
+def test_legs_follow_real_turns_only(rt):
+    """B.8: a straight passage through open water is one leg, whatever the triangles."""
+    # (a line through a grid vertex would be split there: B.8 walks treat touching a vertex as blocked)
+    res = rt.route((-81.9965, 27.0035), (-81.99345, 27.00255), Profile(1, 0.5, 5))
+    assert res["ok"] and len(res["legs"]) == 1 and len(res["corridor"]) >= 6
+    # every leg lies in passable triangles of the reported corridor, which is a chain of neighbours
+    cor = res["corridor"]
+    assert all(cor[i + 1] in rt.nbr[cor[i]] for i in range(len(cor) - 1))
 
 
 def test_no_route_reports_blocked_place_and_hint(rt):

@@ -182,9 +182,9 @@ created by tapping the chart, saved, drawn and followed; the debug GPX sample's 
 until legs advance and arrival is announced; a recording killed mid-way, resumed on relaunch, stopped,
 listed and drawn; GPX import plan, duplicate re-import and export; the speed unit setting applied and kept
 across a relaunch. In `AutoRouteUITests.swift`: the auto-route notice gates planning and is remembered after a
-relaunch; RT Longboat → RT Marina Jack (vectors q1) plans 28 green legs, is drawn (`plannedLegs:28`), saved, shown
+relaunch; RT Longboat → RT Marina Jack (vectors q1) plans 7 green legs, is drawn (`plannedLegs:7`), saved, shown
 in Routes with its Route check, and followed; RT Marina Jack → RT Roberts Bay (q4) has no route with one blocked
-place on the chart (`blocked:1`) and the "use maintained channels" hint, which plans 55 legs (39 green, 16 yellow,
+place on the chart (`blocked:1`) and the "use maintained channels" hint, which plans 11 legs (5 green, 6 yellow,
 as q3) that are saved and followed after the yellow-leg confirmation; boat profiles are added, edited, made
 default and deleted, and kept across a relaunch. App state is read from a second debug-only element, `app.status`
 (`PlotterModel.statusValue`: `waypoints=… routes=… tracks=… recording=… trackPoints=… trackStored=… nav=…

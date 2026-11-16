@@ -192,6 +192,8 @@ def cmd_vectors(a):
     sp = out / "synthetic.pack"
     packfmt.write_pack(synth.build_synthetic(), sp, with_adjacency=True)
     vectors.make_vectors(sp, vectors.SYNTH_QUERIES, out / "synthetic.vectors.json")
+    # the same pack in format 1.1 (no ADVS, 17-byte ATTR rows): readers must still accept it
+    packfmt.write_pack(synth.build_synthetic(), out / "synthetic-v11.pack", with_adjacency=True, minor=1)
     (out / "synthetic.records.json").write_text(json.dumps(vectors.dump_records(sp), indent=1, default=vectors._np))
     src_region, bbox = config.CUTS["sarasota"]
     big = packfmt.read_pack(_pack_path(_region(src_region)))

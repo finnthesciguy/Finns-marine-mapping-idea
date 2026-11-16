@@ -69,7 +69,7 @@ struct PilotPerformanceTests {
               + "derivedAdjacency=\(pack.adjacencyWasDerived); arrays \(MemoryProbe.mb(pack.memoryFootprintBytes)); "
               + "RSS before \(MemoryProbe.mb(before.current)) after \(MemoryProbe.mb(after.current)); "
               + "peak \(MemoryProbe.mb(after.peak)) (peak before load \(MemoryProbe.mb(before.peak)))")
-        #expect(pack.triangleCount == 860_420)
+        if pack.regionID == "pilot" { #expect(pack.triangleCount == 850_384) }   // a region pack has its own count
         // Repeat to get a steady-state load time.
         var best = loadTime
         for _ in 0..<2 {
@@ -123,6 +123,38 @@ struct PilotPerformanceTests {
         #expect(matched == queries.count)
     }
 
+    /// Memory on a region pack: peak while loading, resident after loading, and peak while the reference queries run
+    /// (start, goal and profile only, so the expected results are not held in memory).
+    @Test func queryMemory() throws {
+        guard let p = pilotVectorsPath else { return }
+        let queries: [MemoryQuery]
+        do {
+            let d = JSONDecoder()
+            d.keyDecodingStrategy = .convertFromSnakeCase
+            queries = try d.decode(MemoryQueryFile.self, from: Data(contentsOf: URL(fileURLWithPath: p))).queries
+        }
+        MemoryProbe.resetPeak()
+        let before = MemoryProbe.rss()
+        let clock = ContinuousClock()
+        let t0 = clock.now
+        let pack = try RoutingPack(contentsOf: URL(fileURLWithPath: pilotPackPath!))
+        let load = seconds(clock.now - t0)
+        let after = MemoryProbe.rss()
+        MemoryProbe.resetPeak()
+        var slowest = 0.0
+        for q in queries {
+            let t = clock.now
+            _ = try? pack.routeSynchronously(q.request)
+            slowest = max(slowest, seconds(clock.now - t))
+        }
+        let end = MemoryProbe.rss()
+        print("[memory \(buildKind)] \(pack.regionID): T=\(pack.triangleCount) classes=\(pack.attributeClassCount) "
+              + "load \(String(format: "%.2f", load)) s; arrays \(MemoryProbe.mb(pack.memoryFootprintBytes)); "
+              + "RSS before load \(MemoryProbe.mb(before.current)), after load \(MemoryProbe.mb(after.current)), "
+              + "peak during load \(MemoryProbe.mb(after.peak)); peak during \(queries.count) queries \(MemoryProbe.mb(end.peak)) "
+              + "(slowest \(String(format: "%.2f", slowest)) s)")
+    }
+
     /// Cancelling a long query mid-search returns promptly.
     @Test func cancellationLatency() async throws {
         let pack = try RoutingPack(contentsOf: URL(fileURLWithPath: pilotPackPath!))
@@ -147,4 +179,21 @@ struct PilotPerformanceTests {
         #expect(code == "CANCELLED")
         #expect(latency < 0.5)
     }
+}
+
+struct MemoryQuery: Decodable {
+    var start: [Double]
+    var goal: [Double]
+    var profile: VectorProfile
+    var maxSnapM: Double
+
+    var request: RouteRequest {
+        RouteRequest(start: Coordinate(latitude: start[1], longitude: start[0]),
+                     goal: Coordinate(latitude: goal[1], longitude: goal[0]),
+                     profile: profile.boatProfile, maxSnapMeters: maxSnapM)
+    }
+}
+
+struct MemoryQueryFile: Decodable {
+    var queries: [MemoryQuery]
 }

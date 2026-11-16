@@ -1,6 +1,6 @@
 # Routing-pack build: operator guide
 
-Status: Wave 4, 2026-11-14. Code: [`pipeline/routing`](../pipeline/routing). Format: [routing-pack-format.md](routing-pack-format.md) (1.1, unchanged by Wave 4). Workflow: [`.github/workflows/routing-build.yml`](../.github/workflows/routing-build.yml) (manual only, uploads workflow artifacts, publishes nothing).
+Status: Wave 4 round 2, 2026-11-15 (builder 3.1.1). Code: [`pipeline/routing`](../pipeline/routing). Format: [routing-pack-format.md](routing-pack-format.md) (1.2: locks, area-wide advisories, new leg construction; packs must be rebuilt, readers still accept 1.0 and 1.1). Workflow: [`.github/workflows/routing-build.yml`](../.github/workflows/routing-build.yml) (manual only, uploads workflow artifacts, publishes nothing).
 
 ## 1. What is built
 
@@ -8,15 +8,15 @@ One routing pack per chart region, with the chart region's id, so it installs al
 
 | pack | chart region | routing area |
 |---|---|---|
-| `ncds_10` | Tampa Bay to the Keys and Dry Tortugas | chart box + 30 nm, inside the Gulf AOI |
+| `ncds_10` | Tampa Bay to the Keys and Dry Tortugas | chart box + 15 nm, inside the Gulf AOI |
 | `ncds_11` | Tarpon Springs to Biloxi | same rule |
 | `ncds_12` | Mississippi River, Lake Pontchartrain, Louisiana waterways | same rule |
 | `ncds_13` | Louisiana coast south of 29.33° N | same rule |
 | `ncds_14` | Sabine to Brownsville | same rule |
 
-**Overlap policy.** The on-device engine routes inside one pack only. Every pack therefore extends 30 nautical miles past its chart box on every side (clipped to pipeline/catalog's Gulf area of interest). Any passage that starts in a chart region and ends less than 30 nm past its edge can be planned in that region's pack. Examples: Clearwater to Anclote and St. Petersburg to Anclote (10/11 line at 28.1° N); Gulfport to Mobile and Biloxi to the Rigolets (11/12 line at 89.07° W); Grand Isle, Venice and Port Fourchon to New Orleans (12/13 line at 29.33° N, which cuts across the delta: the ncds_12 pack reaches 28.83° N and holds the whole delta, the ncds_13 pack reaches 29.83° N and holds Houma and Morgan City); Intracoastal City to Cameron (13/14 line at 92.46° W). The upper Keys east of 80.6° W, outside every chart box, are in the ncds_10 pack.
+**Overlap policy.** The on-device engine routes inside one pack only. Every pack therefore extends 15 nautical miles past its chart box on every side (clipped to pipeline/catalog's Gulf area of interest; 30 nm until round 2, when 37 % of all stored triangles were overlap copies). Any passage that starts in a chart region and ends less than 15 nm past its edge can be planned in that region's pack. Examples: Clearwater to Anclote and St. Petersburg to Anclote (10/11 line at 28.1° N; Gulfport FL to Anclote now only in ncds_10); Gulfport to Mobile and Biloxi to the Rigolets (11/12 line at 89.07° W); Grand Isle, Venice and Port Fourchon to New Orleans (12/13 line at 29.33° N: the ncds_12 pack reaches 29.08° N and holds Head of Passes and Grand Isle; the ncds_13 pack reaches 29.58° N, so Houma's floodgate is in it but Morgan City is not — Atchafalaya Bay to Morgan City is now an ncds_12 route); Intracoastal City to Cameron (13/14 line at 92.46° W; the ncds_14 pack reaches 92.16° W, just past Freshwater Bayou). The upper Keys east of 80.6° W, outside every chart box, are in the ncds_10 pack.
 
-**Cost of the overlap.** 36.8 % of all stored triangles are overlap copies: 18.3 million triangles in the five packs against 11.6 million unique (about 89 MB of packs against about 57 MB without overlap). The share per pack is 15 % (ncds_10), 48 % (ncds_11), 35 % (ncds_12), 67 % (ncds_13) and 5 % (ncds_14). Packs remain below 23 MB.
+**Sizes.** The five packs are 12.0 / 12.7 / 15.1 / 8.0 / 13.0 MB (61 MB, 12.5 million triangles), against 13.2 / 20.1 / 22.8 / 18.6 / 14.5 MB (89 MB, 18.3 million triangles) before round 2. The reduction comes from the 15 nm overlap and from not meshing water no boat can use far from live water (format spec C.10a).
 
 **What still cannot be planned in one go.** A passage longer than the overlap across a region line, for example Texas to Florida, Morgan City to Galveston, Pensacola to Tampa, or Sarasota to Cedar Key. The app already refuses it with "Start and destination in different regions … plan to a point inside one region first". It should say which region line the passage crosses and suggest the hand-over points that both packs hold (for example "plan to Gulfport, then from Gulfport to Mobile"). A cross-pack planner (stitching two packs at a shared tile edge) is the real fix; the tiles of the overlap are identical in both packs, which makes such stitching possible later.
 
@@ -59,7 +59,17 @@ The slowest single tile takes 20 s (Louisiana marsh, up to 274,000 triangles per
 
 A whole-Gulf cold build is therefore roughly 20 minutes of compute; the 120-minute workflow limit leaves room for slow servers. Disk: about 3.5 GB of caches (zips 126 MB, extractions 626 MB, merged cells 472 MB, tiles 1.3 GB, unzipped cells 320 MB which may be deleted).
 
-On the device (RoutingKit release build, Linux): the largest pack (ncds_12, 4.75 M triangles) loads in 1.39 s with 233 MB of arrays, 263 MB resident after load and 332 MB peak; the 27 reference queries ran in 0.01–3.3 s with a peak of 323 MB. The pilot pack was 80 MB.
+On the device (RoutingKit release build, Linux, glibc with `MALLOC_MMAP_THRESHOLD_=131072` so that freed large buffers are returned as on iOS; process RSS including a 25 MB test-process baseline):
+
+| | before round 2 (4.75 M triangles, old RoutingKit) | round 2 (3.19 M triangles) |
+|---|---|---|
+| decoded arrays | 233 MB | 116 MB |
+| resident after load | 258 MB | 142 MB |
+| peak while loading | 333 MB | 184 MB |
+| peak while running the 27 reference queries | 319 MB | 180 MB |
+| load time | 1.47 s | 1.6 s |
+
+With glibc's default (dynamic) mmap threshold the round 2 numbers are 183 / 202 / 188 MB, because glibc keeps freed decoder buffers in its heap. The saving is about half from the smaller pack and half from RoutingKit (attribute classes: 4 bytes per triangle instead of 17; adjacency derived from per-vertex corner lists; ATTR decoded before the mesh arrays; search state allocated in pages on first touch). The remaining load peak is the derived adjacency (about 16 bytes per triangle, transient).
 
 ## 4. Incremental rebuilds
 
@@ -112,12 +122,6 @@ A route that changes class (strict, maintained, relaxed, failed) between two rel
 
 In the workflow, the caches are kept with `actions/cache` between runs.
 
-## 8. Builder rules that differ from routing-pack-format.md part C
+## 8. Builder rules
 
-Part C still describes the Wave 2 builder; these Wave 4 changes need to be written into it (the file format, parts A and B, is unchanged):
-
-- **C.1** Cells of band 3 (coastal) and better only; band 1–2 cells are not used. Each cell is clipped to its exclusive region on its own (claimed area closed by 5 m in a local transverse Mercator); a cell without M_COVR falls back to its catalog coverage.
-- **C.10** Mesh per 0.2° tile, in a transverse Mercator centred on the tile, with input features clipped to the tile plus 600 m and constraint lines to the tile plus 200 m; the tile edges are constraint lines; tiles are joined by exact T-junction splitting and the whole mesh must pass A.9 and the exact area check. The size grid is 0.02° only in 0.1° cells within 3 km of land or structures, and 0.1° elsewhere (was 0.02° everywhere).
-- **C.11** The open-Gulf mask is derived: on a 0.002° raster, water farther than 5 km from land, connected to water charted ≥ 30 ft deep and ≥ 10 km from land, grown back by 5 km (the opening of the open water by a 5 km disk). Passes and gaps narrower than 10 km are sealed; no hand-placed seeds or barrier lines.
-- **C.6** Duplicate cables: the one with the smallest feature key is kept. Side-table order is by feature key (cell + LNAM), so "lowest index wins" ties are tiling-independent.
-- **C.8** HIGHWAY from NCF centrelines exists only where the NCF marks centrelines (Jacksonville district, Florida west coast); elsewhere only the ENC ICW recommended track counts.
+Part C of the format document is current for builder 3.1.0 (the Wave 4 tiled build and the round 2 rules: locks and floodgates C.2a, extended sounding raise C.4b, area-wide advisories C.7a, water no boat can use C.10a). The derived layers (`derived.py`) are computed once per build for the whole Gulf; the extended sounding raise takes about 3 minutes and is cached under `sndext/gulf.<key>.pkl` (key: every merged cell, the parameters and `EXT_VERSION`).

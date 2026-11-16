@@ -36,6 +36,8 @@ public final class RoutingPack: Sendable {
     public let channels: [Channel]
     /// `AREA` records.
     public let areas: [RegulatedArea]
+    /// `ADVS` (format 1.2): sets of area-wide `AREA` indices; set 0 is empty. `[[]]` for older packs.
+    public let advisorySets: [[Int]]
     /// GRID parameters.
     public let gridInfo: GridIndexInfo
 
@@ -46,16 +48,9 @@ public final class RoutingPack: Sendable {
     let tris: ContiguousArray<Int32>
     /// 3 neighbour triangles per triangle, -1 = boundary.
     let nbr: ContiguousArray<Int32>
-    // ATTR columns.
-    let depth: ContiguousArray<Int16>
-    let band: ContiguousArray<Int16>
-    let maint: ContiguousArray<Int16>
-    let clr: ContiguousArray<UInt16>
-    let flags: ContiguousArray<UInt16>
-    let chan: ContiguousArray<UInt16>
-    let ovhd: ContiguousArray<UInt16>
-    let area: ContiguousArray<UInt16>
-    let quality: ContiguousArray<UInt8>
+    // ATTR: each triangle's attribute class, and the classes' columns.
+    let attrClass: ContiguousArray<UInt32>
+    let classes: AttributeClasses
     // GRID: ids of cell c are gridIDs[gridOffsets[c] ..< gridOffsets[c+1]].
     let gridOffsets: ContiguousArray<UInt32>
     let gridIDs: ContiguousArray<Int32>
@@ -125,20 +120,14 @@ public final class RoutingPack: Sendable {
         hazards = c.hazards
         channels = c.channels
         areas = c.areas
+        advisorySets = c.advisorySets
         gridInfo = c.gridInfo
         lon = c.lon
         lat = c.lat
         tris = c.tris
         nbr = c.nbr
-        depth = c.depth
-        band = c.band
-        maint = c.maint
-        clr = c.clr
-        flags = c.flags
-        chan = c.chan
-        ovhd = c.ovhd
-        area = c.area
-        quality = c.quality
+        attrClass = c.attrClass
+        classes = c.classes
         gridOffsets = c.gridOffsets
         gridIDs = c.gridIDs
         geom = c.geom
@@ -155,7 +144,9 @@ public final class RoutingPack: Sendable {
     /// The chart data date shown to the user.
     public var dataDate: PackDate { header.dataDate }
     public var vertexCount: Int { lon.count }
-    public var triangleCount: Int { depth.count }
+    public var triangleCount: Int { attrClass.count }
+    /// Number of distinct `ATTR` rows (attribute classes).
+    public var attributeClassCount: Int { classes.count }
     /// Number of strings in `STRS`.
     public var stringCount: Int { stringOffsets.count - 1 }
 
@@ -174,9 +165,22 @@ public final class RoutingPack: Sendable {
 
     /// The `ATTR` columns of triangle `t`.
     public func attributes(_ t: Int) -> TriangleAttributes {
-        TriangleAttributes(depthDm: depth[t], bandDepthDm: band[t], maintDm: maint[t], clearanceDm: clr[t],
-                           flags: flags[t], channel: chan[t], overhead: ovhd[t], area: area[t], quality: quality[t])
+        let k = Int(attrClass[t])
+        let c = classes
+        return TriangleAttributes(depthDm: c.depth[k], bandDepthDm: c.band[k], maintDm: c.maint[k], clearanceDm: c.clr[k],
+                                  flags: c.flags[k], channel: c.chan[k], overhead: c.ovhd[k], area: c.area[k],
+                                  quality: c.quality[k], advisory: c.advisory[k])
     }
+
+    // Per-triangle columns through the attribute class.
+    @inline(__always) func depth(_ t: Int) -> Int16 { classes.depth[Int(attrClass[t])] }
+    @inline(__always) func maint(_ t: Int) -> Int16 { classes.maint[Int(attrClass[t])] }
+    @inline(__always) func clearance(_ t: Int) -> UInt16 { classes.clr[Int(attrClass[t])] }
+    @inline(__always) func flags(_ t: Int) -> UInt16 { classes.flags[Int(attrClass[t])] }
+    @inline(__always) func overheadIndex(_ t: Int) -> UInt16 { classes.ovhd[Int(attrClass[t])] }
+    @inline(__always) func areaIndex(_ t: Int) -> UInt16 { classes.area[Int(attrClass[t])] }
+    @inline(__always) func quality(_ t: Int) -> UInt8 { classes.quality[Int(attrClass[t])] }
+    @inline(__always) func advisorySet(_ t: Int) -> Int { Int(classes.advisory[Int(attrClass[t])]) }
 
     /// String `id` of `STRS` (empty for an out-of-range id).
     public func string(_ id: UInt32) -> String {
@@ -242,7 +246,7 @@ public final class RoutingPack: Sendable {
     /// Approximate bytes held by the decoded arrays (excluding small side tables' Swift overhead).
     public var memoryFootprintBytes: Int {
         lon.count * 4 + lat.count * 4 + tris.count * 4 + nbr.count * 4
-            + depth.count * 17 + gridOffsets.count * 4 + gridIDs.count * 4 + geom.count * 4
+            + attrClass.count * 4 + classes.memoryBytes + gridOffsets.count * 4 + gridIDs.count * 4 + geom.count * 4
             + stringOffsets.count * 4 + stringBlob.count + hazardBoxes.count * 4 + overheadBoxes.count * 4
             + overheadObjects.count * MemoryLayout<OverheadObject>.stride + hazards.count * MemoryLayout<Hazard>.stride
             + channels.count * MemoryLayout<Channel>.stride + areas.count * MemoryLayout<RegulatedArea>.stride

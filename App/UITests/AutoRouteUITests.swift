@@ -1,14 +1,14 @@
 import XCTest
 
 /// Auto-routing (deliverable 3 of the auto-route piece). The app is launched with
-/// `GULFNAV_PREINSTALL_FIXTURE_ROUTING=1`: the bundled `sarasota.pack` (216 KB, debug builds only) is
+/// `GULFNAV_PREINSTALL_FIXTURE_ROUTING=1`: the bundled `sarasota.pack` (214 KB, debug builds only) is
 /// side-loaded, waypoints "RT Longboat", "RT Marina Jack" and "RT Roberts Bay" are added at points from
 /// `testdata/routing/sarasota.vectors.json`, and the simulated GPS runs in Sarasota Bay. Expected results are
 /// those of the vectors (and of the AppServices tests that reproduce them):
 ///
-/// - RT Longboat → RT Marina Jack (q1): 28 legs, all green, 5.70 nm.
+/// - RT Longboat → RT Marina Jack (q1): 7 legs, all green, 5.54 nm.
 /// - RT Marina Jack → RT Roberts Bay with the default profile (q4): no route (DEPTH), one blocked place,
-///   hint "use maintained channels"; with the hint applied (q3): 55 legs, 39 green, 16 yellow.
+///   hint "use maintained channels"; with the hint applied (q3): 11 legs, 5 green, 6 yellow.
 ///
 /// State is read from `app.status` (`notice`, `planState`, `planLegs`, `planGreen`, `planYellow`,
 /// `planBlocked`, `planHints`, `planPack`, `routingPacks`, `planSaved`, `profiles`, `defaultProfile`) and the
@@ -72,10 +72,10 @@ extension GulfNavUITests {
         XCTAssertTrue(plan.waitForExistence(timeout: GulfNavUITests.stepTimeout))
         plan.tap()
         waitForStatus(app, "planState", "proposal", timeout: GulfNavUITests.planTimeout)
-        XCTAssertEqual(GulfNavUITests.statusField(app, "planLegs"), "28")
-        XCTAssertEqual(GulfNavUITests.statusField(app, "planGreen"), "28")
+        XCTAssertEqual(GulfNavUITests.statusField(app, "planLegs"), "7")
+        XCTAssertEqual(GulfNavUITests.statusField(app, "planGreen"), "7")
         XCTAssertEqual(GulfNavUITests.statusField(app, "planYellow"), "0")
-        waitForOverlay(app, "plannedLegs", equals: 28)
+        waitForOverlay(app, "plannedLegs", equals: 7)
         GulfNavUITests.logMapStatus(app, "autoroute-proposal")
         attachScreenshot(app, "autoroute-proposal")
 
@@ -85,7 +85,7 @@ extension GulfNavUITests {
         waitForStatus(app, "routes", "1")
         waitForStatus(app, "planState", "idle")
         waitForOverlay(app, "plannedLegs", equals: 0)
-        waitForOverlay(app, "routeLegs", equals: 28)
+        waitForOverlay(app, "routeLegs", equals: 7)
         app.buttons["autoroute.done"].tap()
 
         // In Routes, with its Route check summary.
@@ -95,12 +95,12 @@ extension GulfNavUITests {
         XCTAssertEqual(name.label, "RT Longboat to RT Marina Jack")
         name.tap()
         let legs: XCUIElement = scrollTo(app, "route.check.legs")
-        XCTAssertEqual(legs.label, "28 legs: 28 green, 0 yellow")
+        XCTAssertEqual(legs.label, "7 legs: 7 green, 0 yellow")
         #if targetEnvironment(macCatalyst)
         // "Distance" is the row above "Legs": scrolling to "Legs" can push it off the top.
         scrollTo(app, "route.check.distance", downwards: true)
         #endif
-        XCTAssertEqual(GulfNavUITests.element(app, "route.check.distance").label, "5.70 nm")
+        XCTAssertEqual(GulfNavUITests.element(app, "route.check.distance").label, "5.54 nm")
         #if targetEnvironment(macCatalyst)
         // Mac: the Route check rows below "legs" may be under the fold of the 800 x 632 window's sheet.
         scrollTo(app, "route.check.data")
@@ -147,10 +147,10 @@ extension GulfNavUITests {
         let hint: XCUIElement = scrollTo(app, "autoroute.hint.useMaintainedChannels")
         hint.tap()
         waitForStatus(app, "planState", "proposal", timeout: GulfNavUITests.planTimeout)
-        XCTAssertEqual(GulfNavUITests.statusField(app, "planLegs"), "55")
-        XCTAssertEqual(GulfNavUITests.statusField(app, "planGreen"), "39")
-        XCTAssertEqual(GulfNavUITests.statusField(app, "planYellow"), "16")
-        waitForOverlay(app, "plannedLegs", equals: 55)
+        XCTAssertEqual(GulfNavUITests.statusField(app, "planLegs"), "11")
+        XCTAssertEqual(GulfNavUITests.statusField(app, "planGreen"), "5")
+        XCTAssertEqual(GulfNavUITests.statusField(app, "planYellow"), "6")
+        waitForOverlay(app, "plannedLegs", equals: 11)
         waitForOverlay(app, "blocked", equals: 0)
         attachScreenshot(app, "autoroute-hint-applied")
 
@@ -161,7 +161,7 @@ extension GulfNavUITests {
         waitForStatus(app, "planSaved", "RT Marina Jack to RT Roberts Bay")
         waitForStatus(app, "routes", "1")
         waitForStatus(app, "nav", "route")
-        waitForOverlay(app, "routeLegs", equals: 55)
+        waitForOverlay(app, "routeLegs", equals: 11)
         GulfNavUITests.logMapStatus(app, "autoroute-hint-follow")
         attachScreenshot(app, "autoroute-hint-follow")
     }

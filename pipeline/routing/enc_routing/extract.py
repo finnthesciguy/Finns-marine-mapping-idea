@@ -36,8 +36,8 @@ LAYERS: dict[str, list[str]] = {
     "FLODOC": [],
     "DRYDOC": [],
     "CAUSWY": ["WATLEV"],
-    "DAMCON": [],
-    "GATCON": [],
+    "DAMCON": ["CATDAM"],
+    "GATCON": ["CATGAT"],
     "DYKCON": [],
     # hazards
     "OBSTRN": ["VALSOU", "WATLEV", "CATOBS", "QUASOU", "EXPSOU"],
@@ -80,7 +80,7 @@ LAYERS: dict[str, list[str]] = {
     "SMCFAC": ["CATSCF"],
 }
 
-EXTRACT_VERSION = "v3"  # bump when LAYERS or read_cell change (part of the cache path)
+EXTRACT_VERSION = "v4"  # bump when LAYERS or read_cell change (part of the cache path)
 
 # DSPM values every NOAA Gulf cell is expected to carry (verified on the pilot):
 # WGS 84, soundings at MLLW, heights above MHW, metres for depth and height.

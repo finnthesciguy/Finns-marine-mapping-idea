@@ -39,6 +39,7 @@ def test_roundtrip_synthetic(synth_pack):
     assert q.strings == src.strings
     assert np.array_equal(q.overhead, src.overhead) and np.array_equal(q.hazards, src.hazards)
     assert np.array_equal(q.grid["ids"], src.grid["ids"])
+    assert q.advisory_sets == [[], [4], [4, 5]] and np.array_equal(q.areas, src.areas)
 
 
 def test_pack_without_adjacency_derives_the_same(tmp_path):
@@ -54,7 +55,7 @@ def test_header_layout_and_crc(synth_pack):
     buf = synth_pack.read_bytes()
     assert buf[:8] == b"GCRTPACK"
     major, minor, hsize = struct.unpack_from("<HHI", buf, 8)
-    assert (major, minor, hsize) == (1, 1, 256)
+    assert (major, minor, hsize) == (1, 2, 256)
     assert struct.unpack_from("<I", buf, 16)[0] == len(buf)
     n = struct.unpack_from("<I", buf, 20)[0]
     assert struct.unpack_from("<I", buf, 108)[0] == zlib.crc32(buf[256:256 + 32 * n])
@@ -132,22 +133,69 @@ def _entry(buf, tag):
     raise KeyError(tag)
 
 
-def test_reader_accepts_format_1_0(synth_pack):
-    buf = bytearray(synth_pack.read_bytes())
+def _old_format_copy(tmp_path):
+    """The synthetic pack written as format 1.1 (no ADVS, 17-byte ATTR rows) and patched to 1.0."""
+    src = synth.build_synthetic()
+    p11 = tmp_path / "v11.pack"
+    P.write_pack(src, p11, with_adjacency=True, minor=1)
+    buf = bytearray(p11.read_bytes())
     struct.pack_into("<H", buf, 10, 0)       # minor 0
     struct.pack_into("<I", buf, 108, 0)      # reserved in 1.0: no section-table CRC
+    return src, p11, buf
+
+
+def test_reader_accepts_format_1_0_and_1_1(tmp_path):
+    src, p11, buf = _old_format_copy(tmp_path)
+    v11 = P.read_pack(p11)
     old = P.decode_pack(_fix_crcs(buf, table_crc=False))
-    new = P.read_pack(synth_pack)
-    assert old.header["minor"] == 0 and new.header["minor"] == 1
-    assert np.array_equal(old.tris, new.tris) and np.array_equal(old.nbr, new.nbr)
+    assert old.header["minor"] == 0 and v11.header["minor"] == 1
+    for q in (old, v11):
+        assert np.array_equal(q.tris, src.tris) and np.array_equal(q.nbr, src.nbr)
+        assert not q.attrs["advisory"].any() and q.advisory_sets == [[]]
+        assert "ADVS" not in [s["name"] for s in q.sections]
+        for k, _ in P.ATTR_COLUMNS:
+            if k != "advisory":
+                assert np.array_equal(q.attrs[k], src.attrs[k]), k
     # a 1.0 file has no table CRC, so a table change is not detected by a checksum ...
     struct.pack_into("<I", buf, _entry(buf, b"INFO") + 28, 5)  # INFO count is informative
     P.decode_pack(_fix_crcs(buf, table_crc=False))
-    # ... but in 1.1 it is
-    buf = bytearray(synth_pack.read_bytes())
+    # ... but from 1.1 on it is
+    buf = bytearray(p11.read_bytes())
     struct.pack_into("<I", buf, _entry(buf, b"INFO") + 28, 5)
     with pytest.raises(P.PackError, match="section table CRC"):
         P.decode_pack(bytes(buf))
+
+
+def test_format_1_1_file_with_1_2_rows_is_rejected(tmp_path, synth_pack):
+    buf = bytearray(synth_pack.read_bytes())
+    struct.pack_into("<H", buf, 10, 1)       # claims 1.1 but holds 19-byte ATTR rows
+    with pytest.raises(P.PackError, match="ATTR"):
+        P.decode_pack(_fix_crcs(buf))
+
+
+@pytest.mark.parametrize("case", ["not_ascending", "not_area_wide", "set0_not_empty", "attr_out_of_range",
+                                  "missing"])
+def test_reader_checks_advisory_sets(tmp_path, case):
+    src = synth.build_synthetic()
+    if case == "not_ascending":
+        src.advisory_sets = [[], [4], [5, 4]]
+    elif case == "not_area_wide":
+        src.advisory_sets = [[], [2], [4, 5]]
+    elif case == "set0_not_empty":
+        src.advisory_sets = [[4], [4], [4, 5]]
+    elif case == "attr_out_of_range":
+        src.advisory_sets = [[], [4]]
+    p = tmp_path / f"{case}.pack"
+    P.write_pack(src, p, with_adjacency=True)
+    if case == "missing":
+        buf = bytearray(p.read_bytes())
+        e = _entry(buf, b"ADVS")
+        buf[e:e + 4] = b"ADVX"                # an unknown tag: ADVS is then missing from a 1.2 file
+        with pytest.raises(P.PackError, match="missing section ADVS"):
+            P.decode_pack(_fix_crcs(buf))
+        return
+    with pytest.raises(P.PackError, match="ADVS|advisory"):
+        P.read_pack(p)
 
 
 def _mutations(buf):

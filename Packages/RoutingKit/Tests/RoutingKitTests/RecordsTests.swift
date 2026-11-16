@@ -326,9 +326,9 @@ func geomFields(_ pts: [GridPoint]) -> [[Int32]] { pts.map { [$0.x, $0.y] } }
 
     @Test func spec_A10_workedExamples() throws {
         let pack = Fixtures.synthetic
-        #expect(pack.header.formatMajor == 1 && pack.header.formatMinor == 1 && pack.header.fileSize == 1824)
-        #expect(pack.header.tableCRC32 == 0x0387_020D)
-        #expect(pack.header.headerCRC32 == 0x34A0_171D)
+        #expect(pack.header.formatMajor == 1 && pack.header.formatMinor == 2 && pack.header.fileSize == 2048)
+        #expect(pack.header.tableCRC32 == 0xAE5E_4CE1)
+        #expect(pack.header.headerCRC32 == 0xE2E9_4AFD)
         #expect(pack.sections[3].tag == "VERT" && pack.sections[3].encoding == 1 && pack.sections[3].rawLength == 182)
         #expect(pack.vertex(1) == GridPoint(x: -819_990_000, y: 270_000_000))
         #expect(pack.vertex(2) == GridPoint(x: -819_990_000, y: 270_010_000))

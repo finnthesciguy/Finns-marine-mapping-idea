@@ -1,10 +1,11 @@
-"""Routing pack binary format, version 1.1: writer and reader.
+"""Routing pack binary format, version 1.2: writer and reader.
 
 The authoritative description is docs/routing-pack-format.md (part A). This
 module depends only on numpy, zlib and struct, and the reader touches nothing
 but the pack file. The reader performs every check of spec A.4, in order, and
 raises PackError for any failure. It also accepts version 1.0 files (no
-section-table checksum).
+section-table checksum) and 1.1 files (no ADVS section, 17-byte ATTR rows):
+they read as packs without locks and without area-wide advisories.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import numpy as np
 
 MAGIC = b"GCRTPACK"
 FORMAT_MAJOR = 1
-FORMAT_MINOR = 1
+FORMAT_MINOR = 2
 HEADER_SIZE = 256
 ENTRY_SIZE = 32
 TABLE_CRC_OFFSET = 108       # u32 CRC-32 of the section table (format 1.1; reserved 0 in 1.0)
@@ -44,19 +45,27 @@ F_OUTSIDE = 1 << 9
 F_REFINED = 1 << 10
 SHORE_SHIFT = 11              # bits 11-12: shore class 0..3
 SHORE_MASK = 3 << SHORE_SHIFT
+F_LOCK = 1 << 13             # format 1.2: in a lock or navigable floodgate zone
 
 FLAG_NAMES = {F_CHANNEL: "CHANNEL", F_HIGHWAY: "HIGHWAY", F_OPENING: "OPENING_BRIDGE",
               F_UNKNOWN_CLR: "UNKNOWN_CLEARANCE", F_RESTRICTED: "RESTRICTED", F_CAUTION: "CAUTION",
               F_NEAR_HAZARD: "NEAR_HAZARD", F_HAZARD_DEPTH: "HAZARD_DEPTH",
-              F_PROHIBITED: "PROHIBITED", F_OUTSIDE: "OUTSIDE", F_REFINED: "SOUNDING_REFINED"}
+              F_PROHIBITED: "PROHIBITED", F_OUTSIDE: "OUTSIDE", F_REFINED: "SOUNDING_REFINED", F_LOCK: "LOCK"}
+
+# AREA kinds and flags (format 1.2 adds kind 4 and the area-wide flag)
+AREA_PROHIBITED, AREA_RESTRICTED, AREA_CAUTION, AREA_LOCK = 1, 2, 3, 4
+AREA_SRC_RESARE, AREA_SRC_CTNARE, AREA_SRC_GATCON, AREA_SRC_DATUM = 1, 2, 3, 4
+AREA_F_AREA_WIDE = 1          # AREA flags bit 0: area-wide advisory (listed once in the route summary)
 
 SECTION_ORDER = ["INFO", "STRS", "SRCS", "VERT", "TRIS", "ADJC", "ATTR", "GRID",
-                 "OVHD", "HAZD", "CHAN", "AREA", "GEOM"]
+                 "OVHD", "HAZD", "CHAN", "AREA", "ADVS", "GEOM"]
 
 ATTR_COLUMNS = [  # (name, numpy dtype) in storage order
     ("depth_dm", "<i2"), ("band_depth_dm", "<i2"), ("maint_dm", "<i2"), ("clearance_dm", "<u2"),
     ("flags", "<u2"), ("channel", "<u2"), ("overhead", "<u2"), ("area", "<u2"), ("quality", "u1"),
+    ("advisory", "<u2"),           # format 1.2: ADVS set index (0 = none); absent (all 0) in 1.0 / 1.1
 ]
+ATTR_ROW_BYTES = {1: 17, 2: 19}    # bytes per triangle by format minor (1.0 as 1.1)
 
 OVHD_DT = np.dtype([("kind", "u1"), ("flags", "u1"), ("catbrg", "<u2"), ("clearance_dm", "<u2"),
                     ("open_clearance_dm", "<u2"), ("hor_clearance_dm", "<u2"), ("reserved", "<u2"),
@@ -68,7 +77,7 @@ HAZD_DT = np.dtype([("cls", "u1"), ("watlev", "u1"), ("category", "u1"), ("geom_
 CHAN_DT = np.dtype([("source", "u1"), ("flags", "u1"), ("maint_dm", "<i2"), ("auth_dm", "<i2"),
                     ("reserved", "<u2"), ("name", "<u4"), ("ident", "<u4"), ("desc", "<u4"),
                     ("date", "<u4"), ("lon", "<i4"), ("lat", "<i4")])
-AREA_DT = np.dtype([("kind", "u1"), ("source", "u1"), ("reserved", "<u2"), ("name", "<u4"),
+AREA_DT = np.dtype([("kind", "u1"), ("source", "u1"), ("flags", "u1"), ("reserved", "u1"), ("name", "<u4"),
                     ("text", "<u4"), ("lon", "<i4"), ("lat", "<i4"), ("reserved2", "<u4", (3,))])
 SRCS_DT = np.dtype([("name", "<u4"), ("edition", "<u2"), ("update", "<u2"), ("issue_date", "<u4"),
                     ("cscale", "<u4"), ("band", "u1"), ("used", "u1"), ("pad", "u1", (6,))])
@@ -157,6 +166,7 @@ class Pack:
     sources: np.ndarray             # SRCS_DT
     geom: np.ndarray                # (G,2) int32 coordinate pool
     info: dict = field(default_factory=dict)
+    advisory_sets: list = field(default_factory=lambda: [[]])  # ADVS: set k = sorted AREA ids; set 0 = []
     nbr: np.ndarray | None = None   # (T,3) int32, -1 = boundary
     grid: dict | None = None        # origin_lon, origin_lat, cell, nx, ny, offsets, ids
     sections: list | None = None    # filled by the reader: section table entries
@@ -326,18 +336,27 @@ def _enc_info(info: dict) -> bytes:
     return "".join(lines).encode("utf-8")
 
 
-def _enc_attrs(attrs, T) -> bytes:
+def _enc_advs(sets) -> bytes:
+    offs = np.concatenate([[0], np.cumsum([len(x) for x in sets])]).astype("<u4")
+    ids = np.array([i for x in sets for i in x], dtype="<u2")
+    return offs.tobytes() + ids.tobytes()
+
+
+def _enc_attrs(attrs, T, minor=FORMAT_MINOR) -> bytes:
     out = []
     for name, dt in ATTR_COLUMNS:
-        a = np.asarray(attrs[name])
+        if name == "advisory" and minor < 2:
+            continue
+        a = np.asarray(attrs[name]) if name in attrs else np.zeros(T, np.int64)
         assert len(a) == T, name
         out.append(a.astype(dt).tobytes())
     return b"".join(out)
 
 
-def write_pack(pack: Pack, path, with_adjacency: bool = True, level: int = 9) -> dict:
+def write_pack(pack: Pack, path, with_adjacency: bool = True, level: int = 9, minor: int = FORMAT_MINOR) -> dict:
     """Write `pack` (vertices/tris must already be canonical) to path.
-    Returns {section: (stored_bytes, raw_bytes)}."""
+    Returns {section: (stored_bytes, raw_bytes)}. minor=1 writes a format 1.1 file (tests only: no ADVS,
+    17-byte ATTR rows; the pack must then have no advisories)."""
     T, V = len(pack.tris), len(pack.vertices)
     if pack.nbr is None:
         pack.nbr, dup = adjacency(pack.tris)
@@ -349,12 +368,13 @@ def write_pack(pack: Pack, path, with_adjacency: bool = True, level: int = 9) ->
         "VERT": (_enc_vertices(pack.vertices, pack.bbox), V),
         "TRIS": (_enc_tris(pack.tris), T),
         "ADJC": (_enc_adj(pack.nbr), T) if with_adjacency else None,
-        "ATTR": (_enc_attrs(pack.attrs, T), T),
+        "ATTR": (_enc_attrs(pack.attrs, T, minor), T),
         "GRID": (_enc_grid(pack.grid), pack.grid["nx"] * pack.grid["ny"]),
         "OVHD": (pack.overhead.tobytes(), len(pack.overhead)),
         "HAZD": (pack.hazards.tobytes(), len(pack.hazards)),
         "CHAN": (pack.channels.tobytes(), len(pack.channels)),
         "AREA": (pack.areas.tobytes(), len(pack.areas)),
+        "ADVS": (_enc_advs(pack.advisory_sets), len(pack.advisory_sets)) if minor >= 2 else None,
         "GEOM": (pack.geom.astype("<i4").tobytes(), len(pack.geom)),
     }
     names = [n for n in SECTION_ORDER if sec.get(n) is not None]
@@ -377,7 +397,7 @@ def write_pack(pack: Pack, path, with_adjacency: bool = True, level: int = 9) ->
     table = b"".join(entries)
     header = struct.pack(
         "<8sHHIIIII32s4iIIIIIHHHHI",
-        MAGIC, FORMAT_MAJOR, FORMAT_MINOR, HEADER_SIZE, file_size, len(names), HEADER_SIZE,
+        MAGIC, FORMAT_MAJOR, minor, HEADER_SIZE, file_size, len(names), HEADER_SIZE,
         1 if with_adjacency else 0, pack.region_id.encode("ascii")[:32].ljust(32, b"\0"),
         *[int(b) for b in pack.bbox], pack.data_date, pack.build_date, pack.build_time, V, T,
         pack.clearance_dm, pack.check_dm, int(pack.shore_rings_m[0]), int(pack.shore_rings_m[1]),
@@ -401,7 +421,7 @@ HEADER_FIELDS = ["magic", "major", "minor", "header_size", "file_size", "section
                  "max_lat", "data_date", "build_date", "build_time", "vertex_count",
                  "triangle_count", "clearance_dm", "check_dm", "shore_ring0_m", "shore_ring1_m",
                  "table_crc32"]
-REQUIRED_SECTIONS = [n for n in SECTION_ORDER if n != "ADJC"]
+REQUIRED_SECTIONS = [n for n in SECTION_ORDER if n not in ("ADJC", "ADVS")]   # ADVS: required from 1.2
 RECORD_SIZES = {"SRCS": SRCS_DT.itemsize, "OVHD": OVHD_DT.itemsize, "HAZD": HAZD_DT.itemsize,
                 "CHAN": CHAN_DT.itemsize, "AREA": AREA_DT.itemsize}
 
@@ -476,14 +496,14 @@ def read_sections(buf: bytes, h: dict) -> dict:
             raise PackError(f"duplicate section {tag}")
         out[tag] = {"stored": stored, "count": count, "encoding": enc, "offset": off,
                     "stored_length": slen, "raw_length": rlen, "crc32": crc}
-    for tag in REQUIRED_SECTIONS:
+    for tag in REQUIRED_SECTIONS + (["ADVS"] if h["minor"] >= 2 else []):
         if tag not in out:
             raise PackError(f"missing section {tag}")
     if ("ADJC" in out) != bool(h["flags"] & 1):
         raise PackError("flag bit 0 (ADJC present) disagrees with the section table")
     for tag, e in out.items():
-        if tag not in SECTION_ORDER:
-            continue  # unknown tags are ignored (layout and CRC are checked above)
+        if tag not in SECTION_ORDER or (tag == "ADVS" and h["minor"] < 2):
+            continue  # unknown tags are ignored (layout and CRC are checked above); ADVS is unknown before 1.2
         stored = e.pop("stored")
         if e["encoding"] == 0:
             raw = bytes(stored)
@@ -500,8 +520,10 @@ def read_sections(buf: bytes, h: dict) -> dict:
         if len(raw) != e["raw_length"]:
             raise PackError(f"section {tag}: raw length mismatch")
         e["raw"] = raw
-    for tag in [t for t in out if t not in SECTION_ORDER]:
+    for tag in [t for t in out if "stored" in out[t]]:
         out[tag].pop("stored")
+    if h["minor"] < 2:
+        out.pop("ADVS", None)
     return out
 
 
@@ -580,6 +602,29 @@ def _dec_grid(raw, count, h):
     offsets[nx * ny] = q
     return {"origin_lon": ox, "origin_lat": oy, "cell": cell, "nx": nx, "ny": ny,
             "offsets": offsets, "ids": ids[:q].astype(np.int32)}
+
+
+def _dec_advs(raw, count, areas) -> list:
+    """ADVS: u32 offsets[K+1], then u16 AREA ids. Set 0 is empty; each set is strictly ascending and
+    names only area-wide AREA records (flags bit 0)."""
+    K = count
+    if K < 1 or len(raw) < 4 * (K + 1):
+        raise PackError("section ADVS: set count")
+    offs = np.frombuffer(raw, dtype="<u4", count=K + 1).astype(np.int64)
+    M = int(offs[K])
+    if offs[0] != 0 or offs[1] != 0 or (np.diff(offs) < 0).any() or len(raw) != 4 * (K + 1) + 2 * M:
+        raise PackError("section ADVS: offsets (set 0 must be empty)")
+    ids = np.frombuffer(raw, dtype="<u2", count=M, offset=4 * (K + 1)).astype(np.int64)
+    if len(ids) and ((ids >= len(areas)).any()
+                     or not (areas["flags"][ids].astype(np.int64) & AREA_F_AREA_WIDE).all()):
+        raise PackError("section ADVS: id is not an area-wide AREA record")
+    sets = []
+    for k in range(K):
+        x = ids[offs[k]:offs[k + 1]]
+        if (np.diff(x) <= 0).any():
+            raise PackError(f"section ADVS: set {k} not strictly ascending")
+        sets.append([int(v) for v in x])
+    return sets
 
 
 def _records(s, tag, dtype):
@@ -696,12 +741,20 @@ def decode_pack(buf: bytes) -> Pack:
         nbr, dup = adjacency(tris)
         if dup:
             raise PackError("section TRIS: a directed edge occurs twice")
+    # ADVS (format 1.2): advisory sets
+    advisory_sets = [[]]
+    if "ADVS" in s:
+        advisory_sets = _dec_advs(s["ADVS"]["raw"], s["ADVS"]["count"], areas)
     # ATTR
     e = s["ATTR"]
-    if e["count"] != T or len(e["raw"]) != 17 * T:
-        raise PackError("section ATTR: length differs from 17 * triangle_count")
+    row = ATTR_ROW_BYTES[2 if h["minor"] >= 2 else 1]
+    if e["count"] != T or len(e["raw"]) != row * T:
+        raise PackError(f"section ATTR: length differs from {row} * triangle_count")
     attrs, o = {}, 0
     for name, dt in ATTR_COLUMNS:
+        if name == "advisory" and row == 17:
+            attrs[name] = np.zeros(T, dtype=dt)
+            continue
         col = np.frombuffer(e["raw"], dtype=dt, count=T, offset=o)
         attrs[name] = col
         o += col.nbytes
@@ -709,6 +762,8 @@ def decode_pack(buf: bytes) -> Pack:
         x = attrs[col].astype(np.int64)
         if ((x != ID_NONE) & (x >= len(table))).any():
             raise PackError(f"section ATTR: {col} reference out of range")
+    if (attrs["advisory"].astype(np.int64) >= len(advisory_sets)).any():
+        raise PackError("section ATTR: advisory set index out of range")
     grid = _dec_grid(s["GRID"]["raw"], s["GRID"]["count"], h)
     info = {}
     for line in s["INFO"]["raw"].decode("utf-8", errors="replace").splitlines():
@@ -720,7 +775,7 @@ def decode_pack(buf: bytes) -> Pack:
         build_time=h["build_time"], clearance_dm=h["clearance_dm"], check_dm=h["check_dm"],
         shore_rings_m=(h["shore_ring0_m"], h["shore_ring1_m"]), vertices=verts, tris=tris,
         attrs=attrs, strings=strings, overhead=overhead, hazards=hazards, channels=channels,
-        areas=areas, sources=sources, geom=geom, info=info, nbr=nbr, grid=grid,
+        areas=areas, sources=sources, geom=geom, info=info, nbr=nbr, grid=grid, advisory_sets=advisory_sets,
     )
     p.sections = [{"name": k, **{kk: vv for kk, vv in v.items() if kk != "raw"}} for k, v in s.items()]
     p.header = h

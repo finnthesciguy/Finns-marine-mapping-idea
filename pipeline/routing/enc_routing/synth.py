@@ -11,9 +11,12 @@ to north (0..3).
   row 2  open 21 dm      | col 4 known-depth hazard zone 15 dm, and an overhead point object (50 m
                            clearance) 4 units north of the row 1/row 2 boundary | col 6 RESTRICTED |
                            col 7 band 9 dm refined to 21 dm
-  row 1  channel 36 dm   (HIGHWAY, NCF maintained 27 dm), col 3 shoaled to 9 dm, col 5 opening bridge closed 18 dm
+  row 1  channel 36 dm   (HIGHWAY, NCF maintained 27 dm), col 3 shoaled to 9 dm, col 5 opening bridge closed 18 dm,
+                           col 6 a lock (LOCK, AREA 3)
   row 0  shallow 6 dm, CATZOC D | col 1 CAUTION | col 2 missing (island)
 
+Area-wide advisories (format 1.2, ADVS): columns 0-3 of row 2 are in set 1 = {AREA 4, a sanctuary};
+columns 0-3 of row 3 in set 2 = {AREA 4, AREA 5, a chart-datum note}.
 All other quality bytes: CATZOC A2, survey 2010.
 """
 from __future__ import annotations
@@ -63,6 +66,10 @@ def square_values(c, r):
     if c == 7 and r == 2:
         d.update(depth=21, band=9)
         d["flags"] |= P.F_REFINED
+    if c == 6 and r == 1:
+        d["flags"] |= P.F_LOCK
+        d["area"] = 3
+    d["advisory"] = (1 if r == 2 else 2 if r == 3 else 0) if c <= 3 else 0
     d["flags"] |= d.pop("shore") << P.SHORE_SHIFT
     return d
 
@@ -92,11 +99,13 @@ def build_synthetic() -> P.Pack:
         "maint_dm": np.array([v["maint"] for v in vals]), "clearance_dm": np.array([v["clr"] for v in vals]),
         "flags": np.array([v["flags"] for v in vals]), "channel": np.array([v["channel"] for v in vals]),
         "overhead": np.array([v["overhead"] for v in vals]), "area": np.array([v["area"] for v in vals]),
-        "quality": np.array([v["q"] for v in vals]),
+        "quality": np.array([v["q"] for v in vals]), "advisory": np.array([v["advisory"] for v in vals]),
     }
     strings = ["", "Test Opening Bridge", "Test Fixed Bridge", "Test Cable", "Test Wreck",
                "Test Channel", "CUT-1", "Approach Cut", "Prohibited Zone", "Restricted Zone",
-               "Caution Zone", "Shoal reported", "US5TEST1", "Test Overhead Point"]
+               "Caution Zone", "Shoal reported", "US5TEST1", "Test Overhead Point", "Test Lock",
+               "Lock: operation and hours not charted", "Test Sanctuary", "Protected area: test regulations",
+               "Chart datum", "Depths refer to a local low-water datum, not MLLW"]
     sid = {s: i for i, s in enumerate(strings)}
 
     def pt(c, r):  # units of a grid node
@@ -133,9 +142,15 @@ def build_synthetic() -> P.Pack:
     hz = np.array([(2, 3, 0, 1, 15, 0, hx + STEP // 2, hy + STEP // 2, *g3, sid["Test Wreck"], 0)], dtype=P.HAZD_DT)
     ch = np.array([(1, 1, 27, 27, 0, sid["Test Channel"], sid["CUT-1"], sid["Approach Cut"], 20260101,
                     LON0 + 40000, LAT0 + 15000)], dtype=P.CHAN_DT)
-    ar = np.array([(1, 1, 0, sid["Prohibited Zone"], 0, LON0 + 65000, LAT0 + 35000, (0, 0, 0)),
-                   (2, 1, 0, sid["Restricted Zone"], 0, LON0 + 65000, LAT0 + 25000, (0, 0, 0)),
-                   (3, 2, 0, sid["Caution Zone"], sid["Shoal reported"], LON0 + 15000, LAT0 + 5000, (0, 0, 0))],
+    ar = np.array([(1, 1, 0, 0, sid["Prohibited Zone"], 0, LON0 + 65000, LAT0 + 35000, (0, 0, 0)),
+                   (2, 1, 0, 0, sid["Restricted Zone"], 0, LON0 + 65000, LAT0 + 25000, (0, 0, 0)),
+                   (3, 2, 0, 0, sid["Caution Zone"], sid["Shoal reported"], LON0 + 15000, LAT0 + 5000, (0, 0, 0)),
+                   (4, 3, 0, 0, sid["Test Lock"], sid["Lock: operation and hours not charted"], LON0 + 65000,
+                    LAT0 + 15000, (0, 0, 0)),
+                   (3, 1, 1, 0, sid["Test Sanctuary"], sid["Protected area: test regulations"], LON0 + 20000,
+                    LAT0 + 30000, (0, 0, 0)),
+                   (3, 4, 1, 0, sid["Chart datum"], sid["Depths refer to a local low-water datum, not MLLW"],
+                    LON0 + 20000, LAT0 + 35000, (0, 0, 0))],
                   dtype=P.AREA_DT)
     src = np.array([(sid["US5TEST1"], 3, 1, 20261101, 12000, 5, 1, (0,) * 6)], dtype=P.SRCS_DT)
     bbox = (LON0, LAT0, LON0 + NX * STEP, LAT0 + NY * STEP)
@@ -146,4 +161,4 @@ def build_synthetic() -> P.Pack:
                   clearance_dm=120, check_dm=110, shore_rings_m=(50, 150), vertices=V, tris=T, attrs=attrs,
                   strings=strings, overhead=ovh, hazards=hz, channels=ch, areas=ar, sources=src,
                   geom=np.array(geom, np.int32), info={"builder": "enc_routing synth", "note": "synthetic test pack"},
-                  nbr=nbr, grid=grid)
+                  nbr=nbr, grid=grid, advisory_sets=[[], [4], [4, 5]])

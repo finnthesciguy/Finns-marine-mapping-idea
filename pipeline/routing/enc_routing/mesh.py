@@ -182,9 +182,17 @@ def prepare_tile(merged, ncf_reach, ncf_line, gulf_ll, crs, p):
         brw = br[br.intersects(water)]
         if len(brw):
             bridge_zone = shapely.union_all(shapely.buffer(brw.geometry.values, p.bridge_zone_m, quad_segs=4))
+    # Locks and navigable floodgates (derived LOCKZN, spec C.2a): chambers are 17-25 m wide between
+    # their walls, so the reduced bridge clearance applies inside the lock zone as well.
+    lz = merged.get("LOCKZN")
+    if lz is not None and len(lz):
+        bridge_zone = robust_union([bridge_zone] + list(shapely.make_valid(lz.geometry.values)))
     far = robust_union(shapely.buffer(block, C + 2 * s))
-    near = robust_union(shapely.buffer(block, p.bridge_clearance_m + 2 * s))
-    B = robust_union([far.difference(bridge_zone), near.intersection(bridge_zone),
+    near = robust_union(shapely.buffer(shore, p.bridge_clearance_m + 2 * s))
+    # Blocking hazards keep the full clearance everywhere, also in bridge and lock zones: leg validation (format
+    # B.10) checks every leg against them at check_dm (11 m), and the reduction is only needed between piers and walls.
+    hz_block = robust_union(shapely.buffer(list(haz[haz.blocking].geometry.values), C + 2 * s))
+    B = robust_union([far.difference(bridge_zone), near.intersection(bridge_zone), hz_block,
                       robust_union(shapely.buffer(fenders, p.fender_clearance_m + 2 * s))])
     Bs = shapely.make_valid(shapely.simplify(B, s, preserve_topology=True))
     dom = shapely.make_valid(water.difference(Bs))
@@ -203,6 +211,16 @@ def prepare_tile(merged, ncf_reach, ncf_line, gulf_ll, crs, p):
         if len(haz) else shapely.Polygon()
     snd = L.soundings(merged)
     refine = sounding_refinement(areas, snd, p)
+    refine["ext"] = False
+    ext = merged.get("SNDEXT")
+    if ext is not None and len(ext) and len(areas):
+        idx = {k: i for i, k in enumerate(areas.fkey.values)}
+        m = np.array([k in idx for k in ext.area_fkey.values], bool)
+        if m.any():
+            e = gpd.GeoDataFrame({"area_idx": [idx[k] for k in ext.area_fkey.values[m]],
+                                  "refined_dm": ext.refined_dm.values[m].astype(np.int64), "ext": True},
+                                 geometry=list(shapely.make_valid(ext.geometry.values[m])))
+            refine = gpd.GeoDataFrame(pd.concat([e, refine], ignore_index=True), geometry="geometry")
     lower = sounding_lowering(areas, refine, snd, p)
     over = L.overhead(merged, water)
     if len(over):
@@ -227,7 +245,17 @@ def prepare_tile(merged, ncf_reach, ncf_line, gulf_ll, crs, p):
         tr = Transformer.from_crs(GEO_CRS, crs, always_xy=True)
         gulf = shapely.make_valid(shapely.transform(gulf_ll, lambda xy: np.column_stack(tr.transform(xy[:, 0], xy[:, 1]))))
     used_cells = sorted(set(wet[wet.intersects(domain)].cell.astype(str))) if len(wet) and not domain.is_empty else []
-    return dict(areas=areas, water=water, domain=domain, obst_buffer=Bs,
+    # live water (spec C.10a): what some boat with a requirement of live_floor_dm could use; faces farther
+    # than live_distance_m from it are not meshed
+    fl = p.live_floor_dm
+    live = list(wet[wet.d1 >= fl].geometry.values)
+    live += list(refine[refine.refined_dm >= fl].geometry.values)
+    live += [g for g, src, md in zip(chan.geometry.values, chan.source.values, chan.maint_dm.values)
+             if src == 1 and md >= fl]
+    live = robust_union(live)
+    live_zone = shapely.buffer(shapely.simplify(live, 5.0), p.live_distance_m, quad_segs=4) if not live.is_empty \
+        else shapely.Polygon()
+    return dict(areas=areas, water=water, domain=domain, obst_buffer=Bs, live_zone=live_zone,
                 rings=rings, haz=haz, hz_zone=hz_zone, hz_ring=hz_ring, snd=snd, refine=refine,
                 lower=lower, over=over, chan=chan, highway=hw, regs=regs, qual=qual, gulf=gulf,
                 gulf_ll=gulf_ll, used_cells=used_cells)
@@ -302,7 +330,7 @@ def polygon_area2(poly):
     return a
 
 
-def faces_and_triangles(lines_u, domain_u, bbox_u, p, grid=None, keep_rect=None):
+def faces_and_triangles(lines_u, domain_u, bbox_u, p, grid=None, keep_rect=None, keep_zone=None):
     """Node the constraint lines (units) on the integer grid, polygonize, keep
     the faces inside the domain (and inside keep_rect, a tile), triangulate
     them, repair and validate. grid: the size-grid lines (default: a uniform
@@ -322,6 +350,9 @@ def faces_and_triangles(lines_u, domain_u, bbox_u, p, grid=None, keep_rect=None)
         x0, y0, x1, y1 = keep_rect
         c = shapely.get_coordinates(rp)
         keep &= (c[:, 0] > x0) & (c[:, 0] < x1) & (c[:, 1] > y0) & (c[:, 1] < y1)
+    if keep_zone is not None:   # spec C.10a: only faces within reach of live water
+        shapely.prepare(keep_zone)
+        keep &= shapely.intersects(keep_zone, faces)
     faces = faces[keep]
     if len(faces) == 0:
         rep = {"ok": True, "faces": 0, "flat_removed": 0, "tjunction_splits": 0, "area2_faces": 0,
@@ -414,8 +445,11 @@ def face_attributes(prep, pts_m, p):
     ref = prep["refine"]
     i, j = _pairs(ref.geometry.values, pts, "within")
     ok = (nareas[i] == 1) & (one_area[i] == ref.area_idx.values[j]) & (ref.refined_dm.values[j] > depth[i])
-    refined[i[ok]] = ref.refined_dm.values[j][ok]
-    flags[i[ok]] |= P.F_REFINED
+    ext = ref.ext.values[j].astype(bool) if len(j) else np.zeros(0, bool)
+    for pass_ext in (True, False):   # the extended raise (C.4b) first; the ordinary raise (C.4) wins
+        m = ok & (ext == pass_ext)
+        refined[i[m]] = ref.refined_dm.values[j][m]
+        flags[i[m]] |= P.F_REFINED
     band = depth.copy()
     # --- lowering by shallower soundings and by known-depth hazards
     for g, vals, flag in ((prep["lower"].geometry.values, prep["lower"].depth_dm.values, 0),
@@ -466,12 +500,22 @@ def face_attributes(prep, pts_m, p):
     # --- regulated areas (any part of the sample disk)
     regs = prep["regs"]
     area = np.full(n, P.ID_NONE, np.int64)
+    advisory = [()] * n
     i, j = _pairs(regs.geometry.values, pts, "dwithin", r)
     if len(i):
+        wide = regs.areawide.values[j].astype(bool)
+        # area-wide advisories (C.7a): no flag, no area reference; the set of them per face
+        adv = {}
+        for a_, b_ in zip(i[wide].tolist(), j[wide].tolist()):
+            adv.setdefault(a_, set()).add(b_)
+        for a_, v in adv.items():
+            advisory[a_] = tuple(sorted(v))
+        i, j = i[~wide], j[~wide]
         kind = regs.kind.values[j]
-        for k, f in ((1, P.F_PROHIBITED), (2, P.F_RESTRICTED), (3, P.F_CAUTION)):
+        for k, f in ((1, P.F_PROHIBITED), (2, P.F_RESTRICTED), (3, P.F_CAUTION), (4, P.F_LOCK)):
             flags[i[kind == k]] |= f
-        pri = kind * 100000 + j
+        rank = np.select([kind == 1, kind == 4, kind == 2], [1, 2, 3], 4)   # prohibited > lock > restricted > caution
+        pri = rank * 100000 + j
         best = np.full(n, 1 << 40, np.int64)
         np.minimum.at(best, i, pri)
         has = best < (1 << 40)
@@ -518,7 +562,8 @@ def face_attributes(prep, pts_m, p):
         yr = np.where(yy < 99999, yy, 0)
     qbyte = np.array([L.quality_byte(c, y) for c, y in zip(cz, yr)], np.int64)
     return {"depth_dm": refined, "band_depth_dm": band, "maint_dm": maint, "clearance_dm": clear,
-            "flags": flags, "channel": channel, "overhead": ovid, "area": area, "quality": qbyte}
+            "flags": flags, "channel": channel, "overhead": ovid, "area": area, "quality": qbyte,
+            "advisory": advisory}
 
 
 # --------------------------------------------------------------------------- side tables

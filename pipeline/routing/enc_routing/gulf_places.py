@@ -118,6 +118,9 @@ ROUTES = {
          "Clearwater to Anclote (past the ncds_10 / ncds_11 line)", False),
         ("gulfport_venice", "Gulfport Channel Daybeacon 3", "Venice Inlet - Siesta Key Daybeacon 19",
          "Gulfport (Boca Ciega Bay) to Venice", False),
+        # moved from ncds_11 in round 2: with a 15 nm overlap Gulfport FL (27.72 N) is outside the ncds_11 pack
+        ("gulfport_fl_anclote", "Gulfport Channel Daybeacon 3", "Anclote Anchorage North Entrance Light 7",
+         "Gulfport FL (Boca Ciega Bay) to Anclote (past the ncds_10 / ncds_11 line, in the ncds_10 pack)", False),
     ],
     "ncds_11": [
         ("anclote_cedarkey", "Anclote Anchorage North Entrance Light 7", "Cedar Keys Main Channel Daybeacon 22",
@@ -138,8 +141,6 @@ ROUTES = {
          "Gulfport to Mobile Bay (past the ncds_11 / ncds_12 line)", False),
         ("destin_pensacola", "Old East Pass Harbor Channel Light 13", "Pensacola Bay East Channel Inner Range Front Light",
          "Destin to Pensacola, inside (GIWW)", True),
-        ("gulfport_fl_anclote", "Gulfport Channel Daybeacon 3", "Anclote Anchorage North Entrance Light 7",
-         "Gulfport FL (Boca Ciega Bay) to Anclote (past the ncds_10 / ncds_11 line)", False),
     ],
     "ncds_12": [
         ("batonrouge_neworleans", "Lower Baton Rouge Anchorage Lower Daybeacon 228.5",
@@ -160,6 +161,9 @@ ROUTES = {
          "Grand Isle to New Orleans", False),
         ("biloxi_rigolets", "Back Bay of Biloxi Daybeacon 10", "The Rigolets Light 3",
          "Biloxi to the Rigolets (past the ncds_11 / ncds_12 line), inside", True),
+        # moved from ncds_13 in round 2: with a 15 nm overlap Morgan City (29.73 N) is outside the ncds_13 pack
+        ("atchafalaya_morgancity", "Atchafalaya Bay Light 11", "Morgan City-Port Allen Alternate Route Daybeacon 10",
+         "Atchafalaya Bay to Morgan City", False),
     ],
     "ncds_13": [
         ("swpass_baptiste", "Southwest Pass Light 10", "Baptiste Collette Bayou Light 10",
@@ -170,8 +174,6 @@ ROUTES = {
          "Grand Isle to Port Fourchon (Belle Pass)", False),
         ("fourchon_catisland", "Belle Pass Entrance Light 8", "Cat Island Pass Buoy 13",
          "Belle Pass to Cat Island Pass", False),
-        ("atchafalaya_morgancity", "Atchafalaya Bay Light 11", "Morgan City-Port Allen Alternate Route Daybeacon 10",
-         "Atchafalaya Bay to Morgan City", False),
         ("grandisle_swpass", "Grand Isle Turning Basin Light 4", "Southwest Pass Light 10",
          "Grand Isle to Southwest Pass, offshore", False),
         ("headofpasses_southpass", "Head of Passes Junction Light", "South Pass Light 6",

@@ -1,7 +1,7 @@
 {
  "schema": "routing-vectors/1",
  "pack": "synthetic.pack",
- "pack_sha256": "e32df39fd14943412827390e9c79a600e2dbe02506e2749ca27b06dd4816f32d",
+ "pack_sha256": "da3f5d68cd4b5ff1298973b030f63059075047c94a3612125983551802041ae9",
  "tolerances": {
   "waypoints_units": 0,
   "distance_m": 1e-06,
@@ -165,7 +165,8 @@
       "grade": "yellow",
       "reasons": [
        "MAINTAINED_DEPTH",
-       "BRIDGE_OPENING"
+       "BRIDGE_OPENING",
+       "LOCK"
       ],
       "min_depth_dm": 9,
       "min_spare_dm": 21,
@@ -209,6 +210,16 @@
       }
      ],
      "unknown_clearances": [],
+     "locks": [
+      {
+       "corridor_index": 11,
+       "area": 3,
+       "name": "Test Lock",
+       "lon": -81.9936667,
+       "lat": 27.0016666
+      }
+     ],
+     "advisories": [],
      "maintained_triangles": 2,
      "data_date": 20261101
     },
@@ -270,8 +281,8 @@
      42,
      45,
      46,
-     39,
-     40,
+     56,
+     57,
      58
     ],
     "waypoints_units": [
@@ -280,12 +291,16 @@
       270015000
      ],
      [
-      -819970000,
-      270020000
+      -819978000,
+      270016000
      ],
      [
-      -819940000,
-      270020000
+      -819964000,
+      270024000
+     ],
+     [
+      -819924000,
+      270024000
      ],
      [
       -819925000,
@@ -298,12 +313,16 @@
       27.0015
      ],
      [
-      -81.997,
-      27.002
+      -81.9978,
+      27.0016
      ],
      [
-      -81.994,
-      27.002
+      -81.9964,
+      27.0024
+     ],
+     [
+      -81.9924,
+      27.0024
      ],
      [
       -81.9925,
@@ -317,14 +336,34 @@
        27.0015
       ],
       "to": [
-       -81.997,
-       27.002
+       -81.9978,
+       27.0016
       ],
       "triangles": [
        0,
-       5
+       3
       ],
-      "length_m": 253.84827304608797,
+      "length_m": 168.79275605129374,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 36,
+      "min_spare_dm": 21,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.9978,
+       27.0016
+      ],
+      "to": [
+       -81.9964,
+       27.0024
+      ],
+      "triangles": [
+       3,
+       6
+      ],
+      "length_m": 164.7779853912913,
       "grade": "yellow",
       "reasons": [
        "UNKNOWN_CLEARANCE"
@@ -335,20 +374,21 @@
      },
      {
       "from": [
-       -81.997,
-       27.002
+       -81.9964,
+       27.0024
       ],
       "to": [
-       -81.994,
-       27.002
+       -81.9924,
+       27.0024
       ],
       "triangles": [
        6,
-       12
+       14
       ],
-      "length_m": 297.2213392447422,
+      "length_m": 396.2937091761193,
       "grade": "yellow",
       "reasons": [
+       "SOUNDING_DEPTH",
        "RESTRICTED_AREA",
        "HAZARD_PROXIMITY"
       ],
@@ -356,39 +396,41 @@
       "min_spare_dm": 0,
       "crossings": [
        {
-        "record": 3,
-        "clearance_dm": 500,
+        "record": 1,
+        "clearance_dm": 30,
         "opening": false
        }
       ]
      },
      {
       "from": [
-       -81.994,
-       27.002
+       -81.9924,
+       27.0024
       ],
       "to": [
        -81.9925,
        27.0015
       ],
       "triangles": [
-       13,
+       14,
        15
       ],
-      "length_m": 158.67046291285382,
-      "grade": "green",
-      "reasons": [],
-      "min_depth_dm": 36,
-      "min_spare_dm": 21,
+      "length_m": 100.56478697270994,
+      "grade": "yellow",
+      "reasons": [
+       "SOUNDING_DEPTH"
+      ],
+      "min_depth_dm": 21,
+      "min_spare_dm": 6,
       "crossings": []
      }
     ],
     "summary": {
-     "distance_m": 709.740075203684,
-     "distance_nm": 0.38322898229140606,
-     "legs": 3,
+     "distance_m": 830.4292375914143,
+     "distance_nm": 0.4483959166260337,
+     "legs": 4,
      "green_legs": 1,
-     "yellow_legs": 2,
+     "yellow_legs": 3,
      "shallowest": {
       "depth_dm": 15,
       "triangle": 50,
@@ -413,11 +455,21 @@
        "lat": 27.0023333
       }
      ],
+     "locks": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      }
+     ],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
     "data_date": 20261101,
-    "distance_m": 709.740075203684
+    "distance_m": 830.4292375914143
    }
   },
   {
@@ -620,6 +672,23 @@
        "lat": 27.0036666
       }
      ],
+     "locks": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      },
+      {
+       "area": 5,
+       "kind": 3,
+       "source": 4,
+       "name": "Chart datum",
+       "text": "Depths refer to a local low-water datum, not MLLW"
+      }
+     ],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
@@ -708,6 +777,10 @@
       270005000
      ],
      [
+      -819986000,
+      270026000
+     ],
+     [
       -819985000,
       270025000
      ]
@@ -716,6 +789,10 @@
      [
       -81.998,
       27.0005
+     ],
+     [
+      -81.9986,
+      27.0026
      ],
      [
       -81.9985,
@@ -729,14 +806,14 @@
        27.0005
       ],
       "to": [
-       -81.9985,
-       27.0025
+       -81.9986,
+       27.0026
       ],
       "triangles": [
        0,
        5
       ],
-      "length_m": 227.84053360885392,
+      "length_m": 240.95728779725744,
       "grade": "yellow",
       "reasons": [
        "CAUTION_AREA",
@@ -746,13 +823,33 @@
       "min_depth_dm": 6,
       "min_spare_dm": 0,
       "crossings": []
+     },
+     {
+      "from": [
+       -81.9986,
+       27.0026
+      ],
+      "to": [
+       -81.9985,
+       27.0025
+      ],
+      "triangles": [
+       5,
+       5
+      ],
+      "length_m": 14.892905583676427,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 21,
+      "min_spare_dm": 15,
+      "crossings": []
      }
     ],
     "summary": {
-     "distance_m": 227.84053360885392,
-     "distance_nm": 0.1230240462250831,
-     "legs": 1,
-     "green_legs": 0,
+     "distance_m": 255.85019338093386,
+     "distance_nm": 0.13814805258149776,
+     "legs": 2,
+     "green_legs": 1,
      "yellow_legs": 1,
      "shallowest": {
       "depth_dm": 6,
@@ -764,11 +861,21 @@
      "lowest_clearance": null,
      "openings": [],
      "unknown_clearances": [],
+     "locks": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      }
+     ],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
     "data_date": 20261101,
-    "distance_m": 227.84053360885392
+    "distance_m": 255.85019338093386
    }
   },
   {
@@ -822,10 +929,10 @@
      28,
      33,
      32,
-     41,
-     38,
-     39,
-     40,
+     31,
+     30,
+     35,
+     34,
      36
     ],
     "waypoints_units": [
@@ -834,16 +941,8 @@
       270005000
      ],
      [
-      -820000000,
-      270000000
-     ],
-     [
-      -819990000,
-      270010000
-     ],
-     [
-      -819940000,
-      270010000
+      -819988000,
+      270016000
      ],
      [
       -819935000,
@@ -856,16 +955,8 @@
       27.0005
      ],
      [
-      -82.0,
-      27.0
-     ],
-     [
-      -81.999,
-      27.001
-     ],
-     [
-      -81.994,
-      27.001
+      -81.9988,
+      27.0016
      ],
      [
       -81.9935,
@@ -879,37 +970,14 @@
        27.0005
       ],
       "to": [
-       -82.0,
-       27.0
+       -81.9988,
+       27.0016
       ],
       "triangles": [
        0,
-       0
-      ],
-      "length_m": 74.46520199681596,
-      "grade": "yellow",
-      "reasons": [
-       "LOW_DATA_QUALITY",
-       "THIN_MARGIN"
-      ],
-      "min_depth_dm": 6,
-      "min_spare_dm": 0,
-      "crossings": []
-     },
-     {
-      "from": [
-       -82.0,
-       27.0
-      ],
-      "to": [
-       -81.999,
-       27.001
-      ],
-      "triangles": [
-       1,
        3
       ],
-      "length_m": 148.93025746035144,
+      "length_m": 140.6079320351075,
       "grade": "yellow",
       "reasons": [
        "LOW_DATA_QUALITY",
@@ -921,38 +989,18 @@
      },
      {
       "from": [
-       -81.999,
-       27.001
-      ],
-      "to": [
-       -81.994,
-       27.001
-      ],
-      "triangles": [
-       4,
-       14
-      ],
-      "length_m": 495.37330430992535,
-      "grade": "green",
-      "reasons": [],
-      "min_depth_dm": 9,
-      "min_spare_dm": 3,
-      "crossings": []
-     },
-     {
-      "from": [
-       -81.994,
-       27.001
+       -81.9988,
+       27.0016
       ],
       "to": [
        -81.9935,
        27.0005
       ],
       "triangles": [
-       15,
+       3,
        15
       ],
-      "length_m": 74.46505546299888,
+      "length_m": 539.1531416461374,
       "grade": "yellow",
       "reasons": [
        "LOW_DATA_QUALITY",
@@ -964,11 +1012,11 @@
      }
     ],
     "summary": {
-     "distance_m": 793.2338192300916,
-     "distance_nm": 0.4283119974244555,
-     "legs": 4,
-     "green_legs": 1,
-     "yellow_legs": 3,
+     "distance_m": 679.761073681245,
+     "distance_nm": 0.3670416164585556,
+     "legs": 2,
+     "green_legs": 0,
+     "yellow_legs": 2,
      "shallowest": {
       "depth_dm": 6,
       "triangle": 0,
@@ -976,19 +1024,16 @@
       "lat": 27.0003333,
       "maintained": false
      },
-     "lowest_clearance": {
-      "clearance_dm": 18,
-      "overhead": 0,
-      "name": "Test Opening Bridge",
-      "opening": true
-     },
+     "lowest_clearance": null,
      "openings": [],
      "unknown_clearances": [],
+     "locks": [],
+     "advisories": [],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
     "data_date": 20261101,
-    "distance_m": 793.2338192300916
+    "distance_m": 679.761073681245
    }
   },
   {
@@ -1096,6 +1141,8 @@
      "lowest_clearance": null,
      "openings": [],
      "unknown_clearances": [],
+     "locks": [],
+     "advisories": [],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
@@ -1164,12 +1211,12 @@
       270025000
      ],
      [
-      -819980000,
-      270020000
+      -819974000,
+      270014000
      ],
      [
-      -819950000,
-      270020000
+      -819948000,
+      270016000
      ],
      [
       -819945000,
@@ -1182,12 +1229,12 @@
       27.0025
      ],
      [
-      -81.998,
-      27.002
+      -81.9974,
+      27.0014
      ],
      [
-      -81.995,
-      27.002
+      -81.9948,
+      27.0016
      ],
      [
       -81.9945,
@@ -1201,14 +1248,14 @@
        27.0025
       ],
       "to": [
-       -81.998,
-       27.002
+       -81.9974,
+       27.0014
       ],
       "triangles": [
        0,
-       5
+       7
       ],
-      "length_m": 158.6698439631322,
+      "length_m": 241.34571470085592,
       "grade": "green",
       "reasons": [],
       "min_depth_dm": 21,
@@ -1217,34 +1264,28 @@
      },
      {
       "from": [
-       -81.998,
-       27.002
+       -81.9974,
+       27.0014
       ],
       "to": [
-       -81.995,
-       27.002
+       -81.9948,
+       27.0016
       ],
       "triangles": [
-       6,
-       11
+       7,
+       12
       ],
-      "length_m": 297.2213392447422,
+      "length_m": 258.55118153351896,
       "grade": "green",
       "reasons": [],
       "min_depth_dm": 9,
       "min_spare_dm": 3,
-      "crossings": [
-       {
-        "record": 3,
-        "clearance_dm": 500,
-        "opening": false
-       }
-      ]
+      "crossings": []
      },
      {
       "from": [
-       -81.995,
-       27.002
+       -81.9948,
+       27.0016
       ],
       "to": [
        -81.9945,
@@ -1254,7 +1295,7 @@
        12,
        13
       ],
-      "length_m": 74.46461584778442,
+      "length_m": 104.39599902560963,
       "grade": "green",
       "reasons": [],
       "min_depth_dm": 21,
@@ -1269,8 +1310,8 @@
      }
     ],
     "summary": {
-     "distance_m": 530.3557990556587,
-     "distance_nm": 0.2863692219522995,
+     "distance_m": 604.2928952599846,
+     "distance_nm": 0.32629206007558564,
      "legs": 3,
      "green_legs": 3,
      "yellow_legs": 0,
@@ -1289,11 +1330,21 @@
      },
      "openings": [],
      "unknown_clearances": [],
+     "locks": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      }
+     ],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
     "data_date": 20261101,
-    "distance_m": 530.3557990556587
+    "distance_m": 604.2928952599846
    }
   },
   {
@@ -1367,6 +1418,8 @@
      "lowest_clearance": null,
      "openings": [],
      "unknown_clearances": [],
+     "locks": [],
+     "advisories": [],
      "maintained_triangles": 0,
      "data_date": 20261101
     },
@@ -1432,6 +1485,283 @@
      "error": "OUTSIDE_PACK"
     },
     "data_date": 20261101
+   }
+  },
+  {
+   "id": "s14_lock",
+   "start": [
+    -81.9935,
+    27.0015
+   ],
+   "goal": [
+    -81.9922,
+    27.0012
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "through the lock square (col 6, row 1): yellow LOCK leg, listed in summary.locks",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9935,
+     "lat": 27.0015,
+     "x": -819935000,
+     "y": 270015000,
+     "triangle": 39,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9922,
+     "lat": 27.0012,
+     "x": -819922000,
+     "y": 270012000,
+     "triangle": 59,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     39,
+     40,
+     58,
+     59
+    ],
+    "waypoints_units": [
+     [
+      -819935000,
+      270015000
+     ],
+     [
+      -819922000,
+      270012000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9935,
+      27.0015
+     ],
+     [
+      -81.9922,
+      27.0012
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9935,
+       27.0015
+      ],
+      "to": [
+       -81.9922,
+       27.0012
+      ],
+      "triangles": [
+       0,
+       3
+      ],
+      "length_m": 133.04649674591144,
+      "grade": "yellow",
+      "reasons": [
+       "LOCK"
+      ],
+      "min_depth_dm": 36,
+      "min_spare_dm": 21,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 133.04649674591144,
+     "distance_nm": 0.07183936109390467,
+     "legs": 1,
+     "green_legs": 0,
+     "yellow_legs": 1,
+     "shallowest": {
+      "depth_dm": 36,
+      "triangle": 39,
+      "lon": -81.9936667,
+      "lat": 27.0016666,
+      "maintained": false
+     },
+     "lowest_clearance": null,
+     "openings": [],
+     "unknown_clearances": [],
+     "locks": [
+      {
+       "corridor_index": 0,
+       "area": 3,
+       "name": "Test Lock",
+       "lon": -81.9936667,
+       "lat": 27.0016666
+      }
+     ],
+     "advisories": [],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 133.04649674591144
+   }
+  },
+  {
+   "id": "s15_advisories",
+   "start": [
+    -81.9995,
+    27.0035
+   ],
+   "goal": [
+    -81.9985,
+    27.0025
+   ],
+   "profile": {
+    "draft_ft": 1,
+    "margin_ft": 0.5,
+    "air_draft_ft": 5
+   },
+   "note": "rows 2-3, columns 0-1: green legs, the sanctuary and the datum note listed once in summary.advisories",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 6,
+    "air_dm": 15,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0035,
+     "x": -819995000,
+     "y": 270035000,
+     "triangle": 10,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9985,
+     "lat": 27.0025,
+     "x": -819985000,
+     "y": 270025000,
+     "triangle": 12,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     10,
+     14,
+     13,
+     12
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270035000
+     ],
+     [
+      -819986000,
+      270028000
+     ],
+     [
+      -819985000,
+      270025000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0035
+     ],
+     [
+      -81.9986,
+      27.0028
+     ],
+     [
+      -81.9985,
+      27.0025
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0035
+      ],
+      "to": [
+       -81.9986,
+       27.0028
+      ],
+      "triangles": [
+       0,
+       3
+      ],
+      "length_m": 118.35968082225905,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 21,
+      "min_spare_dm": 15,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.9986,
+       27.0028
+      ],
+      "to": [
+       -81.9985,
+       27.0025
+      ],
+      "triangles": [
+       3,
+       3
+      ],
+      "length_m": 34.79865128959503,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 21,
+      "min_spare_dm": 15,
+      "crossings": []
+     }
+    ],
+    "summary": {
+     "distance_m": 153.15833211185407,
+     "distance_nm": 0.08269888342972681,
+     "legs": 2,
+     "green_legs": 2,
+     "yellow_legs": 0,
+     "shallowest": {
+      "depth_dm": 21,
+      "triangle": 12,
+      "lon": -81.9986667,
+      "lat": 27.0026666,
+      "maintained": false
+     },
+     "lowest_clearance": null,
+     "openings": [],
+     "unknown_clearances": [],
+     "locks": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      },
+      {
+       "area": 5,
+       "kind": 3,
+       "source": 4,
+       "name": "Chart datum",
+       "text": "Depths refer to a local low-water datum, not MLLW"
+      }
+     ],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 153.15833211185407
    }
   }
  ]

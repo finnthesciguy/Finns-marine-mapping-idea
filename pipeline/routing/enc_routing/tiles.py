@@ -42,7 +42,8 @@ from .config import BUILDER_VERSION, GEO_CRS, UNITS, tmerc, work
 # Merged ENC layers a tile needs (names-only layers are not mesh inputs).
 TILE_LAYERS = ["DEPARE", "DRGARE", "LNDARE", "UNSARE", "SLCONS", "PONTON", "HULKES", "FLODOC", "DRYDOC",
                "CAUSWY", "DAMCON", "GATCON", "DYKCON", "PILPNT", "OBSTRN", "WRECKS", "UWTROC", "SOUNDG",
-               "BRIDGE", "CBLOHD", "PIPOHD", "FAIRWY", "RECTRC", "NAVLNE", "RESARE", "CTNARE", "M_QUAL"]
+               "BRIDGE", "CBLOHD", "PIPOHD", "FAIRWY", "RECTRC", "NAVLNE", "RESARE", "CTNARE", "M_QUAL",
+               "LOCKZN", "DATUMN", "SNDEXT"]   # the last three are derived layers (derived.py)
 # Layers whose presence near a 0.1 degree cell switches it to the fine size grid.
 NEAR_LAYERS = ["LNDARE", "SLCONS", "UNSARE", "PONTON"]
 M_PER_DEG = 111_195.0
@@ -154,7 +155,8 @@ class Source:
     """Region-level access to the merged ENC features, the NCF and the mask,
     cut into tile inputs."""
 
-    def __init__(self, merged_entries: dict, load_merged, ncf: dict, mask: dict | None, bounds, p, log=print):
+    def __init__(self, merged_entries: dict, load_merged, ncf: dict, mask: dict | None, bounds, p, log=print,
+                 derived: dict | None = None):
         self.p = p
         self.mask = mask
         self.frames = {}
@@ -166,9 +168,19 @@ class Source:
             m = load_merged(merged_entries[n])
             for layer, g in m.items():
                 per.setdefault(layer, []).append(g)
+        derived = derived or {}
+        for layer in ("LOCKZN", "DATUMN", "SNDEXT"):
+            g = derived.get(layer)
+            if g is not None and len(g):
+                g = g[g.intersects(b)]
+                if len(g):
+                    per.setdefault(layer, []).append(g)
+        aw = derived.get("areawide", set())
         for layer, fr in per.items():
             g = pd.concat(fr, ignore_index=True)
             g = g.sort_values("fkey", kind="stable").reset_index(drop=True)
+            if layer in ("RESARE", "CTNARE"):
+                g["areawide"] = g.fkey.isin(aw).values
             self.frames[layer] = g
         self.trees = {k: shapely.STRtree(g.geometry.values) for k, g in self.frames.items()}
         self.ncf = {}
@@ -319,8 +331,10 @@ def build_tile(inp) -> dict:
     domain_u = U.geoms_to_units([prep["domain"]])[0]
     grid = mesh.tile_grid_lines(rect, lb, int(round(p.coarse_grid_deg * UNITS)), int(round(p.grid_deg * UNITS)),
                                 inp["fine_cells"])
+    lz = prep["live_zone"]
+    keep_zone = U.geoms_to_units([lz])[0] if not lz.is_empty else shapely.Polygon()
     faces, coords, tris, face_of, topo = mesh.faces_and_triangles(lines_u, domain_u, None, p, grid=grid,
-                                                                  keep_rect=rect)
+                                                                  keep_rect=rect, keep_zone=keep_zone)
     if not topo["ok"]:
         raise RuntimeError(f"tile {tile.id}: mesh topology validation failed: {topo}")
     if len(tris) == 0:
@@ -336,11 +350,24 @@ def build_tile(inp) -> dict:
     keymaps = {"channel": list(chan.fkey.values) if len(chan) else [],
                "overhead": list(over.fkey.values) if len(over) else [],
                "area": list(regs.fkey.values) if len(regs) else []}
+    # area-wide advisories: per face a tuple of tile-local area indices -> tile set table of feature keys
+    adv = fa.pop("advisory")
+    rkeys = list(regs.fkey.values) if len(regs) else []
+    set_index = {(): 0}
+    adv_sets = [()]
+    face_set = np.zeros(len(adv), np.int64)
+    for f, t in enumerate(adv):
+        kt = tuple(sorted(rkeys[x] for x in t))
+        if kt not in set_index:
+            set_index[kt] = len(adv_sets)
+            adv_sets.append(kt)
+        face_set[f] = set_index[kt]
+    fa["advisory"] = face_set
     attrs = {k: np.asarray(v)[face_of] for k, v in fa.items()}
     res.update(coords=coords.astype(np.int64), tris=tris.astype(np.int32), attrs=attrs,
                chan_keys=keymaps["channel"], over_keys=keymaps["overhead"], area_keys=keymaps["area"],
                over_water_keys=keymaps["overhead"], chan_domain_keys=keymaps["channel"],
-               used_cells=prep["used_cells"], area2=int(topo["area2_faces"]), topology=topo,
+               used_cells=prep["used_cells"], area2=int(topo["area2_faces"]), topology=topo, adv_sets=adv_sets,
                faces=int(len(faces)), seconds=round(time.time() - t0, 2))
     res["triangles"] = int(len(tris))
     del P

@@ -231,9 +231,9 @@ enum SourceFixtures {
     @Test func gzipAndWKBFixturesDecode() throws {
         let obstacles: MetricGeometry = try SourceFixtures.load("sarasota.obstacles.wkb.gz")
         let zones: MetricGeometry = try SourceFixtures.load("sarasota.bridge_zone.wkb.gz")
-        // 794 parts (52 polygons, 441 lines, 301 points) and 23 bridge-zone polygons.
-        #expect(obstacles.polygons.count == 52)
-        #expect(zones.polygons.count == 23)
+        // 793 parts (53 polygons, 439 lines, 301 points) and 25 bridge- and lock-zone polygons.
+        #expect(obstacles.polygons.count == 53)
+        #expect(zones.polygons.count == 25)
         #expect(obstacles.edges.count > 9000)
         #expect(throws: InflateError.self) { try Gzip.decompress([0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]) }
     }

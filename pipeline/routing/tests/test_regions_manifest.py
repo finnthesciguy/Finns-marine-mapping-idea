@@ -36,10 +36,10 @@ def test_regions_share_ids_with_chart_regions_and_overlap():
         core = box(*chart[rid]).intersection(aoi)
         assert r.geometry.buffer(1e-9).contains(core)
         assert r.geometry.area > core.area
-    # ncds_12 / ncds_13 split at 29.33 N across the Louisiana coast: each reaches 25 nm past it
+    # ncds_12 / ncds_13 split at 29.33 N across the Louisiana coast: each reaches OVERLAP_NM - 2 nm past it
     r12, r13 = get_region("ncds_12"), get_region("ncds_13")
     lon = -90.0
-    for nm in (5, 25):
+    for nm in (5, OVERLAP_NM - 2):
         assert r12.geometry.contains(Point(lon, nm_north(29.333333, -nm)))
         assert r13.geometry.contains(Point(lon, nm_north(29.333333, nm)))
     assert not r12.geometry.contains(Point(lon, nm_north(29.333333, -(OVERLAP_NM + 5))))

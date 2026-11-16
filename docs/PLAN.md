@@ -247,6 +247,25 @@ Routing packs for the whole Gulf ([operator guide](routing-build.md)). Built fro
 - **The GIWW, walked link by link inside only with a 6 ft requirement, is broken in many places:** by charted depth at Roberts Bay and south of Venice (maintained depth closes them), Clearwater to Anclote, St. George Sound and Apalachicola to West Bay, the Santa Rosa Sound danger zone (charted entry prohibited), Louisiana west of Larose and at Freshwater Bayou (maintained depth closes some), and it is cut by objects of unknown clearance (Biloxi Back Bay, Bay St. Louis, Calcasieu, Port Arthur), solid bridge parts (Bay St. Louis railroad swing bridge, Houma), and by locks, which are not modelled (New Orleans, Brazos/Colorado River in Texas).
 - **Open, for the owner and skippers:** Lake Pontchartrain is charted as one 0–5 m depth area, so it is closed to every keel boat (soundings are too sparse for the refinement rule); charted "entry prohibited" danger zones close the GIWW where it really is open most of the time; the Florida Keys sanctuary makes almost every Keys leg yellow; 63–75 % of hazards have no depth; locks and floodgates are obstacles; the largest pack needs about 330 MB on the phone. Nothing is published.
 
+**Round 2 (quality fixes, 15–16 Nov 2026; routing pack format 1.2, builder 3.1.1).** Packs must be rebuilt (none were published); readers still accept 1.0 and 1.1 packs, but a 1.1 reader rejects 1.2 packs.
+
+| pack | triangles | size | before round 2 |
+|---|---|---|---|
+| ncds_10 | 2.42 M | 12.0 MB | 2.66 M, 13.2 MB |
+| ncds_11 | 2.62 M | 12.6 MB | 4.18 M, 20.1 MB |
+| ncds_12 | 3.19 M | 15.1 MB | 4.75 M, 22.8 MB |
+| ncds_13 | 1.65 M | 8.0 MB | 3.83 M, 18.6 MB |
+| ncds_14 | 2.63 M | 13.0 MB | 2.93 M, 14.5 MB |
+
+- **Legs follow real turns.** Legs are now built by straight visibility walks through passable water that add no caution reason (the old funnel path hugged every corner of the triangle chain). Freeport to Galveston: 582 legs → 63; median over all reference routes 95 → 17 legs, the longest 890 → 91. Distances are 0–8 % shorter.
+- **Locks and floodgates** (ENC gates with CATGAT 2 or 4 that are not marked closed) are passable with a yellow "lock or floodgate" leg, a summary list and a cost penalty; dams and other gates stay obstacles. Grand Isle to New Orleans is 48 nm through the Barataria Waterway and a lock instead of 141 nm round the delta (it now needs "maintained channels" and "unknown clearance" because the 15 nm overlap no longer holds the passes for the long way round). The Texas Colorado River locks connect (Colorado River to Matagorda is now a strict GIWW link; Freeport to the Colorado is still cut by depth at Freeport); New Orleans' Industrial Canal lock and the Harvey and Algiers locks are passable, but the GIWW across New Orleans is still cut by bridges of unknown clearance.
+- **Area-wide advisories.** Sanctuaries, sensitive sea areas, the Mississippi River regulated navigation area and other regulated areas over 10 km² are listed once in the route summary instead of making every leg yellow; cells on a non-MLLW datum (lower Mississippi) get a "chart datum" note. Key West to Marathon: 134 yellow legs of 143 → 1 of 11; Baton Rouge to New Orleans: 811 of 818 → 9 of 91.
+- **Sparse soundings.** Depth areas charted from 0 can be raised from consistent soundings up to 2 km apart (yellow "relies on spot soundings" legs). This opens about 450 km² of Lake Pontchartrain to a 6 ft requirement, but **no reference route on the lake succeeds yet**: the approaches near Mandeville, the south shore marinas and the Industrial Canal stay closed (no soundings within reach of the shore).
+- **Memory on the phone** (largest pack, Linux release): 116 MB of arrays instead of 233 MB; about 142 MB resident after load, 184 MB peak while loading and 180 MB peak while routing, against 258 / 333 / 319 MB (process figures including a 25 MB test baseline). The 150 MB target is not quite met; the derived adjacency is the remaining load peak. Water no boat with a 2 ft requirement could use, farther than 500 m from usable water, is no longer meshed, and the overlap between packs is 15 nm instead of 30.
+- **Reference routes** (strict / maintained / relaxed / failed): ncds_10 9/2/0/1, ncds_11 5/1/1/2, ncds_12 3/1/2/4, ncds_13 7/1/0/0, ncds_14 9/0/0/1 (two routes moved packs with the smaller overlap). No route touches land, structures or blocking hazards or passes under a fixed object below the air draft; RoutingKit reproduces all 147 reference queries exactly.
+- **Found and fixed on the way:** with long legs, the raw-data check must follow the leg in lon/lat (a 40 km leg projected end to end bows by metres); blocking hazards now keep the full 12 m clearance inside bridge and lock zones (a leg near the Bob Sikes bridge failed leg validation).
+
+
 ## 6. What the owner has to do
 
 Nothing is needed for Waves 1 and 2. Before Wave 3:

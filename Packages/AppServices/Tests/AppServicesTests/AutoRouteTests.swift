@@ -42,6 +42,8 @@ enum RoutingFixtures {
     static let smallWater = endpoint("Small water", lon: -82.5454965, lat: 27.3326002)
     static let synWest = endpoint("West", lon: -81.9995, lat: 27.0015)
     static let synEast = endpoint("East", lon: -81.9925, lat: 27.0015)
+    static let synNorthWest = endpoint("North-west", lon: -81.9995, lat: 27.0035)
+    static let synSanctuary = endpoint("Sanctuary", lon: -81.9985, lat: 27.0025)
 }
 
 /// A library with copies of the test packs in a temporary side-load directory.
@@ -261,7 +263,7 @@ final class RoutingPackLibraryTests: XCTestCase {
         XCTAssertEqual(sarasota.id, "file:pilot-sarasota.pack")
         XCTAssertEqual(sarasota.dataDateRaw, 20261023)
         XCTAssertEqual(sarasota.version, "pilot-sarasota-20261023")
-        XCTAssertEqual(sarasota.formatVersion, "1.1")
+        XCTAssertEqual(sarasota.formatVersion, "1.2")
         XCTAssertEqual(sarasota.coverage, RoutingPackCoverage(south: 27.24, west: -82.62, north: 27.42, east: -82.5))
         let size = try FileManager.default.attributesOfItem(atPath: RoutingFixtures.url("sarasota.pack").path)[.size] as? NSNumber
         XCTAssertEqual(sarasota.byteSize, size?.int64Value)
@@ -391,7 +393,7 @@ final class RoutingPackLibraryTests: XCTestCase {
 final class AutoRoutePlannerTests: XCTestCase {
     let defaultBoat = RoutingFixtures.profile(name: "Test boat", draftFeet: 4.5, marginFeet: 1.5, airFeet: 20)
 
-    /// sarasota.vectors.json q1: 28 green legs.
+    /// sarasota.vectors.json q1: 7 green legs (format 1.2 leg planning; 28 before).
     func testSuccessPresentsLegsAndSummary() async throws {
         let fixture = try PackFixture()
         let planner = try await fixture.planner()
@@ -400,11 +402,11 @@ final class AutoRoutePlannerTests: XCTestCase {
                                                               profile: defaultBoat),
                                          now: RoutingFixtures.now, progress: { phases.add($0.phase) })
         let p = try XCTUnwrap(outcome.proposal, "\(outcome)")
-        XCTAssertEqual(p.legs.count, 28)
-        XCTAssertEqual(p.greenLegs, 28)
+        XCTAssertEqual(p.legs.count, 7)
+        XCTAssertEqual(p.greenLegs, 7)
         XCTAssertEqual(p.yellowLegs, 0)
-        XCTAssertEqual(p.points.count, 29)
-        XCTAssertEqual(p.distanceMeters, 10559.349388729319, accuracy: 1e-6)
+        XCTAssertEqual(p.points.count, 8)
+        XCTAssertEqual(p.distanceMeters, 10265.981753128568, accuracy: 1e-6)
         XCTAssertEqual(p.safety, .allowed)
         XCTAssertEqual(p.suggestedName, "Longboat to Marina Jack")
         XCTAssertEqual(Array(phases.all.prefix(2)), [.openingPack, .searching])
@@ -414,15 +416,15 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertEqual(leg0.title, "Leg 1")
         XCTAssertEqual(leg0.grade, .green)
         XCTAssertEqual(leg0.reasons, [])
-        XCTAssertEqual(leg0.lengthMeters, 971.329032560351, accuracy: 1e-6)
-        XCTAssertTrue(leg0.detail.hasPrefix("0.52 nm · "), leg0.detail)
+        XCTAssertEqual(leg0.lengthMeters, 6090.398549951267, accuracy: 1e-6)
+        XCTAssertTrue(leg0.detail.hasPrefix("3.29 nm · "), leg0.detail)
         XCTAssertTrue(leg0.detail.hasSuffix(" · least depth 5.9 ft"), leg0.detail)
 
         let lines = Dictionary(uniqueKeysWithValues: p.summary.map { ($0.id, $0) })
-        XCTAssertEqual(lines["distance"]?.value, "5.70 nm")
+        XCTAssertEqual(lines["distance"]?.value, "5.54 nm")
         XCTAssertEqual(lines["time"]?.label, "Time at 6.0 kn")
-        XCTAssertEqual(lines["time"]?.value, "57 min")
-        XCTAssertEqual(lines["legs"]?.value, "28 legs: 28 green, 0 yellow")
+        XCTAssertEqual(lines["time"]?.value, "55 min")
+        XCTAssertEqual(lines["legs"]?.value, "7 legs: 7 green, 0 yellow")
         XCTAssertEqual(lines["legs"]?.isWarning, false)
         XCTAssertEqual(lines["shallowest"]?.value, "5.9 ft at " + NavFormat.position(Coordinate(latitude: 27.4024097, longitude: -82.6022451)))
         XCTAssertEqual(lines["clearance"]?.value, "Ringling Causeway Bridge A / SR 789: 65.0 ft")
@@ -444,13 +446,13 @@ final class AutoRoutePlannerTests: XCTestCase {
                                         now: RoutingFixtures.now)
         let m = try XCTUnwrap(metric.proposal)
         let mlines = Dictionary(uniqueKeysWithValues: m.summary.map { ($0.id, $0.value) })
-        XCTAssertEqual(mlines["distance"], "10.6 km")
+        XCTAssertEqual(mlines["distance"], "10.3 km")
         XCTAssertEqual(mlines["goalSnap"], "Moved 4 m to navigable water")
         XCTAssertEqual(mlines["clearance"], "Ringling Causeway Bridge A / SR 789: 19.8 m")
     }
 
     /// sarasota q4 (strict: no route at the Roberts Bay gap, hint "use maintained channels"), then the hint applied
-    /// gives the q3 route (55 legs, 16 yellow).
+    /// gives the q3 route (11 legs, 6 yellow; 55 and 16 before format 1.2 leg planning).
     func testNoRouteOffersTheHintAndApplyingItPlans() async throws {
         let fixture = try PackFixture()
         let planner = try await fixture.planner()
@@ -477,9 +479,9 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertEqual(replan.options.useMaintainedChannels, true)
         let second = await planner.plan(replan, now: RoutingFixtures.now)
         let p = try XCTUnwrap(second.proposal, "\(second)")
-        XCTAssertEqual(p.legs.count, 55)
-        XCTAssertEqual(p.greenLegs, 39)
-        XCTAssertEqual(p.yellowLegs, 16)
+        XCTAssertEqual(p.legs.count, 11)
+        XCTAssertEqual(p.greenLegs, 5)
+        XCTAssertEqual(p.yellowLegs, 6)
         for leg in p.legs where leg.grade == .yellow { XCTAssertFalse(leg.reasons.isEmpty, "every yellow leg states a reason") }
         let reasonCodes = Set(p.legs.flatMap { $0.reasons.map(\.code) })
         XCTAssertEqual(reasonCodes, ["MAINTAINED_DEPTH", "LOW_DATA_QUALITY"])
@@ -489,8 +491,8 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertTrue(lines["shallowest"]?.value.hasSuffix("(the route uses the maintained channel depth there)") ?? false)
         XCTAssertTrue(lines["boat"]?.value.hasSuffix("; maintained channels allowed") ?? false)
         guard case .needsConfirmation(let c) = p.safety else { return XCTFail("\(p.safety)") }
-        XCTAssertEqual(c.title, "16 legs need caution")
-        XCTAssertEqual(Set(c.reasons), ["Maintained channel depth (14 legs)", "Poor survey data (2 legs)"])
+        XCTAssertEqual(c.title, "6 legs need caution")
+        XCTAssertEqual(Set(c.reasons), ["Maintained channel depth (5 legs)", "Poor survey data (1 leg)"])
         XCTAssertEqual(c.confirmLabel, "I have reviewed the yellow legs")
     }
 
@@ -541,7 +543,36 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertEqual(s.noHintText, "Turning on \"use maintained channels\" or \"accept unknown clearance\" would not give a route either.")
     }
 
-    /// synthetic.pack s2 (bridge opening, maintained depth), s3 (unknown clearance, restricted area, hazard), s1 hints.
+    /// synthetic.pack s15: area-wide advisories are listed once in the summary, never on a leg.
+    func testAreaWideAdvisoriesAreSummaryLines() async throws {
+        let fixture = try PackFixture(packs: ["synthetic.pack"])
+        let planner = try await fixture.planner()
+        let outcome = await planner.plan(AutoRoutePlanRequest(
+            start: RoutingFixtures.synNorthWest, goal: RoutingFixtures.synSanctuary,
+            profile: RoutingFixtures.profile(draftFeet: 1, marginFeet: 0.5, airFeet: 5)), now: RoutingFixtures.now)
+        let p = try XCTUnwrap(outcome.proposal, "\(outcome)")
+        XCTAssertEqual(p.yellowLegs, 0)
+        XCTAssertEqual(p.safety, .allowed)
+        let lines = Dictionary(uniqueKeysWithValues: p.summary.map { ($0.id, $0) })
+        XCTAssertEqual(lines["advisory-4"]?.label, "Area-wide caution on the route")
+        XCTAssertEqual(lines["advisory-4"]?.value, "Test Sanctuary: Protected area: test regulations")
+        XCTAssertEqual(lines["advisory-4"]?.isWarning, false)
+        XCTAssertEqual(lines["advisory-5"]?.label, "Chart datum")
+        XCTAssertEqual(lines["advisory-5"]?.value, "Chart datum: Depths refer to a local low-water datum, not MLLW")
+        XCTAssertEqual(lines["advisory-5"]?.isWarning, true)
+        XCTAssertNil(lines["locks"])
+        let ids: [String] = p.summary.map(\.id)
+        XCTAssertEqual(ids, ["distance", "time", "legs", "shallowest", "clearance", "openings", "advisory-4", "advisory-5",
+                             "startSnap", "goalSnap", "data", "pack", "boat"])
+    }
+
+    func testLockReasonHasWords() {
+        let r: AutoRouteReason = AutoRouteReason.caution("LOCK")
+        XCTAssertEqual(r.title, "Lock or floodgate")
+        XCTAssertTrue(r.detail.contains("not known to the app"))
+    }
+
+    /// synthetic.pack s2 (bridge opening, maintained depth, lock), s3 (unknown clearance, restricted area, hazard), s1 hints.
     func testSyntheticBridgeOpeningsAndRestrictedAreas() async throws {
         let fixture = try PackFixture(packs: ["synthetic.pack"])
         let planner = try await fixture.planner()
@@ -551,27 +582,30 @@ final class AutoRoutePlannerTests: XCTestCase {
         let p2 = try XCTUnwrap(s2.proposal, "\(s2)")
         XCTAssertEqual(p2.legs.count, 1)
         XCTAssertEqual(p2.legs[0].grade, .yellow)
-        XCTAssertEqual(p2.legs[0].reasons.map(\.title), ["Maintained channel depth", "Bridge must open"])
+        XCTAssertEqual(p2.legs[0].reasons.map(\.title), ["Maintained channel depth", "Bridge must open", "Lock or floodgate"])
         XCTAssertEqual(p2.legs[0].overheads, ["Under Test Opening Bridge (5.9 ft closed, must open)"])
         let l2 = Dictionary(uniqueKeysWithValues: p2.summary.map { ($0.id, $0) })
         XCTAssertEqual(l2["openings"]?.value, "1: Test Opening Bridge")
         XCTAssertEqual(l2["openings"]?.isWarning, true)
         XCTAssertEqual(l2["clearance"]?.value, "Test Opening Bridge: 5.9 ft closed (opening bridge)")
         XCTAssertEqual(l2["data"]?.value, "1 Nov 2026 (12 days old)")
-        XCTAssertEqual(p2.storedLegs, [AutoRouteInfo.Leg(index: 0, grade: .yellow, reasonCodes: ["MAINTAINED_DEPTH", "BRIDGE_OPENING"],
+        XCTAssertEqual(p2.storedLegs, [AutoRouteInfo.Leg(index: 0, grade: .yellow, reasonCodes: ["MAINTAINED_DEPTH", "BRIDGE_OPENING", "LOCK"],
                                                          leastDepthMeters: 0.9, leastClearanceMeters: nil)])
         guard case .needsConfirmation(let c2) = p2.safety else { return XCTFail() }
-        XCTAssertEqual(c2.reasons, ["Maintained channel depth (1 leg)", "Bridge must open (1 leg)"])
+        XCTAssertEqual(c2.reasons, ["Maintained channel depth (1 leg)", "Bridge must open (1 leg)", "Lock or floodgate (1 leg)"])
+        XCTAssertEqual(l2["locks"]?.value, "1: Test Lock (operation, hours and restrictions not known to the app)")
+        XCTAssertEqual(l2["locks"]?.isWarning, true)
         XCTAssertEqual(c2.title, "1 leg needs caution")
 
         let s3 = await planner.plan(AutoRoutePlanRequest(
             start: RoutingFixtures.synWest, goal: RoutingFixtures.synEast,
             profile: RoutingFixtures.profile(draftFeet: 4, marginFeet: 1, airFeet: 8, unknown: true)), now: RoutingFixtures.now)
         let p3 = try XCTUnwrap(s3.proposal, "\(s3)")
-        XCTAssertEqual(p3.legs.count, 3)
+        XCTAssertEqual(p3.legs.count, 4)
         XCTAssertEqual(p3.greenLegs, 1)
-        XCTAssertEqual(p3.yellowLegs, 2)
-        XCTAssertEqual(Set(p3.legs.flatMap { $0.reasons.map(\.title) }), ["Clearance not charted", "Restricted area", "Near a charted hazard"])
+        XCTAssertEqual(p3.yellowLegs, 3)
+        let titles3: Set<String> = Set(p3.legs.flatMap { $0.reasons.map(\.title) })
+        XCTAssertEqual(titles3, ["Clearance not charted", "Restricted area", "Near a charted hazard", "Relies on spot soundings"])
         let l3 = Dictionary(uniqueKeysWithValues: p3.summary.map { ($0.id, $0) })
         XCTAssertEqual(l3["unknownClearance"]?.value, "1: Test Cable")
         XCTAssertEqual(l3["clearance"]?.value, "Test Fixed Bridge: 9.8 ft")
@@ -708,7 +742,7 @@ final class AutoRouteSafetyAndSavingTests: XCTestCase {
             XCTFail("yellow legs need the confirmation")
         } catch {
             guard case .confirmationRequired(let c) = error else { return XCTFail("\(error)") }
-            XCTAssertEqual(c.title, "16 legs need caution")
+            XCTAssertEqual(c.title, "6 legs need caution")
         }
         var forged = proposal
         forged.storedLegs[3].grade = .red
@@ -727,18 +761,18 @@ final class AutoRouteSafetyAndSavingTests: XCTestCase {
         // Reopen the file: the route comes back as the existing screens read it.
         let reopened = try PersistenceStore(url: file)
         let route = try await XCTUnwrapAsync(await reopened.route(saved.id))
-        XCTAssertEqual(route.points.count, 56)
+        XCTAssertEqual(route.points.count, 12)
         XCTAssertEqual(route.points.first?.name, "Marina Jack")
         XCTAssertEqual(route.points.last?.name, "Roberts Bay")
         XCTAssertEqual(route.points[1].coordinate, proposal.points[1])
         XCTAssertTrue(route.notes.hasPrefix("Auto-route suggestion from Gulf Nav."))
         XCTAssertTrue(route.notes.contains("Chart data: 23 Oct 2026"))
         let info = try XCTUnwrap(route.metadata?.autoRouteInfo)
-        XCTAssertEqual(info.legs.count, 55)
-        XCTAssertEqual(info.legs.filter { $0.grade == .yellow }.count, 16)
+        XCTAssertEqual(info.legs.count, 11)
+        XCTAssertEqual(info.legs.filter { $0.grade == .yellow }.count, 6)
         XCTAssertEqual(info.legs, proposal.storedLegs)
         XCTAssertEqual(info.summary.worstGrade, .yellow)
-        XCTAssertEqual(info.summary.distanceMeters ?? 0, 8545.565739365891, accuracy: 1e-6)
+        XCTAssertEqual(info.summary.distanceMeters ?? 0, 8480.826658033386, accuracy: 1e-6)
         XCTAssertEqual(info.summary.shallowestDepthMeters, 0)
         XCTAssertEqual(info.summary.lowestClearanceMeters ?? 0, 7.6, accuracy: 1e-9)
         XCTAssertEqual(info.routingPackVersion, "pilot-sarasota-20261023")
@@ -750,15 +784,15 @@ final class AutoRouteSafetyAndSavingTests: XCTestCase {
         XCTAssertEqual(info.generatedAt, RoutingFixtures.now)
         let record = try XCTUnwrap(AutoRouteSaving.plannerRecord(of: route))
         XCTAssertEqual(record.packRegionID, "pilot-sarasota")
-        XCTAssertEqual(record.yellowLegs, 16)
+        XCTAssertEqual(record.yellowLegs, 6)
         XCTAssertEqual(record.goalSnapMeters, proposal.result.goal.snapMeters, accuracy: 1e-9)
         XCTAssertEqual(record.noticeVersion, AutoRouteNotice.version)
 
         // What the map and the Route check section use.
         let display = RouteDisplay(route: route)
-        XCTAssertEqual(display.legs.count, 55)
-        XCTAssertEqual(display.legs.filter { $0.grade == "yellow" }.count, 16)
-        XCTAssertEqual(display.legs.filter { $0.grade == "green" }.count, 39)
+        XCTAssertEqual(display.legs.count, 11)
+        XCTAssertEqual(display.legs.filter { $0.grade == "yellow" }.count, 6)
+        XCTAssertEqual(display.legs.filter { $0.grade == "green" }.count, 5)
         XCTAssertEqual(display.summary?.worstGrade, .yellow)
         XCTAssertEqual(display.routingPackDataDate, ChartDates.day(2026, 10, 23))
         let legsJSON = String(decoding: MapFeatures.routeLegs([display], activeRouteID: nil, activeLeg: nil), as: UTF8.self)
@@ -776,8 +810,8 @@ final class AutoRouteSafetyAndSavingTests: XCTestCase {
             profile: RoutingFixtures.profile(draftFeet: 4.5, marginFeet: 1.5, airFeet: 20)), now: RoutingFixtures.now)
         let proposal = try XCTUnwrap(planned.proposal)
         let route = try await AutoRouteSaving.save(proposal, name: "Green", cautionConfirmed: false, store: fixture.store)
-        XCTAssertEqual(route.points.count, 29)
-        XCTAssertEqual(RouteDisplay(route: route).legs.map(\.grade), Array(repeating: "green", count: 28))
+        XCTAssertEqual(route.points.count, 8)
+        XCTAssertEqual(RouteDisplay(route: route).legs.map(\.grade), Array(repeating: "green", count: 7))
         do {
             _ = try await AutoRouteSaving.save(proposal, name: "  ", cautionConfirmed: false, store: fixture.store)
             XCTFail()
@@ -811,13 +845,13 @@ final class AutoRouteDisplayTests: XCTestCase {
         let ok = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.longboat, goal: RoutingFixtures.marinaJack, profile: boat),
                                     now: RoutingFixtures.now)
         let layer = PlannedRouteLayer(outcome: ok)
-        XCTAssertEqual(layer.legs.count, 28)
+        XCTAssertEqual(layer.legs.count, 7)
         XCTAssertEqual(layer.blocked, [])
         let overlays = MapOverlays.make(waypoints: [], selectedWaypoint: nil, targetWaypoint: nil, routes: [], activeRouteID: nil,
                                         nextPointIndex: nil, editingRouteID: nil, tracks: [], directLine: nil, planned: layer)
-        XCTAssertEqual(overlays.counts.plannedLegs, 28)
+        XCTAssertEqual(overlays.counts.plannedLegs, 7)
         XCTAssertEqual(overlays.counts.blocked, 0)
-        XCTAssertEqual(overlays.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0,plannedLegs:28,blocked:0")
+        XCTAssertEqual(overlays.summary, "waypoints:0,routeLegs:0,routePoints:0,tracks:0,direct:0,plannedLegs:7,blocked:0")
         let json = String(decoding: overlays.planned, as: UTF8.self)
         XCTAssertTrue(json.contains("\"grade\":\"green\""))
         XCTAssertTrue(json.hasPrefix("{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[[-82.603,27.403],"), json)

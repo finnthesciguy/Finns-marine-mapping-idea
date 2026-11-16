@@ -29,6 +29,8 @@ public enum CautionReason: String, Hashable, Sendable, Codable, CaseIterable {
     case soundingDepth = "SOUNDING_DEPTH"
     /// A bridge must open for the boat's air draft.
     case bridgeOpening = "BRIDGE_OPENING"
+    /// Passes a lock or navigable floodgate: operation, hours and restrictions are not known to the app.
+    case lock = "LOCK"
     /// Passes under an object of unknown clearance.
     case unknownClearance = "UNKNOWN_CLEARANCE"
     case restrictedArea = "RESTRICTED_AREA"
@@ -131,6 +133,28 @@ public struct OverheadRun: Hashable, Sendable {
     public var centroid: GridPoint
 }
 
+/// A lock or navigable floodgate along the route (spec B.12 `locks`).
+public struct LockRun: Hashable, Sendable {
+    public var corridorIndex: Int
+    /// `AREA` record of the lock (kind 4), or nil if the triangle names none.
+    public var area: Int?
+    public var name: String
+    public var centroid: GridPoint
+}
+
+/// An area-wide advisory that applies to the route (spec B.12 `advisories`): reported once, never on a leg.
+public struct AreaAdvisory: Hashable, Sendable {
+    /// `AREA` record index.
+    public var area: Int
+    /// 2 restricted, 3 caution.
+    public var kind: Int
+    /// 1 RESARE, 2 CTNARE, 4 chart-datum note.
+    public var source: Int
+    public var name: String
+    /// The chart's text (INFORM), or the datum note.
+    public var text: String
+}
+
 /// Whole-route summary (spec B.12).
 public struct RouteSummary: Hashable, Sendable {
     public var distanceMeters: Double
@@ -143,6 +167,10 @@ public struct RouteSummary: Hashable, Sendable {
     public var lowestClearance: LowestClearance?
     public var openings: [OverheadRun]
     public var unknownClearances: [OverheadRun]
+    /// Locks and navigable floodgates passed, in order (format 1.2).
+    public var locks: [LockRun]
+    /// Area-wide advisories (sanctuaries, regulated navigation areas, non-MLLW chart datum), by `AREA` index.
+    public var advisories: [AreaAdvisory]
     public var maintainedTriangles: Int
     public var dataDate: PackDate
 }
@@ -156,7 +184,7 @@ public struct RouteResult: Hashable, Sendable {
     public var requiredAirDm: Int
     public var start: SnappedEndpoint
     public var goal: SnappedEndpoint
-    /// Triangles from start to goal (spec B.7).
+    /// Triangles from start to goal: the triangles the legs cross, in order (spec B.8).
     public var corridor: [Int]
     /// Waypoints in units: these are the exact, comparable result (spec D: `waypoints_units`).
     public var waypointsUnits: [GridPoint]

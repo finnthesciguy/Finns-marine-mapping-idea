@@ -38,25 +38,30 @@ def load_checks(region) -> dict:
     fend = np.asarray(shapely.from_wkb(ck["fenders"]), dtype=object) if len(ck["fenders"]) else np.zeros(0, object)
     bridges = np.asarray(shapely.from_wkb(ck["bridges"]), dtype=object) if len(ck["bridges"]) else np.zeros(0, object)
     over = ck["overhead"]
-    out = {"obstacles": obst, "fenders": fend, "bridges": bridges, "overhead": over,
+    locks = np.asarray(shapely.from_wkb(ck["lock_zones"]), dtype=object) if len(ck.get("lock_zones", [])) \
+        else np.zeros(0, object)
+    out = {"obstacles": obst, "fenders": fend, "bridges": bridges, "overhead": over, "locks": locks,
            "obst_tree": shapely.STRtree(obst), "fend_tree": shapely.STRtree(fend) if len(fend) else None,
            "bridge_tree": shapely.STRtree(bridges) if len(bridges) else None,
            "over_tree": shapely.STRtree(over.geometry.values) if len(over) else None}
     p = region.params
 
     def bridge_zone_ll(b):
+        """Bridge zones (60 m around bridges) and lock zones (C.2a): the reduced clearance applies."""
+        lk = [g for g in locks if g.intersects(b)]
         if out["bridge_tree"] is None:
-            return shapely.Polygon()
+            return shapely.union_all(lk) if lk else shapely.Polygon()
         idx = out["bridge_tree"].query(b)
         if not len(idx):
-            return shapely.Polygon()
+            return shapely.union_all(lk) if lk else shapely.Polygon()
         c = b.centroid
         crs = tmerc(round(c.x, 2))
         fw = Transformer.from_crs(GEO_CRS, crs, always_xy=True)
         bw = Transformer.from_crs(crs, GEO_CRS, always_xy=True)
         g = shapely.transform(bridges[idx], lambda xy: np.column_stack(fw.transform(xy[:, 0], xy[:, 1])))
         z = shapely.union_all(shapely.buffer(shapely.make_valid(g), p.bridge_zone_m, quad_segs=4))
-        return shapely.transform(z, lambda xy: np.column_stack(bw.transform(xy[:, 0], xy[:, 1])))
+        z = shapely.transform(z, lambda xy: np.column_stack(bw.transform(xy[:, 0], xy[:, 1])))
+        return shapely.union_all([z] + lk) if lk else z
     out["bridge_zone_ll"] = bridge_zone_ll
     return out
 
@@ -64,7 +69,9 @@ def load_checks(region) -> dict:
 def check_route(ck, waypoints, prof: Profile, p) -> dict:
     """Raw-data checks of one route (waypoints lon/lat)."""
     w = np.asarray(waypoints, float)
-    line_ll = shapely.LineString(w)
+    # A leg is straight in lon/lat (as the router and its validation see it, and close to the rhumb line a plotter
+    # steers). Densify it before projecting: a 40 km leg projected end to end would bow by several metres.
+    line_ll = shapely.segmentize(shapely.LineString(w), 0.0005)
     lon0 = float(np.mean(w[:, 0]))
     crs = tmerc(round(lon0, 2))
     fw = Transformer.from_crs(GEO_CRS, crs, always_xy=True)
