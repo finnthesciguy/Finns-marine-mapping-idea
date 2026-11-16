@@ -73,7 +73,15 @@ extension GulfNavUITests {
         // Long-press the chart well north of the boat (the chart follows the boat, so its centre is the
         // boat; a quarter of the screen up at zoom 9 is tens of miles) to drop a second waypoint.
         let arrivalsBefore: String = GulfNavUITests.statusField(app, "navArrivals") ?? "0"
-        GulfNavUITests.chartMap(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).press(forDuration: 1.2)
+        #if targetEnvironment(macCatalyst)
+        // Mac: the window is 632 points tall, so a quarter of the way down is under the top bar and the banners
+        // (here the arrival message and "No charts installed"); 42 % is clear chart, still tens of miles north at
+        // zoom 9.
+        let pressOffset = CGVector(dx: 0.5, dy: 0.42)
+        #else
+        let pressOffset = CGVector(dx: 0.5, dy: 0.25)
+        #endif
+        GulfNavUITests.chartMap(app).coordinate(withNormalizedOffset: pressOffset).press(forDuration: 1.2)
         waitForStatus(app, "waypoints", "2")
         // The new waypoint is selected. Its default number never repeats: WP 001 was renamed, so this is
         // WP 002 (AppServices.WaypointNumbering). Read the name rather than assume it, then check it.
@@ -143,7 +151,13 @@ extension GulfNavUITests {
         let map: XCUIElement = GulfNavUITests.chartMap(app)
         // Upper half of the chart: the route edit bar, the map buttons and the instruments fill the lower
         // half on a phone (the first run's third point at 46 % landed on the edit bar), and banners the top.
+        #if targetEnvironment(macCatalyst)
+        // Mac: in a 632-point window the top 25 % holds the top bar and the "No charts installed" banner (a click
+        // there opens the Charts screen), and the bottom third the edit bar, buttons and instruments.
+        let offsets: [CGVector] = [CGVector(dx: 0.40, dy: 0.38), CGVector(dx: 0.60, dy: 0.44), CGVector(dx: 0.48, dy: 0.52)]
+        #else
         let offsets: [CGVector] = [CGVector(dx: 0.35, dy: 0.22), CGVector(dx: 0.62, dy: 0.28), CGVector(dx: 0.45, dy: 0.35)]
+        #endif
         for (index, offset) in offsets.enumerated() {
             map.coordinate(withNormalizedOffset: offset).tap()
             waitForStatus(app, "editPoints", String(index + 1))
@@ -529,6 +543,27 @@ extension GulfNavUITests {
         entry.click()
     }
 
+    #if targetEnvironment(macCatalyst)
+    /// Mac: prints how many alerts, sheets and dialogs exist and the buttons in them, when a confirmation button
+    /// was not found.
+    @MainActor
+    func logDialogs(_ app: XCUIApplication) {
+        print("GULFNAV-NOTE alerts=\(app.alerts.count) sheets=\(app.sheets.count) dialogs=\(app.dialogs.count) popovers=\(app.popovers.count)")
+        for (name, query) in [("alert", app.alerts), ("sheet", app.sheets), ("dialog", app.dialogs), ("popover", app.popovers)] {
+            guard query.count > 0 else { continue }
+            let buttons: XCUIElementQuery = query.firstMatch.buttons
+            var titles: [String] = []
+            var index: Int = 0
+            while index < buttons.count && index < 12 {
+                let button: XCUIElement = buttons.element(boundBy: index)
+                titles.append("'\(button.label)'/'\(button.title)'/'\(button.identifier)'")
+                index += 1
+            }
+            print("GULFNAV-NOTE \(name) buttons: \(titles.joined(separator: ", "))")
+        }
+    }
+    #endif
+
     /// Mac: prints the menu bar's top-level titles as a GULFNAV-NOTE line.
     @MainActor
     func logMenuBar(_ app: XCUIApplication) {
@@ -573,6 +608,19 @@ extension GulfNavUITests {
     /// Taps a confirmation dialog's button by identifier, falling back to its label.
     @MainActor
     func tapConfirmation(_ app: XCUIApplication, identifier: String, label: String) {
+        #if targetEnvironment(macCatalyst)
+        // Mac: alerts and confirmation dialogs are AppKit alert sheets or popovers; SwiftUI's identifier may not
+        // reach their buttons, and a Mac button's text can be in `title` rather than `label`. Match any button in
+        // any window by identifier, label or title.
+        let predicate = NSPredicate(format: "identifier == %@ OR label == %@ OR title == %@", identifier, label, label)
+        let macButton: XCUIElement = app.descendants(matching: .button).matching(predicate).firstMatch
+        if macButton.waitForExistence(timeout: GulfNavUITests.stepTimeout) {
+            print("GULFNAV-NOTE confirmation '\(label)' found as \(macButton.identifier.isEmpty ? "label/title" : "identifier \(macButton.identifier)")")
+            macButton.click()
+            return
+        }
+        logDialogs(app)
+        #endif
         // A confirmation dialog can expose its button more than once in the accessibility tree,
         // so never use a query that requires a single match here.
         let matches: XCUIElementQuery = app.buttons.matching(identifier: identifier)

@@ -162,6 +162,17 @@ enum MacWindow {
             let tooSmall: Bool = current.width < minimum.width || current.height < minimum.height
             let belowWanted: Bool = current.width < wanted.width - 20 || current.height < wanted.height - 20
             guard tooSmall || (starting && belowWanted) else { continue }
+            // CI showed the geometry request alone being ignored (window stayed 800 x 632 after five requests).
+            // Raising the minimum size to the wanted size makes the system grow the window; the real minimum is
+            // put back shortly after, so the user can still make the window smaller.
+            if starting && belowWanted {
+                windowScene.sizeRestrictions?.minimumSize = wanted
+                let restore: CGSize = minimum
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    windowScene.sizeRestrictions?.minimumSize = restore
+                }
+            }
             let frame = CGRect(x: 20, y: 40, width: wanted.width, height: wanted.height)
             requestCount += 1
             lastRequest = "\(Int(frame.width))x\(Int(frame.height)) (request \(requestCount), window was \(Int(current.width))x\(Int(current.height)))"

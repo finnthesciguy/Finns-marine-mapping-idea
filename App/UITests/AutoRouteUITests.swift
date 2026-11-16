@@ -96,7 +96,14 @@ extension GulfNavUITests {
         name.tap()
         let legs: XCUIElement = scrollTo(app, "route.check.legs")
         XCTAssertEqual(legs.label, "28 legs: 28 green, 0 yellow")
+        #if targetEnvironment(macCatalyst)
+        scrollTo(app, "route.check.distance")
+        #endif
         XCTAssertEqual(GulfNavUITests.element(app, "route.check.distance").label, "5.70 nm")
+        #if targetEnvironment(macCatalyst)
+        // Mac: the Route check rows below "legs" may be under the fold of the 800 x 632 window's sheet.
+        scrollTo(app, "route.check.data")
+        #endif
         let data: XCUIElement = GulfNavUITests.element(app, "route.check.data")
         XCTAssertTrue(data.label.hasPrefix("23 Oct 2026 ("), data.label)
         attachScreenshot(app, "autoroute-route-check")
@@ -186,8 +193,9 @@ extension GulfNavUITests {
 
         // Make Bravo the default.
         app.staticTexts["profile.name.Bravo"].tap()
-        let makeDefault: XCUIElement = GulfNavUITests.element(app, "profile.makeDefault")
-        XCTAssertTrue(makeDefault.waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        // The editor's "Make default" is below its fields; on the Mac's shorter sheet it needs scrolling to.
+        let makeDefault: XCUIElement = scrollTo(app, "profile.makeDefault")
+        XCTAssertTrue(makeDefault.exists)
         makeDefault.tap()
         waitForStatus(app, "defaultProfile", "Bravo")
 
