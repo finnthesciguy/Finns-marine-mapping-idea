@@ -452,6 +452,9 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/MacTestDerivedData" \
             -resultBundlePath "$RUNNER_TEMP/GulfNavMacTests.xcresult" \
             -parallel-testing-enabled NO \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 420 \
             "${signing[@]}" > "$RUNNER_TEMP/mac-test-run.log" 2>&1
           status=$?
           xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/GulfNavMacTests.xcresult" --compact \
@@ -522,6 +525,10 @@ jobs:
         run: |
           if [ -f "$RUNNER_TEMP/mac-test-summary.txt" ]; then
             cat "$RUNNER_TEMP/mac-test-summary.txt"
+          elif [ -f "$RUNNER_TEMP/mac-test-run.log" ]; then
+            echo "The test step did not finish (cancelled or timed out); summary of the partial log:"
+            SUMMARY_TITLE="Mac app" SUMMARY_NOTES=1 bash App/Scripts/test-summary.sh "$RUNNER_TEMP/mac-test-run.log" 124 || true
+            tail -n 15 "$RUNNER_TEMP/mac-test-run.log" | cut -c1-300
           else
             echo "No test summary: the job stopped before the tests ran (see the failing step above)."
             if [ -f "$RUNNER_TEMP/mac-test-build.log" ]; then
