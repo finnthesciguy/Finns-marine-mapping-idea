@@ -14,6 +14,16 @@ final class ChartMapModel {
     private(set) var planRevision: Int = 0
     private(set) var badge: ChartAgeBadge?
     private(set) var hasCharts: Bool = false
+    /// Online NOAA charts are on (drawn under any installed regions).
+    private(set) var liveCharts: Bool = false
+    /// The tile loader the Mac map draws from (nil when online charts are off; the iOS map lets MapLibre fetch).
+    @ObservationIgnored private(set) var liveLoader: LiveChartTileLoader?
+    var liveStatus: LiveChartStatus = LiveChartStatus()
+
+    func setLiveCharts(_ loader: LiveChartTileLoader?) {
+        liveLoader = loader
+        liveCharts = loader != nil
+    }
     var follow: Bool = true
     var orientation: MapOrientationMode = .northUp
     /// A camera position to move to once (framing a planned route); applied when `focusRevision` changes.

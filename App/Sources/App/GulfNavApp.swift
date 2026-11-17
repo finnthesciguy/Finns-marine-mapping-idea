@@ -23,7 +23,7 @@ struct GulfNavApp: App {
                     }
                 }
         }
-        .defaultSize(width: MacWindow.defaultSize.width, height: MacWindow.defaultSize.height)
+        .defaultSize(width: MacWindow.launchSize.width, height: MacWindow.launchSize.height)
         .windowResizability(.contentMinSize)
         .commands {
             MacCommands(model: model)

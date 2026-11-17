@@ -135,6 +135,16 @@ extension GPXDocumentTypes {
 @MainActor
 enum MacWindow {
     static let defaultSize: CGSize = CGSize(width: 1280, height: 860)
+
+    /// The default window size clamped to the main screen (less room for the menu bar, title bar and Dock). On
+    /// CI's 1024 × 768 screen the unclamped 1280 × 860 default was not used and the window opened at the minimum;
+    /// a default that fits may be. (A larger screen gets 1280 × 860.)
+    static var launchSize: CGSize {
+        let screen: CGSize = UIScreen.main.bounds.size
+        guard screen.width > 0, screen.height > 0 else { return defaultSize }
+        return CGSize(width: max(contentMinimum.width, min(defaultSize.width, screen.width - 60)),
+                      height: max(contentMinimum.height, min(defaultSize.height, screen.height - 140)))
+    }
     /// Fits a 1024 × 768 display with the menu bar and Dock.
     static let contentMinimum: CGSize = CGSize(width: 800, height: 600)
     private static var lastRequest: String = "none"

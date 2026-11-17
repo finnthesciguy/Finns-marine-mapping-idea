@@ -48,8 +48,17 @@ targets:
       - path: Resources
         excludes:
           - PrivacyInfo.xcprivacy
+          - RoutingPacks
+          - RoutingPacks/**
       - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
+      # Routing packs shipped in the app (ncds_10.pack … ncds_14.pack and manifest.json), copied as one folder
+      # (RoutingPacks/ in the bundle) and linked into the routing-pack library at first launch
+      # (AppServices.BundledRoutingPacks). The folder may hold only .gitkeep until the packs are built.
+      - path: Resources/RoutingPacks
+        type: folder
+        buildPhase: resources
+        optional: true
       # ChartKit's sample Gulf manifest, bundled as the region list for this first build.
       - path: ../Packages/ChartKit/Samples/gulf-manifest.sample.json
         buildPhase: resources
@@ -149,8 +158,17 @@ targets:
       - path: Resources
         excludes:
           - PrivacyInfo.xcprivacy
+          - RoutingPacks
+          - RoutingPacks/**
       - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
+      # Routing packs shipped in the app (ncds_10.pack … ncds_14.pack and manifest.json), copied as one folder
+      # (RoutingPacks/ in the bundle) and linked into the routing-pack library at first launch
+      # (AppServices.BundledRoutingPacks). The folder may hold only .gitkeep until the packs are built.
+      - path: Resources/RoutingPacks
+        type: folder
+        buildPhase: resources
+        optional: true
       - path: ../Packages/ChartKit/Samples/gulf-manifest.sample.json
         buildPhase: resources
         group: Resources

@@ -48,7 +48,8 @@ extension GulfNavUITests {
         // ⌘R starts recording, the menu item stops it.
         app.typeKey("r", modifierFlags: XCUIElement.KeyModifierFlags.command)
         waitForStatus(app, "recording", "recording")
-        clickMenuItem(app, menu: "Navigation", item: "Start or Stop Recording")
+        // While recording, the menu item's title is "Stop Recording" (live menu state).
+        clickMenuItem(app, menu: "Navigation", item: "Stop Recording")
         waitForStatus(app, "recording", "idle")
 
         // ⌘2 opens the waypoint list.
@@ -108,6 +109,45 @@ extension GulfNavUITests {
         waitForOverlay(app, "waypoints", atLeast: 1)
         GulfNavUITests.logMapStatus(app, "mac-nofix")
         attachScreenshot(app, "mac-no-position")
+    }
+
+    /// A first launch as a downloaded Release build behaves: no fixture chart or routing pack, online NOAA charts on
+    /// (`GULFNAV_LIVE_CHARTS=1`, the Release default) and the routing packs shipped in the app linked
+    /// (`GULFNAV_BUNDLED_ROUTING=1`). The chart shows a chart source (no "No charts installed" banner), the
+    /// Charts screen has the online source with its status, and every bundled pack is registered with the
+    /// routing-pack library (0 packs is accepted while the app ships none yet). NOAA's service may or may not be
+    /// reachable from CI: its connection state is only reported, not asserted.
+    @MainActor
+    func testMacFreshLaunchHasAChartSourceAndBundledRoutingPacks() throws {
+        let app: XCUIApplication = GulfNavUITests.makeApp(root: GulfNavUITests.uniqueRoot("mac-fresh"), reset: true)
+        app.launchEnvironment["GULFNAV_LIVE_CHARTS"] = "1"
+        app.launchEnvironment["GULFNAV_BUNDLED_ROUTING"] = "1"
+        app.launch()
+        acceptDisclaimer(app)
+        waitForStatus(app, "liveOn", "yes")
+        waitUntil(GulfNavUITests.stepTimeout, "bundled routing packs linked, status: \(GulfNavUITests.appStatusValue(app))") {
+            let value: String = GulfNavUITests.statusField(app, "bundledPacks") ?? "-1"
+            return value != "-1"
+        }
+        let bundled: String = GulfNavUITests.statusField(app, "bundledPacks") ?? "?"
+        XCTAssertEqual(GulfNavUITests.statusField(app, "bundledProblems"), "0", "every bundled pack passed its check")
+        waitForStatus(app, "routingPacks", bundled)
+        print("GULFNAV-NOTE bundled routing packs registered: \(bundled)")
+        XCTAssertFalse(app.buttons["map.noChartsBanner"].exists, "online charts are a chart source")
+
+        app.buttons["map.chartsButton"].tap()
+        let toggle: XCUIElement = app.descendants(matching: .any).matching(identifier: "charts.liveToggle").firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: GulfNavUITests.stepTimeout), "online NOAA charts entry")
+        let line: XCUIElement = app.staticTexts["charts.liveStatus"]
+        XCTAssertTrue(line.waitForExistence(timeout: GulfNavUITests.stepTimeout))
+        XCTAssertTrue(line.label.hasPrefix("Online NOAA charts"), line.label)
+        // Give the chart a few seconds to ask NOAA for the visible tiles, then report what happened.
+        RunLoop.current.run(until: Date().addingTimeInterval(8))
+        print("GULFNAV-NOTE online charts: \(line.label); \(GulfNavUITests.statusField(app, "liveCharts") ?? "?"), fetched \(GulfNavUITests.statusField(app, "liveFetched") ?? "?"), failures \(GulfNavUITests.statusField(app, "liveFailures") ?? "?")")
+        attachScreenshot(app, "mac-fresh-charts")
+        app.buttons["charts.done"].tap()
+        attachScreenshot(app, "mac-fresh-map")
+        GulfNavUITests.logMapStatus(app, "mac-fresh")
     }
 
     /// Polls `condition` for up to `seconds` without recording a failure.

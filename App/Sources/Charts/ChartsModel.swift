@@ -22,6 +22,12 @@ final class ChartsModel {
     private(set) var sideLoadMessage: String?
     let manifestError: String?
 
+    /// Online NOAA charts (shown in the Charts screen; toggled through `onLiveChartsToggle`).
+    var liveCharts: Bool = false
+    var liveStatus: LiveChartStatus = LiveChartStatus()
+    var liveCacheBytes: Int64 = 0
+    @ObservationIgnored var onLiveChartsToggle: (@MainActor (Bool) -> Void)?
+
     /// Set to ask the user to confirm a download (shows the size first).
     var pendingDownload: PendingDownload?
     /// Set to ask the user to confirm deleting a region.

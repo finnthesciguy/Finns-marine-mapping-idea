@@ -58,7 +58,9 @@ struct MapScreen: View {
                              Task { await perform(action, at: coordinate) }
                          },
                          cameraCommand: cameraCommand,
-                         onCenterChanged: { center in mapCenter = center })
+                         onCenterChanged: { center in mapCenter = center },
+                         liveCharts: map.liveCharts,
+                         liveLoader: map.liveLoader)
                 .ignoresSafeArea()
 
             VStack(spacing: 8) {
@@ -102,7 +104,8 @@ struct MapScreen: View {
             VStack {
                 HStack {
                     StatusProbe(identifier: "app.status",
-                                value: model.autoRoute.statusValue + "; " + model.profiles.statusValue + "; " + plotter.statusValue)
+                                value: model.autoRoute.statusValue + "; " + model.profiles.statusValue + "; " + plotter.statusValue
+                                    + "; " + model.statusValue)
                         .frame(width: 2, height: 2)
                     #if targetEnvironment(macCatalyst)
                     // Debug probe for the UI tests: the window and screen size as macOS reports them.
@@ -364,7 +367,16 @@ struct MapScreen: View {
             }
             .buttonStyle(.plain)
         }
-        if !model.map.hasCharts {
+        if model.map.liveCharts && model.map.liveStatus.connection == .offline {
+            Button {
+                sheet = .charts
+            } label: {
+                Banner(text: "Offline: online NOAA charts show only tiles saved on this device.", systemImage: "wifi.slash")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("map.liveOffline")
+        }
+        if !model.map.hasCharts && !model.map.liveCharts {
             Button {
                 sheet = .charts
             } label: {

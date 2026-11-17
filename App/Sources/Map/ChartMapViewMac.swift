@@ -73,6 +73,10 @@ struct ChartMapView: UIViewRepresentable {
     var cameraCommand: MapCameraCommand? = nil
     /// Mac: the centre of the chart after the camera settled (drop a waypoint there when there is no position).
     var onCenterChanged: ((Coordinate) -> Void)? = nil
+    /// Online NOAA charts are on.
+    var liveCharts: Bool = false
+    /// Where the online tiles come from (disk cache, then NOAA); nil when online charts are off.
+    var liveLoader: LiveChartTileLoader? = nil
 
     func makeCoordinator() -> ChartMapCoordinator {
         ChartMapCoordinator()
@@ -185,7 +189,7 @@ enum ChartTileImage {
         return output as Data
     }
 
-    static func context() -> CGContext? {
+    static func context(side: Int = ChartTileImage.side) -> CGContext? {
         CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     }
@@ -217,9 +221,11 @@ enum ChartTileImage {
         let rect = CGRect(x: CGFloat(source.cropX) * width, y: CGFloat(source.cropY) * height,
                           width: max(1, CGFloat(source.cropSize) * width),
                           height: max(1, CGFloat(source.cropSize) * height)).integral
-        guard let part = image.cropping(to: rect), let context = context() else { return nil }
+        // Keep the source's resolution (512 px for a retina tile), so a scaled-up tile is not also blurred.
+        let out: Int = max(ChartTileImage.side, image.width)
+        guard let part = image.cropping(to: rect), let context = context(side: out) else { return nil }
         context.interpolationQuality = CGInterpolationQuality.medium
-        context.draw(part, in: CGRect(x: 0, y: 0, width: side, height: side))
+        context.draw(part, in: CGRect(x: 0, y: 0, width: out, height: out))
         guard let scaled = context.makeImage() else { return nil }
         return png(scaled)
     }
@@ -319,6 +325,51 @@ final class ChartTileOverlay: MKTileOverlay {
     }
 }
 
+/// Online NOAA charts (AppServices `LiveChartTileLoader`: disk cache, then NOAA's export service). Under the
+/// installed regions. On a Retina display MapKit asks with `contentScaleFactor` 2 and gets NOAA's true 2× tile
+/// (512 px rendered at 192 dpi), so chart text and symbols are sharp.
+final class LiveChartTileOverlay: MKTileOverlay {
+    let loader: LiveChartTileLoader
+    private let region: MKMapRect
+
+    init(loader: LiveChartTileLoader) {
+        self.loader = loader
+        let box: BoundingBox = LiveChartService.coverage
+        let northWest = MKMapPoint(CLLocationCoordinate2D(latitude: box.north, longitude: box.west))
+        let southEast = MKMapPoint(CLLocationCoordinate2D(latitude: box.south, longitude: box.east))
+        self.region = MKMapRect(x: min(northWest.x, southEast.x), y: min(northWest.y, southEast.y),
+                                width: abs(southEast.x - northWest.x), height: abs(southEast.y - northWest.y))
+        super.init(urlTemplate: nil)
+        canReplaceMapContent = false
+        tileSize = CGSize(width: 256, height: 256)
+        minimumZ = LiveChartService.minZoom
+        maximumZ = 22
+    }
+
+    override var boundingMapRect: MKMapRect { region }
+
+    override func loadTile(at path: MKTileOverlayPath, result: @escaping @Sendable (Data?, (any Error)?) -> Void) {
+        let tile = ChartTileMath.Tile(zoom: path.z, x: path.x, y: path.y)
+        let scale: Int = path.contentScaleFactor >= 1.5 ? 2 : 1
+        let loader: LiveChartTileLoader = self.loader
+        Task.detached {
+            let answer: LiveTileResult = await loader.tile(tile, scale: scale)
+            switch answer {
+            case .image(let data, let source):
+                if source.isWholeTile {
+                    result(data, nil)
+                } else if let cut = ChartTileImage.crop(data, source) {
+                    result(cut, nil)
+                } else {
+                    ChartTileOverlay.noTile(result)
+                }
+            case .empty, .unavailable:
+                ChartTileOverlay.noTile(result)
+            }
+        }
+    }
+}
+
 // MARK: - Overlay shapes
 
 /// A line of one overlay style layer.
@@ -386,6 +437,7 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     private var appliedRevision = -1
     private let water = WaterTileOverlay(replacingMapContent: true)
     private var chartOverlays: [ChartTileOverlay] = []
+    private var liveOverlay: LiveChartTileOverlay?
     private var lineOverlays: [StyledPolyline] = []
     private var pointAnnotations: [StyledPointAnnotation] = []
     private var appliedOverlays: [OverlaySource: Data] = [:]
@@ -430,6 +482,7 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     func update(with view: ChartMapView) {
         latest = view
         guard let mapView else { return }
+        applyLiveIfNeeded(view, on: mapView)
         applyPlanIfNeeded(view, on: mapView)
         applyOverlays(view, on: mapView)
         updateMarker(view, on: mapView)
@@ -437,6 +490,22 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     }
 
     // MARK: Charts
+
+    /// Online NOAA charts directly above the water base and under the installed regions.
+    private func applyLiveIfNeeded(_ view: ChartMapView, on mapView: MKMapView) {
+        let wanted: LiveChartTileLoader? = view.liveCharts ? view.liveLoader : nil
+        if let current = liveOverlay, let wanted, current.loader === wanted { return }
+        if liveOverlay == nil && wanted == nil { return }
+        if let current = liveOverlay {
+            mapView.removeOverlay(current)
+            liveOverlay = nil
+        }
+        if let wanted {
+            let overlay = LiveChartTileOverlay(loader: wanted)
+            mapView.insertOverlay(overlay, above: water)
+            liveOverlay = overlay
+        }
+    }
 
     private func applyPlanIfNeeded(_ view: ChartMapView, on mapView: MKMapView) {
         guard view.planRevision != appliedRevision else { return }
@@ -598,14 +667,20 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
         let drag = UIPanGestureRecognizer(target: self, action: #selector(handleDrag(_:)))
         drag.delegate = self
         layer.addGestureRecognizer(drag)
-        // Scroll wheel or two-finger trackpad scroll: zoom (scroll-only: no touch types, per the
-        // `allowedScrollTypesMask` documentation).
-        let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
-        scroll.allowedScrollTypesMask = UIScrollTypeMask.all
-        scroll.allowedTouchTypes = []
-        scroll.delegate = self
-        layer.addGestureRecognizer(scroll)
-        scrollRecognizer = scroll
+        // As in Apple's Maps on the Mac: two-finger trackpad scroll (continuous) pans, a mouse wheel (discrete)
+        // zooms. Both are scroll-only recognizers (no touch types, per the `allowedScrollTypesMask` documentation).
+        let trackpadScroll = UIPanGestureRecognizer(target: self, action: #selector(handleTrackpadScroll(_:)))
+        trackpadScroll.allowedScrollTypesMask = UIScrollTypeMask.continuous
+        trackpadScroll.allowedTouchTypes = []
+        trackpadScroll.delegate = self
+        layer.addGestureRecognizer(trackpadScroll)
+        trackpadRecognizer = trackpadScroll
+        let wheel = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+        wheel.allowedScrollTypesMask = UIScrollTypeMask.discrete
+        wheel.allowedTouchTypes = []
+        wheel.delegate = self
+        layer.addGestureRecognizer(wheel)
+        scrollRecognizer = wheel
         // Trackpad pinch: zoom.
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         pinch.delegate = self
@@ -615,6 +690,8 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     }
 
     private weak var scrollRecognizer: UIGestureRecognizer?
+    private weak var trackpadRecognizer: UIGestureRecognizer?
+    private var lastTrackpad: CGPoint = .zero
     private weak var pinchRecognizer: UIGestureRecognizer?
     private var lastDrag: CGPoint = .zero
     private var lastScroll: CGPoint = .zero
@@ -623,7 +700,7 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
     /// Scroll and pinch may run together with anything; clicks, holds and drags are exclusive.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        let free: [UIGestureRecognizer?] = [scrollRecognizer, pinchRecognizer]
+        let free: [UIGestureRecognizer?] = [scrollRecognizer, pinchRecognizer, trackpadRecognizer]
         return free.contains { $0 === gestureRecognizer || $0 === otherGestureRecognizer }
     }
 
@@ -650,6 +727,30 @@ final class ChartMapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognize
         }
     }
 
+    /// Two-finger trackpad scroll: moves the chart with the fingers (natural scrolling), like a drag.
+    @objc private func handleTrackpadScroll(_ recognizer: UIPanGestureRecognizer) {
+        guard let mapView else { return }
+        switch recognizer.state {
+        case .began:
+            lastTrackpad = recognizer.translation(in: mapView)
+            if let callback = latest?.onUserPannedMap {
+                DispatchQueue.main.async {
+                    callback()
+                }
+            }
+        case .changed:
+            let translation: CGPoint = recognizer.translation(in: mapView)
+            let dx: CGFloat = translation.x - lastTrackpad.x
+            let dy: CGFloat = translation.y - lastTrackpad.y
+            lastTrackpad = translation
+            let target = CGPoint(x: mapView.bounds.midX - dx, y: mapView.bounds.midY - dy)
+            mapView.setCenter(mapView.convert(target, toCoordinateFrom: mapView), animated: false)
+        default:
+            break
+        }
+    }
+
+    /// Mouse wheel: zoom.
     @objc private func handleScroll(_ recognizer: UIPanGestureRecognizer) {
         guard let mapView else { return }
         switch recognizer.state {

@@ -2,6 +2,7 @@ import AppServices
 import ChartKit
 import Foundation
 import Observation
+import Persistence
 
 /// Root of the app's state: composition (AppEnvironment), the disclaimer gate and the feature models.
 @MainActor
@@ -28,11 +29,22 @@ final class AppModel {
     let autoRoute: AutoRouteModel
     /// A GPX file opened in the app from elsewhere ("Open in…"), waiting for the map screen to plan it.
     var pendingOpenURL: URL?
+    /// Online NOAA chart tiles (disk cache under `Library/LiveCharts`, at most two requests in flight).
+    let liveCharts: LiveChartTileLoader
+    /// Routing packs shipped in the app and linked at start-up (`BundledRoutingPacks`), -1 until done.
+    private(set) var bundledPackCount: Int = -1
+    private(set) var bundledPackProblems: Int = 0
+    /// For the debug `app.status` probe: `bundledPacks=… bundledProblems=… liveCharts=… liveSetting=…`.
+    var statusValue: String {
+        "bundledPacks=\(bundledPackCount); bundledProblems=\(bundledPackProblems); " + map.liveStatus.statusValue
+            + "; liveOn=\(map.liveCharts ? "yes" : "no")"
+    }
     /// A menu-bar command (Mac) waiting for the map screen to carry it out.
     private(set) var commandRequest: AppCommandRequest?
     @ObservationIgnored private var commandSerial: Int = 0
 
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var liveStatusTask: Task<Void, Never>?
 
     init(environment: AppEnvironment, manifest: ManifestLoader.Loaded, navigation: NavigationModel,
          notices: [StartupNotice]) {
@@ -40,6 +52,10 @@ final class AppModel {
         self.navigation = navigation
         self.notices = notices
         let mapModel = ChartMapModel(library: environment.charts)
+        let liveRoot: URL = environment.paths.libraryDirectory.appendingPathComponent("LiveCharts", isDirectory: true)
+        try? FileManager.default.createDirectory(at: liveRoot, withIntermediateDirectories: true)
+        try? AppPaths.excludeFromBackup(liveRoot)
+        self.liveCharts = LiveChartTileLoader(cache: LiveChartCache(root: liveRoot))
         let chartsModel = ChartsModel(library: environment.charts, routingPacks: environment.routingPacks,
                                       regions: manifest.regions, manifestError: manifest.error)
         self.map = mapModel
@@ -69,6 +85,9 @@ final class AppModel {
         }
         chartsModel.onInstalledChange = { [weak mapModel] regions in
             mapModel?.update(installed: regions)
+        }
+        chartsModel.onLiveChartsToggle = { [weak self] on in
+            self?.setLiveCharts(on)
         }
         chartsModel.prepareForRemoval = { [weak mapModel] regionID in
             guard let mapModel else { return }
@@ -132,6 +151,10 @@ final class AppModel {
         if environment.launch.preinstallFixtureRouting {
             await installFixtureRouting()
         }
+        if environment.launch.installsBundledRoutingPacks {
+            await installBundledRoutingPacks()
+        }
+        await startLiveCharts()
         await plotter.start(resumedRecording: recovery.resumed)
         await profiles.start()
         map.orientation = plotter.data.settings.orientationMode
@@ -152,6 +175,65 @@ final class AppModel {
         }
         await charts.start()
         await autoRoute.refreshPacks()
+    }
+
+    /// Links the routing packs shipped in the app (`RoutingPacks/` in the bundle) into the routing-pack library on
+    /// the first launch and whenever the bundled set changes; packs that fail the check are reported in a banner.
+    private func installBundledRoutingPacks() async {
+        let directory: URL? = BundledRoutingPacks.directory(in: Bundle.main)
+        let library: RoutingPackLibrary = environment.routingPacks
+        let outcome: BundledRoutingPacks.Outcome = await Task.detached(priority: .userInitiated) {
+            BundledRoutingPacks.install(from: directory, library: library)
+        }.value
+        let catalog: RoutingPackCatalog = await library.catalog()
+        bundledPackCount = catalog.entries.filter { $0.fileURL.lastPathComponent.hasPrefix(BundledRoutingPacks.linkPrefix) }.count
+        bundledPackProblems = outcome.problems.count
+        if !outcome.problems.isEmpty {
+            notices.append(StartupNotice(kind: .storageFallback,
+                                         message: "Some routing packs shipped with the app could not be used: "
+                                             + outcome.problems.joined(separator: "; ")))
+        }
+    }
+
+    // MARK: Online NOAA charts
+
+    private func startLiveCharts() async {
+        var setting: Bool = SettingKey<Bool>.liveNOAACharts.defaultValue
+        if let stored = try? await environment.store.setting(.liveNOAACharts) { setting = stored }
+        applyLiveCharts(environment.launch.allowsLiveCharts(setting: setting))
+        let loader: LiveChartTileLoader = liveCharts
+        // Status for the Charts screen and the offline indicator; the cache is kept under 2 GB.
+        liveStatusTask = Task { [weak self] in
+            var rounds: Int = 0
+            while !Task.isCancelled {
+                let status: LiveChartStatus = await loader.status
+                guard let self else { return }
+                if self.map.liveStatus != status { self.map.liveStatus = status }
+                if self.charts.liveStatus != status { self.charts.liveStatus = status }
+                if rounds % 60 == 0 {
+                    let cache: LiveChartCache = loader.cache
+                    let bytes: Int64 = await Task.detached(priority: .utility) { () -> Int64 in
+                        cache.prune(maxBytes: 2_000_000_000)
+                        return cache.totalBytes()
+                    }.value
+                    self.charts.liveCacheBytes = bytes
+                }
+                rounds += 1
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+
+    /// The Charts screen's switch: saved, then applied (the launch switch of a test run still wins).
+    func setLiveCharts(_ on: Bool) {
+        let store: PersistenceStore = environment.store
+        Task { try? await store.setSetting(.liveNOAACharts, to: on) }
+        applyLiveCharts(environment.launch.allowsLiveCharts(setting: on))
+    }
+
+    private func applyLiveCharts(_ on: Bool) {
+        map.setLiveCharts(on ? liveCharts : nil)
+        charts.liveCharts = on
     }
 
     /// UI tests: side-load the bundled Sarasota routing pack and add its test waypoints (debug builds bundle it).

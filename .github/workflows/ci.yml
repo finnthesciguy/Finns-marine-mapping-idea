@@ -5,7 +5,8 @@
 #   - the iOS app (App/, generated with XcodeGen) built for the iOS Simulator without signing, and its UI and
 #     unit tests run on a booted simulator (job ios-app-tests),
 #   - the Mac app (target GulfNavMac: the same app as Mac Catalyst, MapKit chart map) built without signing
-#     (job mac-app), and its unit and UI tests run on the runner itself (job mac-app-tests).
+#     (job mac-app), and its unit and UI tests run on the runner itself (job mac-app-tests),
+#   - a Release Mac app, ad hoc signed and zipped, uploaded as the artifact GulfNav-Mac-app (job mac-app-download).
 # Packages and tools are discovered at run time, so new ones are picked up without editing this file.
 name: CI
 
@@ -355,6 +356,137 @@ jobs:
             echo "| Check | Result |"
             echo "|---|---|"
             echo "| Mac Catalyst build (generic/platform=macOS,variant=Mac Catalyst) | ${{ steps.build.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  mac-app-download:
+    # The Mac app as the owner downloads it to try: Release configuration (no test fixtures, no debug menus or
+    # probes), ad hoc signed (no Apple Developer account yet, so not notarised), zipped with ditto so the bundle's
+    # symlinks, permissions and signature survive, and uploaded as the artifact "GulfNav-Mac-app". How to open it:
+    # App/README-macOS.md, "Try it on your Mac".
+    name: Mac app (download to try)
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: App
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Generate project
+        run: xcodegen generate --spec project.yml
+      - name: Resolve packages
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies -project GulfNav.xcodeproj -scheme GulfNavMac \
+            -derivedDataPath "$RUNNER_TEMP/MacReleaseDerivedData" 2>&1 | tee "$RUNNER_TEMP/mac-release-resolve.log"
+      - id: build
+        name: Build Release for Mac Catalyst (ad hoc signed)
+        run: |
+          set +e
+          set -o pipefail
+          xcodebuild -project GulfNav.xcodeproj -scheme GulfNavMac -configuration Release \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath "$RUNNER_TEMP/MacReleaseDerivedData" \
+            -skipMacroValidation -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            build > "$RUNNER_TEMP/mac-release-build.log" 2>&1
+          status=$?
+          echo "xcodebuild exit status: $status"
+          echo "----- last 30 log lines -----"
+          tail -n 30 "$RUNNER_TEMP/mac-release-build.log"
+          echo "----- lines containing 'error:' (3 lines of context) -----"
+          grep -n -B 3 -A 3 'error:' "$RUNNER_TEMP/mac-release-build.log" | head -n 200 || echo "(none)"
+          echo "----- error count: $(grep -c 'error:' "$RUNNER_TEMP/mac-release-build.log" || true) -----"
+          exit $status
+      - id: check
+        name: Check, sign-verify and zip the app
+        run: |
+          set -uo pipefail
+          app="$RUNNER_TEMP/MacReleaseDerivedData/Build/Products/Release-maccatalyst/GulfNav.app"
+          if [ ! -x "$app/Contents/MacOS/GulfNav" ]; then
+            echo "::error::No Release GulfNav.app at $app"
+            find "$RUNNER_TEMP/MacReleaseDerivedData/Build/Products" -maxdepth 2 -name '*.app' || true
+            exit 1
+          fi
+          failed=0
+          echo "----- bundle -----"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist"
+          lipo -info "$app/Contents/MacOS/GulfNav"
+          echo "app size: $(du -sh "$app" | cut -f1)"
+          echo "----- code signature -----"
+          if codesign --verify --deep --strict --verbose=2 "$app" 2>&1; then
+            echo "codesign --verify: OK"
+          else
+            echo "::error::codesign --verify failed"
+            failed=1
+          fi
+          codesign -dv "$app" 2>&1 | grep -E 'Identifier|Signature|flags|TeamIdentifier' || true
+          echo "entitlements: $(codesign -d --entitlements - "$app" 2>/dev/null | grep -oE 'com\.apple\.security\.[a-z.-]+' | sort -u | tr '\n' ' ')"
+          echo "----- Release contents -----"
+          fixtures=$(find "$app" \( -name 'tiny-a.mbtiles' -o -name 'sarasota.pack' \) -print)
+          if [ -n "$fixtures" ]; then
+            echo "::error::Release app contains test fixtures: $fixtures"
+            failed=1
+          else
+            echo "no test fixtures (tiny-a.mbtiles, sarasota.pack): OK"
+          fi
+          if otool -L "$app/Contents/MacOS/GulfNav" | grep -q MapLibre; then
+            echo "::error::The Mac app links MapLibre"
+            failed=1
+          fi
+          packs="$app/Contents/Resources/RoutingPacks"
+          if [ -d "$packs" ]; then
+            echo "bundled routing packs: $(find "$packs" -name '*.pack' | wc -l | tr -d ' ') files, $(du -sh "$packs" | cut -f1)"
+            find "$packs" -maxdepth 1 -type f ! -name '.*' -exec ls -l {} \; | awk '{print "  " $5 " " $NF}'
+          else
+            echo "::warning::No RoutingPacks folder in the app (auto-routing will have no packs)"
+          fi
+          echo "----- zip -----"
+          short=$(git rev-parse --short HEAD)
+          zip="$RUNNER_TEMP/GulfNav-Mac-$short.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
+          echo "zip: $(basename "$zip"), $(du -h "$zip" | cut -f1)"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          exit $failed
+      - name: Upload the app
+        if: ${{ steps.check.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GulfNav-Mac-app
+          path: ${{ steps.check.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac-app-download-build-log
+          path: |
+            ${{ runner.temp }}/mac-release-build.log
+            ${{ runner.temp }}/mac-release-resolve.log
+          if-no-files-found: ignore
+      - name: Report
+        if: ${{ always() }}
+        working-directory: .
+        run: |
+          {
+            echo "### Mac app to download"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Release build (ad hoc signed) | ${{ steps.build.outcome }} |"
+            echo "| Signature, contents, zip | ${{ steps.check.outcome }} |"
+            echo ""
+            echo "Download the artifact **GulfNav-Mac-app** from this run's Summary page, unzip it, then follow"
+            echo "\"Try it on your Mac\" in App/README-macOS.md to open the unsigned app."
           } >> "$GITHUB_STEP_SUMMARY"
 
   mac-app-tests:

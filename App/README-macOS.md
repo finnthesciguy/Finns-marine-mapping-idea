@@ -1,5 +1,102 @@
 # Gulf Nav for Mac
 
+## Try it on your Mac
+
+**Download.** Every push to the pull request builds the Mac app.
+1. Open the pull request on GitHub, then the **Checks** tab (or the repository's **Actions** tab), and pick the
+   latest **CI** run.
+2. On the run's **Summary** page, scroll to **Artifacts** and download **GulfNav-Mac-app**. You need to be signed
+   in to GitHub. Artifacts are kept for 30 days.
+3. The download is a zip that contains `GulfNav-Mac-<commit>.zip`. Unzip both; Safari may already have unzipped
+   the outer one. Move **GulfNav.app** to your Applications folder.
+
+The build runs on Macs with Apple silicon and on Intel Macs, with macOS 14 or later.
+
+**Open it the first time.** The app is not notarised (there is no Apple Developer account yet), so macOS blocks it
+at first.
+1. Double-click **GulfNav**. macOS says it cannot verify the app ("“GulfNav” Not Opened"). Click **Done**; do not
+   move it to the Bin.
+2. Open **System Settings > Privacy & Security** and scroll down to **Security**. Next to "“GulfNav” was blocked to
+   protect your Mac", click **Open Anyway**, then confirm with your password or Touch ID.
+3. Double-click GulfNav again and click **Open**. From now on it opens normally.
+
+On macOS 15 and later, right-click > Open no longer skips this step.
+
+Alternative, in Terminal: remove the download quarantine flag, then open the app normally:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/GulfNav.app
+```
+
+If macOS says the app "is damaged and can't be opened", the quarantine flag is the cause. Use the `xattr` command
+above.
+
+**What to expect on the first launch.**
+- The disclaimer. You must accept it.
+- macOS asks to use your location; allow it or not. A Mac positions itself from Wi-Fi, if at all, so the boat
+  marker may not appear. Everything except "follow the boat" works without a position, and the instrument strip
+  says "No position…".
+- The chart opens over Tampa Bay showing **online NOAA charts**:
+  - They are current charts from NOAA's chart display service, loaded as you pan and zoom, so you need internet.
+  - Areas you have viewed are kept on the Mac for a week and show offline.
+  - **Charts** (⌘1) shows the source and whether it is connected.
+- The five NOAA offline regions can be downloaded from **Charts**. They are 381–621 MB each and are NOAA's May 2024
+  packages.
+- **Auto-routing** (⇧⌘N) uses the routing packs shipped inside the app. **Charts > Routing packs** lists them. If a
+  build ships none yet, the planner says no pack covers the area.
+- Your data lives in the app's sandbox: `~/Library/Containers/com.example.gulfnav/`. Delete that folder to start
+  again from scratch.
+
+**What to try** (the feedback that helps most):
+- Pan and zoom the chart:
+  - drag with the mouse, or two-finger scroll on a trackpad: pan;
+  - pinch or the mouse wheel: zoom;
+  - double-click: zoom in;
+  - ⌘= / ⌘-: zoom in and out.
+
+  Say whether it feels like Apple's Maps.
+- Is the chart sharp on your screen? Do tiles load quickly enough? What happens with Wi-Fi off?
+- Waypoints:
+  - click-and-hold, or right-click > Drop Waypoint Here, to drop one;
+  - click a waypoint to select it;
+  - Waypoints (⌘2): rename one, use Go To.
+- A route: New Route on Chart (⌘N), click points, Save, then Follow.
+- An auto-route: right-click > Auto-Route From Here, right-click > Auto-Route To Here, then Plan.
+- GPX: drag a `.gpx` file onto the window, or open one with File > Open With > GulfNav in Finder; export with ⇧⌘E.
+- The menu bar (Navigation, GPX, Chart): are commands missing, or where you would not expect them?
+- The window: does it open at a sensible size? Does it resize well?
+
+**Or build it yourself** (no Gatekeeper steps for an app you built). You need Xcode 26 from the App Store and
+[Homebrew](https://brew.sh). Replace `<pr-branch>` with the pull request's branch name:
+
+```sh
+brew install xcodegen
+git clone https://github.com/finnthesciguy/Finns-marine-mapping-idea.git
+cd Finns-marine-mapping-idea
+git checkout <pr-branch>
+cd App
+xcodegen generate
+xcodebuild -project GulfNav.xcodeproj -scheme GulfNavMac -configuration Release \
+  -destination 'generic/platform=macOS,variant=Mac Catalyst' -derivedDataPath build \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
+open build/Build/Products/Release-maccatalyst/GulfNav.app
+```
+
+Or `open GulfNav.xcodeproj` after `xcodegen generate`, choose the scheme **GulfNavMac** and the destination **My
+Mac**, and press Run (⌘R). That gives a Debug build, which has the Debug menu with simulated GPS.
+
+**Known to be rough** (no need to report these):
+- **Not notarised.** The Gatekeeper steps above are needed after every download.
+- **Positions.** Without GPS, positions come from Wi-Fi only. Track recording and route guidance need a real
+  position, so on a Mac they are mostly for testing with the Debug menu's simulated GPS (Debug builds only).
+- **Offline regions.** The NOAA regions are dated May 2024, and their tiles are not as sharp as the online ones on
+  a Retina screen.
+- **No labels on the chart.** Waypoint and route names appear in the lists and the selection card only.
+- **No arrow keys.** You cannot pan with the arrow keys yet.
+- **Window size on small screens.** On a small screen the window may open at its minimum size (800 × 600).
+
+## About the Mac version
+
 The Mac version is the iOS app built for the Mac with **Mac Catalyst**. It is the target `GulfNavMac` in
 `project.yml`, built from the same `Sources/`, `Resources/` and Swift packages as the iOS target `GulfNav`. It is
 not a fork: a change to a screen or a package reaches both apps. Every feature of the iOS app is in the Mac app:
@@ -106,14 +203,15 @@ boat moves up Tampa Bay as on the iOS simulator. The launch switches in `README.
 | Area | iOS | Mac |
 |---|---|---|
 | Chart engine | MapLibre Native 7.0.0 | MapKit tile overlays reading the same MBTiles (see above); MapKit's own zoom buttons and compass are hidden (they would sit under the input layer) |
+| Chart source on a new install | online NOAA charts (MapLibre raster source on NOAA's export service, `{bbox-epsg-3857}` tile URLs, MapLibre's own cache) | online NOAA charts through AppServices' `LiveChartTileLoader`: disk cache (`Application Support/…/LiveCharts`, a week per tile, kept under 2 GB), at most two requests in flight, generic User-Agent, Gulf box and zoom 3–16 only (deeper zooms cut from zoom 16). Retina tiles (512 px rendered at 192 dpi) on a Retina screen. "Offline" banner when NOAA cannot be reached. Charts > Online NOAA charts turns it off. Installed regions are drawn above it |
 | Position | GPS | Wi-Fi positioning through Location Services, often unavailable or denied. The instrument strip says "No position…" instead of showing values (also when the last fix is older than 30 s), and everything except "drop at the boat" and following works without a position |
 | "Drop Waypoint" with no position | error banner | dropped at the centre of the chart |
-| Chart interaction | tap, long-press, pinch | a transparent input layer over the MapKit map takes all pointer input (on CI a click on MKMapView never reached the app's tap recognizer): click (select a waypoint / add a route point), double-click (zoom in on the point), click-and-hold (drop a waypoint), drag (pan; turns follow mode off), scroll wheel or two-finger scroll (zoom), trackpad pinch (zoom), right-click or control-click context menu (Drop Waypoint Here, Go To Here, Auto-Route From Here, Auto-Route To Here, plus Select Waypoint on a waypoint), ⌘= / ⌘- |
-| Menu bar | — | Navigation: New Route on Chart ⌘N, Plan Auto-Route… ⇧⌘N, Drop Waypoint ⌘D, Start or Stop Recording ⌘R, Charts ⌘1, Waypoints ⌘2, Routes ⌘3, Tracks ⌘4. GPX: Import GPX… ⌘O, Export All as GPX… ⇧⌘E. Chart: Zoom In ⌘=, Zoom Out ⌘-, North Up ⌘U, Switch North Up / Course Up ⇧⌘U, Follow the Boat ⌘L. App menu: Settings… ⌘,. Debug builds: Debug menu. File > New (window) is removed: one window. Items given to SwiftUI's File-menu `.newItem` group never appeared on Mac Catalyst (CI), so all items are in the app's own menus. Each item does exactly what the matching map button does (`AppCommand`, carried out in `MapScreen`) |
+| Chart interaction | tap, long-press, pinch | a transparent input layer over the MapKit map takes all pointer input (on CI a click on MKMapView never reached the app's tap recognizer): click (select a waypoint / add a route point), double-click (zoom in on the point), click-and-hold (drop a waypoint), drag or two-finger trackpad scroll (pan; turns follow mode off), mouse wheel or trackpad pinch (zoom), right-click or control-click context menu (Drop Waypoint Here, Go To Here, Auto-Route From Here, Auto-Route To Here, plus Select Waypoint on a waypoint), ⌘= / ⌘- |
+| Menu bar | — | Navigation: New Route on Chart ⌘N, Plan Auto-Route… ⇧⌘N, Drop Waypoint ⌘D, Start Recording / Stop Recording ⌘R (title follows the state), Charts ⌘1, Waypoints ⌘2, Routes ⌘3, Tracks ⌘4. GPX: Import GPX… ⌘O, Export All as GPX… ⇧⌘E (disabled with nothing to export). Chart: Zoom In ⌘=, Zoom Out ⌘-, North Up ⌘U (disabled when north up), Course Up ⇧⌘U (checkmark), Follow the Boat ⌘L (checkmark), Online NOAA Charts (checkmark). App menu: Settings… ⌘,. Debug builds: Debug menu (Simulate GPS with a checkmark). Everything is disabled until the disclaimer is accepted. File > New (window) is removed: one window. Items given to SwiftUI's File-menu `.newItem` group never appeared on Mac Catalyst (CI), so all items are in the app's own menus. Each item does exactly what the matching map button does (`AppCommand`, carried out in `MapScreen`) |
 | GPX import | document picker, "Open in Gulf Nav" | open panel (⌘O), drag a `.gpx` onto the window, Finder "Open With" > Gulf Nav; the same import plan screen |
 | GPX export | share sheet | save panel |
 | Screens | sheets | the same SwiftUI sheets, shown as Mac sheets on the window (no redesign) |
-| Window | — | opens at 1280 × 860 (clamped to the screen), minimum 800 × 600 (fits a 1024 × 768 display), the chart fills the window. SwiftUI sizes a Catalyst window from its content, and the first content is the small "Loading…" view (CI saw a 59 × 69 window), so the root view has a minimum frame with `.windowResizability(.contentMinSize)`, and `MacWindow.configure()` sets the scene's minimum size and requests a frame (`requestGeometryUpdate(.Mac(systemFrame:))`) when the window is still smaller |
+| Window | — | opens at 1280 × 860, clamped to the screen (`MacWindow.launchSize`), minimum 800 × 600 (fits a 1024 × 768 display), the chart fills the window. SwiftUI sizes a Catalyst window from its content, and the first content is the small "Loading…" view (CI saw a 59 × 69 window), so the root view has a minimum frame with `.windowResizability(.contentMinSize)`, and `MacWindow.configure()` sets the scene's minimum size and requests a frame (`requestGeometryUpdate(.Mac(systemFrame:))`) during start-up. On CI's 1024 × 768 screen the window still opened at the minimum; whether the clamped default fixes that is unverified |
 | Keep the screen on | idle timer | "Keep the display awake": a process activity that stops display sleep while the setting is on |
 | Track recording | background location mode while recording, blue indicator | no background mode needed (a Mac app keeps running behind other windows); records while a position is available. The Tracks and Settings wording says so |
 | Data folder | `Library/Charts`, `Library/AppData`, `Library/RoutingPacks` | the same subfolders under `~/Library/Containers/com.example.gulfnav/Data/Library/Application Support/com.example.gulfnav/` (sandboxed). Charts and routing packs are excluded from backup (Time Machine honours the flag) |
@@ -216,22 +314,18 @@ asset catalog; add a 1024 × 1024 image.
 
 - **Not run on a real Mac yet.** CI builds and tests it on a headless runner. MapKit rendering of the MBTiles
   overlays, and Wi-Fi positioning, have only been reasoned about, not seen.
-- **Sharper tiles on Retina.** On Retina screens MapKit shows the 256-px chart tiles scaled up, so the chart is
-  less sharp than on iPhone. Requesting the next zoom level for `contentScaleFactor` 2 would fix that.
+- **Retina only for online charts.** Online NOAA tiles are true 2× tiles on a Retina screen. NOAA's offline
+  region packages exist only at 256 px, so they stay softer on Retina (on iPhone too).
+- **No "download this area".** Online charts keep only what was viewed (a week). Saving a chosen area for
+  offline use is not built; the NOAA regions are the offline option for now.
 - **Chart framing and zoom are approximate.** MapKit has no zoom levels. Zoom is converted with Web Mercator
   arithmetic, so framing a planned route and ⌘= / ⌘- steps are close to, not identical with, MapLibre's.
 - **Chart input is the app's own.** Drag pans and scroll / pinch zoom through MapKit's camera API from the input
   layer; it has not been tried by hand on a real Mac (feel, scroll direction, speed of 120 points per zoom level).
-  Only a drag turns follow mode off; zoom does not.
-- **Fixed shortcuts.** Menu items do not show state ("Stop Recording" vs "Start Recording"); they are fixed
-  wording with fixed shortcuts.
+  A drag or a two-finger trackpad scroll turns follow mode off; zoom does not. No arrow-key panning yet.
+- **Menu state is live but untested by hand.** Titles, checkmarks and disabled items follow the app's state
+  through Observation; whether SwiftUI refreshes Mac Catalyst menus at once is unverified.
 - **Untested Mac wiring.** Drag and drop accepts GPX/XML data or a `.gpx` file URL; it is exercised by hand only,
   not by a UI test. The same applies to opening from Finder.
-- **AutoRouteUITests on the Mac.** `AutoRouteUITests.swift` (not edited here; another piece of work owns it)
-  scrolls lists with `app.swipeUp()` / `app.swipeDown()` in its `scrollTo` helper. Dragging does not scroll a list
-  on a Mac, so those tests may fail on the Mac job when an element is below the fold. The fix is a two-line change
-  in that helper: replace `if downwards { app.swipeDown() } else { app.swipeUp() }` with
-  `if downwards { scrollUp(app) } else { scrollDown(app) }`. Those helpers are defined in
-  `NavigationDataUITests.swift` and swipe on iOS exactly as before.
 - **Background downloads.** Chart downloads are foreground-only, as on iOS. A Mac app keeps running behind other
   windows, so this matters less there.

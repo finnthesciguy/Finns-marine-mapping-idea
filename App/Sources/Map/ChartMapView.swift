@@ -53,6 +53,11 @@ struct ChartMapView: UIViewRepresentable {
     var onPointAction: ((MapPointAction, Coordinate) -> Void)? = nil
     var cameraCommand: MapCameraCommand? = nil
     var onCenterChanged: ((Coordinate) -> Void)? = nil
+    /// Online NOAA charts: on iOS a MapLibre raster source on NOAA's export service (`{bbox-epsg-3857}` tile URLs;
+    /// MapLibre fetches and caches the tiles itself), drawn under the installed regions.
+    var liveCharts: Bool = false
+    /// Used by the Mac map only (it fetches through AppServices' loader); ignored here.
+    var liveLoader: LiveChartTileLoader? = nil
 
     func makeCoordinator() -> ChartMapCoordinator {
         ChartMapCoordinator()
@@ -196,6 +201,7 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
             updateStatusProbe()
         }
         installOverlaysIfNeeded(on: mapView)
+        applyLiveIfNeeded(view, on: mapView)
         applyPlanIfNeeded(view, on: mapView)
         applyOverlays(view)
         updateMarker(view, on: mapView)
@@ -235,6 +241,46 @@ final class ChartMapCoordinator: NSObject, @preconcurrency MLNMapViewDelegate {
         let revision: Int = view.planRevision
         DispatchQueue.main.async {
             callback(revision)
+        }
+    }
+
+    // MARK: Online NOAA charts
+
+    private var liveSource: MLNRasterTileSource?
+    private var liveLayer: MLNRasterStyleLayer?
+    private var liveStyle: ObjectIdentifier?
+
+    /// Adds or removes the online NOAA chart layer (under the installed regions and the overlays).
+    private func applyLiveIfNeeded(_ view: ChartMapView, on mapView: MLNMapView) {
+        guard styleLoaded, let style = mapView.style else { return }
+        let identity = ObjectIdentifier(style)
+        if liveStyle != nil && liveStyle != identity {
+            // A new style object has none of our layers.
+            liveSource = nil
+            liveLayer = nil
+            liveStyle = nil
+        }
+        if view.liveCharts {
+            guard liveLayer == nil else { return }
+            let source: MLNRasterTileSource = ChartMapLayers.makeLiveSource()
+            style.addSource(source)
+            let layer = MLNRasterStyleLayer(identifier: ChartMapLayers.liveLayerID, source: source)
+            if let firstChart = addedLayers.first {
+                style.insertLayer(layer, below: firstChart)
+            } else if let firstOverlay = overlayLayers.first {
+                style.insertLayer(layer, below: firstOverlay)
+            } else {
+                style.addLayer(layer)
+            }
+            liveSource = source
+            liveLayer = layer
+            liveStyle = identity
+        } else if let layer = liveLayer {
+            style.removeLayer(layer)
+            if let source = liveSource { ChartMapLayers.remove(source, from: style) }
+            liveLayer = nil
+            liveSource = nil
+            liveStyle = nil
         }
     }
 
@@ -518,6 +564,25 @@ enum ChartMapLayers {
         options[.coordinateBounds] = NSValue(mlnCoordinateBounds: bounds)
         let template: String = entry.sourceURL + "?file={x}/{y}/{z}.png"
         return MLNRasterTileSource(identifier: "\(entry.sourceID)-r\(revision)", tileURLTemplates: [template],
+                                   options: options)
+    }
+
+    static let liveSourceID: String = "gn-live-noaa"
+    static let liveLayerID: String = "gn-live-noaa-layer"
+
+    /// Online NOAA charts: NOAA's export service as a raster source. MapLibre fills `{bbox-epsg-3857}` per tile
+    /// (`src/mln/storage/resource.cpp` at ios-v7.0.0) and caches what it fetched. The 2× template asks for 512 px
+    /// at 192 dpi over each 256-point tile: a retina tile. Zoom 3–16 inside the Gulf box, as on the Mac.
+    static func makeLiveSource() -> MLNRasterTileSource {
+        let box: BoundingBox = LiveChartService.coverage
+        let bounds = MLNCoordinateBounds(sw: CLLocationCoordinate2D(latitude: box.south, longitude: box.west),
+                                         ne: CLLocationCoordinate2D(latitude: box.north, longitude: box.east))
+        var options: [MLNTileSourceOption: Any] = [:]
+        options[.minimumZoomLevel] = NSNumber(value: LiveChartService.minZoom)
+        options[.maximumZoomLevel] = NSNumber(value: LiveChartService.maxZoom)
+        options[.tileSize] = NSNumber(value: tileSize)
+        options[.coordinateBounds] = NSValue(mlnCoordinateBounds: bounds)
+        return MLNRasterTileSource(identifier: liveSourceID, tileURLTemplates: [LiveChartService.mapLibreTemplate(scale: 2)],
                                    options: options)
     }
 

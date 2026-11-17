@@ -12,6 +12,8 @@ import Foundation
 /// | `GULFNAV_PREINSTALL_FIXTURE_ROUTING=1` | side-load the bundled Sarasota routing test pack (`FixtureRoutingPack`), add its test waypoints, and run the simulated GPS in Sarasota Bay |
 /// | `GULFNAV_SIM_SPEED_KNOTS=<n>` | speed of the simulated track (default 6 kn; UI tests use a high speed to reach route points quickly) |
 /// | `GULFNAV_TRACK_BATCH_SIZE=<n>` | track points per database write (default 10; UI tests use 2 so points are stored quickly) |
+/// | `GULFNAV_LIVE_CHARTS=0/1` | online NOAA charts off / on regardless of the setting. Default: off with `GULFNAV_DATA_ROOT` (tests make no network requests unless they ask), otherwise the setting decides |
+/// | `GULFNAV_BUNDLED_ROUTING=0/1` | link the routing packs shipped in the app (default: yes, except with `GULFNAV_DATA_ROOT`, so tests see only the fixture pack unless they ask) |
 public struct LaunchConfiguration: Sendable, Equatable {
     public static let dataRootKey = "GULFNAV_DATA_ROOT"
     public static let resetDataKey = "GULFNAV_RESET_DATA"
@@ -20,6 +22,8 @@ public struct LaunchConfiguration: Sendable, Equatable {
     public static let preinstallFixtureRoutingKey = "GULFNAV_PREINSTALL_FIXTURE_ROUTING"
     public static let simulatedSpeedKey = "GULFNAV_SIM_SPEED_KNOTS"
     public static let trackBatchSizeKey = "GULFNAV_TRACK_BATCH_SIZE"
+    public static let liveChartsKey = "GULFNAV_LIVE_CHARTS"
+    public static let bundledRoutingKey = "GULFNAV_BUNDLED_ROUTING"
     /// Directory under the temporary directory that holds isolated data roots.
     public static let testDataDirectoryName = "GulfNavTestData"
 
@@ -34,10 +38,14 @@ public struct LaunchConfiguration: Sendable, Equatable {
     public var simulatedSpeedKnots: Double?
     /// Track points per write (1...100), nil for the default.
     public var trackBatchSize: Int?
+    /// `GULFNAV_LIVE_CHARTS`, nil when not given.
+    public var liveCharts: Bool?
+    /// `GULFNAV_BUNDLED_ROUTING`, nil when not given.
+    public var bundledRouting: Bool?
 
     public init(dataRootName: String? = nil, resetData: Bool = false, simulateGPS: Bool = false,
                 preinstallFixtureChart: Bool = false, simulatedSpeedKnots: Double? = nil, trackBatchSize: Int? = nil,
-                preinstallFixtureRouting: Bool = false) {
+                preinstallFixtureRouting: Bool = false, liveCharts: Bool? = nil, bundledRouting: Bool? = nil) {
         self.dataRootName = dataRootName.flatMap(LaunchConfiguration.sanitize)
         self.resetData = resetData && self.dataRootName != nil
         self.simulateGPS = simulateGPS
@@ -45,6 +53,8 @@ public struct LaunchConfiguration: Sendable, Equatable {
         self.preinstallFixtureRouting = preinstallFixtureRouting
         self.simulatedSpeedKnots = simulatedSpeedKnots.flatMap { $0.isFinite && $0 >= 1 && $0 <= 1000 ? $0 : nil }
         self.trackBatchSize = trackBatchSize.flatMap { $0 >= 1 && $0 <= 100 ? $0 : nil }
+        self.liveCharts = liveCharts
+        self.bundledRouting = bundledRouting
     }
 
     /// Parses a process environment (`ProcessInfo.processInfo.environment`).
@@ -55,7 +65,30 @@ public struct LaunchConfiguration: Sendable, Equatable {
                   preinstallFixtureChart: LaunchConfiguration.flag(environment[LaunchConfiguration.preinstallFixtureChartKey]),
                   simulatedSpeedKnots: environment[LaunchConfiguration.simulatedSpeedKey].flatMap { Double($0) },
                   trackBatchSize: environment[LaunchConfiguration.trackBatchSizeKey].flatMap { Int($0) },
-                  preinstallFixtureRouting: LaunchConfiguration.flag(environment[LaunchConfiguration.preinstallFixtureRoutingKey]))
+                  preinstallFixtureRouting: LaunchConfiguration.flag(environment[LaunchConfiguration.preinstallFixtureRoutingKey]),
+                  liveCharts: LaunchConfiguration.optionalFlag(environment[LaunchConfiguration.liveChartsKey]),
+                  bundledRouting: LaunchConfiguration.optionalFlag(environment[LaunchConfiguration.bundledRoutingKey]))
+    }
+
+    /// "1"/"true"/"yes" → true, "0"/"false"/"no" → false, anything else → nil.
+    static func optionalFlag(_ value: String?) -> Bool? {
+        guard let value else { return nil }
+        switch value.lowercased() {
+        case "1", "true", "yes": return true
+        case "0", "false", "no": return false
+        default: return nil
+        }
+    }
+
+    /// Whether online NOAA charts may be shown, given the user's setting.
+    public func allowsLiveCharts(setting: Bool) -> Bool {
+        if let liveCharts { return liveCharts }
+        return usesIsolatedData ? false : setting
+    }
+
+    /// Whether to link the routing packs shipped in the app.
+    public var installsBundledRoutingPacks: Bool {
+        bundledRouting ?? !usesIsolatedData
     }
 
     /// True when data is kept in an isolated directory (UI tests): UserDefaults are then neither read nor written.

@@ -18,6 +18,7 @@ struct ChartsScreen: View {
                         Text(error).foregroundStyle(Color.red)
                     }
                 }
+                LiveChartsSection(model: model)
                 Section {
                     ForEach(model.rows) { row in
                         RegionRowView(row: row, routingPack: model.routingCatalog.entry(forChartRegion: row.id),
@@ -239,6 +240,35 @@ struct RegionRowView: View {
             Button("Cancel", role: .cancel, action: onPrimary).buttonStyle(.bordered)
         case .none:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.green)
+        }
+    }
+}
+
+/// "Online NOAA charts": the chart a new install shows (no Gulf package has been built yet). Tiles come from
+/// NOAA's chart display service as they are viewed and are kept on the device for a week, so areas already seen
+/// work offline. Installed regions are drawn above them.
+struct LiveChartsSection: View {
+    let model: ChartsModel
+
+    var body: some View {
+        Section {
+            Toggle("Online NOAA charts", isOn: Binding(get: { model.liveCharts },
+                                                      set: { on in model.onLiveChartsToggle?(on) }))
+                .accessibilityIdentifier("charts.liveToggle")
+            if model.liveCharts {
+                Text(model.liveStatus.line)
+                    .font(.footnote)
+                    .accessibilityIdentifier("charts.liveStatus")
+                if model.liveCacheBytes > 0 {
+                    Text("Saved on this device: \(ByteFormat.string(model.liveCacheBytes))")
+                        .font(.footnote)
+                        .foregroundStyle(Color.secondary)
+                }
+            }
+        } header: {
+            Text("Chart source")
+        } footer: {
+            Text("Current NOAA charts from NOAA's chart display service, loaded as you view them (internet needed the first time an area is shown). Viewed areas are kept on this device for a week and shown offline. Installed regions below are drawn on top.")
         }
     }
 }
