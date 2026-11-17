@@ -334,7 +334,7 @@ final class LiveChartTileOverlay: MKTileOverlay {
 
     init(loader: LiveChartTileLoader) {
         self.loader = loader
-        let box: BoundingBox = LiveChartService.coverage
+        let box = LiveChartService.coverage
         let northWest = MKMapPoint(CLLocationCoordinate2D(latitude: box.north, longitude: box.west))
         let southEast = MKMapPoint(CLLocationCoordinate2D(latitude: box.south, longitude: box.east))
         self.region = MKMapRect(x: min(northWest.x, southEast.x), y: min(northWest.y, southEast.y),

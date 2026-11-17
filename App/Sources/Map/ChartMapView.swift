@@ -574,7 +574,7 @@ enum ChartMapLayers {
     /// (`src/mln/storage/resource.cpp` at ios-v7.0.0) and caches what it fetched. The 2× template asks for 512 px
     /// at 192 dpi over each 256-point tile: a retina tile. Zoom 3–16 inside the Gulf box, as on the Mac.
     static func makeLiveSource() -> MLNRasterTileSource {
-        let box: BoundingBox = LiveChartService.coverage
+        let box = LiveChartService.coverage
         let bounds = MLNCoordinateBounds(sw: CLLocationCoordinate2D(latitude: box.south, longitude: box.west),
                                          ne: CLLocationCoordinate2D(latitude: box.north, longitude: box.east))
         var options: [MLNTileSourceOption: Any] = [:]
