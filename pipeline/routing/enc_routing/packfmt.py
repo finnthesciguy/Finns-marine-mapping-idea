@@ -17,7 +17,7 @@ import numpy as np
 
 MAGIC = b"GCRTPACK"
 FORMAT_MAJOR = 1
-FORMAT_MINOR = 2
+FORMAT_MINOR = 3
 HEADER_SIZE = 256
 ENTRY_SIZE = 32
 TABLE_CRC_OFFSET = 108       # u32 CRC-32 of the section table (format 1.1; reserved 0 in 1.0)
@@ -46,11 +46,12 @@ F_REFINED = 1 << 10
 SHORE_SHIFT = 11              # bits 11-12: shore class 0..3
 SHORE_MASK = 3 << SHORE_SHIFT
 F_LOCK = 1 << 13             # format 1.2: in a lock or navigable floodgate zone
+F_BRIDGE_UNCHARTED = 1 << 14 # format 1.3: under a fixed bridge part without a charted clearance
 
 FLAG_NAMES = {F_CHANNEL: "CHANNEL", F_HIGHWAY: "HIGHWAY", F_OPENING: "OPENING_BRIDGE",
               F_UNKNOWN_CLR: "UNKNOWN_CLEARANCE", F_RESTRICTED: "RESTRICTED", F_CAUTION: "CAUTION",
               F_NEAR_HAZARD: "NEAR_HAZARD", F_HAZARD_DEPTH: "HAZARD_DEPTH",
-              F_PROHIBITED: "PROHIBITED", F_OUTSIDE: "OUTSIDE", F_REFINED: "SOUNDING_REFINED", F_LOCK: "LOCK"}
+              F_PROHIBITED: "PROHIBITED", F_OUTSIDE: "OUTSIDE", F_REFINED: "SOUNDING_REFINED", F_LOCK: "LOCK", F_BRIDGE_UNCHARTED: "BRIDGE_UNCHARTED"}
 
 # AREA kinds and flags (format 1.2 adds kind 4 and the area-wide flag)
 AREA_PROHIBITED, AREA_RESTRICTED, AREA_CAUTION, AREA_LOCK = 1, 2, 3, 4

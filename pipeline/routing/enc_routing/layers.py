@@ -66,7 +66,7 @@ def int_set(v) -> set[int]:
 
 # CATBRG: 1 fixed, 2 opening, 3 swing, 4 lifting, 5 bascule, 6 pontoon,
 # 7 drawbridge, 8 transporter, 9 footbridge, 10 viaduct, 11 aqueduct, 12 suspension.
-OPENING_CATBRG = {2, 3, 4, 5, 7, 8}
+OPENING_CATBRG = {2, 3, 4, 5, 6, 7, 8}   # 6 pontoon: it opens by moving a section (round 3)
 
 # Regulated areas -> kind (1 prohibited, 2 restricted, 3 caution).
 RESTRN_PROHIBITED = {7}                  # entry prohibited

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from enc_routing import layers, packfmt as P, synth
-from enc_routing.router import Classified, Profile, Router, dist_m, funnel, req_dm, tri2
+from enc_routing.router import YELLOW_REASONS, Classified, Profile, Router, dist_m, funnel, req_dm, tri2
 
 
 @pytest.fixture(scope="module")
@@ -73,7 +73,21 @@ def test_prohibited_and_outside(rt):
     pro = _tri(rt, 6, 3)
     for prof in (Profile(1, 0, 1), Profile(1, 0, 1, True, True)):
         cls = Classified(rt.p, prof)
-        assert not cls.ok[pro] and cls.reason[pro] == 0
+        # format 1.3 (owner decision): entry-prohibited areas are passable with a caution, at a cost
+        assert cls.ok[pro] and cls.prohibited[pro]
+        assert cls.ybits[pro] & (1 << YELLOW_REASONS.index("PROHIBITED_AREA"))
+        assert cls.factor[pro] >= 3.0  # x 3 for prohibited (B.5)
+
+
+def test_uncharted_bridge_is_passable_with_a_caution(rt):
+    t = _tri(rt, 4, 0)
+    cls = Classified(rt.p, Profile(1, 0.5, 5))
+    assert cls.ok[t] and cls.uncharted[t]
+    assert cls.ybits[t] & (1 << YELLOW_REASONS.index("BRIDGE_UNCHARTED"))
+    res = rt.route((-81.9955, 27.0005), (-81.9945, 27.0005), Profile(1, 0.5, 5))
+    assert res["ok"] and res["legs"][0]["crossings"][0] == {"record": 4, "clearance_dm": 0xFFFE, "opening": False,
+                                                             "uncharted": True}
+    assert [b["name"] for b in res["summary"]["uncharted_bridges"]] == ["Test Uncharted Bridge"]
 
 
 def test_cost_factor_order(rt):

@@ -10,8 +10,8 @@ route found:
   0.5 m tolerance for rounding and the local metric);
 - every overhead object it crosses is an opening span, or has a charted
   clearance of at least the boat's air draft (cables without a clearance
-  only when the profile accepts unknown clearance). A bridge part without a
-  clearance is solid.
+  only when the profile accepts unknown clearance). A fixed bridge part without
+  a clearance is passed with a caution (owner decision, round 3).
 
 A route that fails a check is a release blocker (`reference --gate`).
 """
@@ -131,7 +131,7 @@ def check_route(ck, waypoints, prof: Profile, p) -> dict:
                 continue
             if clr == -32768:
                 if int(r.kind) == 1:
-                    viol.append(f"under a bridge part without clearance ({name or 'unnamed'})")
+                    pass  # a fixed bridge part without a charted clearance: passable with a caution (format 1.3)
                 elif not prof.accept_unknown_clearance:
                     viol.append(f"under a {kind} of unknown clearance ({name or 'unnamed'}) in a profile "
                                 "that does not accept it")

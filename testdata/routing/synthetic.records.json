@@ -1,11 +1,11 @@
 {
  "file": "synthetic.pack",
- "sha256": "da3f5d68cd4b5ff1298973b030f63059075047c94a3612125983551802041ae9",
+ "sha256": "3a3f81bd845a8d01a1c4b8f089305e6c9933044f23c44d847a6de55657a697a8",
  "header": {
   "major": 1,
-  "minor": 2,
+  "minor": 3,
   "header_size": 256,
-  "file_size": 2048,
+  "file_size": 2080,
   "section_count": 14,
   "section_table_offset": 256,
   "flags": 1,
@@ -23,8 +23,8 @@
   "check_dm": 110,
   "shore_ring0_m": 50,
   "shore_ring1_m": 150,
-  "table_crc32": 2925415649,
-  "header_crc32": 3806939901
+  "table_crc32": 2635134489,
+  "header_crc32": 4076843888
  },
  "sections": [
   {
@@ -38,18 +38,18 @@
   },
   {
    "name": "STRS",
-   "count": 20,
+   "count": 21,
    "encoding": 1,
    "offset": 760,
-   "stored_length": 277,
-   "raw_length": 408,
-   "crc32": 4019087558
+   "stored_length": 286,
+   "raw_length": 433,
+   "crc32": 2760689351
   },
   {
    "name": "SRCS",
    "count": 1,
    "encoding": 0,
-   "offset": 1040,
+   "offset": 1048,
    "stored_length": 24,
    "raw_length": 24,
    "crc32": 4085256812
@@ -58,7 +58,7 @@
    "name": "VERT",
    "count": 45,
    "encoding": 1,
-   "offset": 1064,
+   "offset": 1072,
    "stored_length": 63,
    "raw_length": 182,
    "crc32": 1613663742
@@ -67,7 +67,7 @@
    "name": "TRIS",
    "count": 62,
    "encoding": 1,
-   "offset": 1128,
+   "offset": 1136,
    "stored_length": 116,
    "raw_length": 186,
    "crc32": 3009574474
@@ -76,7 +76,7 @@
    "name": "ADJC",
    "count": 62,
    "encoding": 1,
-   "offset": 1248,
+   "offset": 1256,
    "stored_length": 131,
    "raw_length": 186,
    "crc32": 1012292422
@@ -85,34 +85,34 @@
    "name": "ATTR",
    "count": 62,
    "encoding": 1,
-   "offset": 1384,
-   "stored_length": 222,
+   "offset": 1392,
+   "stored_length": 230,
    "raw_length": 1178,
-   "crc32": 680435187
+   "crc32": 955940858
   },
   {
    "name": "GRID",
    "count": 8,
    "encoding": 1,
-   "offset": 1608,
+   "offset": 1624,
    "stored_length": 98,
    "raw_length": 192,
    "crc32": 1808985301
   },
   {
    "name": "OVHD",
-   "count": 4,
+   "count": 5,
    "encoding": 1,
-   "offset": 1712,
-   "stored_length": 95,
-   "raw_length": 160,
-   "crc32": 3236895071
+   "offset": 1728,
+   "stored_length": 109,
+   "raw_length": 200,
+   "crc32": 463998035
   },
   {
    "name": "HAZD",
    "count": 1,
    "encoding": 0,
-   "offset": 1808,
+   "offset": 1840,
    "stored_length": 32,
    "raw_length": 32,
    "crc32": 3657197025
@@ -121,7 +121,7 @@
    "name": "CHAN",
    "count": 1,
    "encoding": 0,
-   "offset": 1840,
+   "offset": 1872,
    "stored_length": 32,
    "raw_length": 32,
    "crc32": 2311523809
@@ -130,7 +130,7 @@
    "name": "AREA",
    "count": 6,
    "encoding": 1,
-   "offset": 1872,
+   "offset": 1904,
    "stored_length": 95,
    "raw_length": 192,
    "crc32": 2994000763
@@ -139,19 +139,19 @@
    "name": "ADVS",
    "count": 3,
    "encoding": 1,
-   "offset": 1968,
+   "offset": 2000,
    "stored_length": 21,
    "raw_length": 22,
    "crc32": 3651474738
   },
   {
    "name": "GEOM",
-   "count": 8,
+   "count": 10,
    "encoding": 1,
-   "offset": 1992,
-   "stored_length": 50,
-   "raw_length": 64,
-   "crc32": 3458843118
+   "offset": 2024,
+   "stored_length": 56,
+   "raw_length": 80,
+   "crc32": 3059253382
   }
  ],
  "info": {
@@ -159,7 +159,7 @@
   "note": "synthetic test pack"
  },
  "strings": {
-  "count": 20,
+  "count": 21,
   "first": {
    "0": "",
    "1": "Test Opening Bridge",
@@ -284,9 +284,9 @@
    "band_depth_dm": 6,
    "maint_dm": -32768,
    "clearance_dm": 65535,
-   "flags": 0,
+   "flags": 16384,
    "channel": 65535,
-   "overhead": 65535,
+   "overhead": 4,
    "area": 65535,
    "quality": 85,
    "advisory": 0
@@ -456,23 +456,27 @@
    ]
   },
   {
-   "kind": 2,
-   "flags": 0,
-   "catbrg": 0,
-   "clearance_dm": 500,
+   "kind": 1,
+   "flags": 2,
+   "catbrg": 1,
+   "clearance_dm": 65534,
    "open_clearance_dm": 65534,
    "hor_clearance_dm": 65534,
-   "name": 13,
+   "name": 20,
    "lon": -819955000,
-   "lat": 270020004,
-   "geom_first": 6,
-   "geom_count": 1,
-   "geom_type": 1,
-   "index": 3,
+   "lat": 270005000,
+   "geom_first": 8,
+   "geom_count": 2,
+   "geom_type": 2,
+   "index": 4,
    "geom": [
     [
      -819955000,
-     270020004
+     270000000
+    ],
+    [
+     -819955000,
+     270010000
     ]
    ]
   }

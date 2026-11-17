@@ -24,7 +24,7 @@ from shapely.geometry import box
 
 from .config import REGIONS, BuildParams, Region
 
-OVERLAP_NM = 15.0   # was 30 nm in Wave 4 (round 2: 37 % of stored triangles were overlap copies)
+OVERLAP_NM = 30.0   # 15 nm in round 2; back to 30 nm in round 3 (memory is no constraint)
 GULF_REGION_IDS = ("ncds_10", "ncds_11", "ncds_12", "ncds_13", "ncds_14")
 
 

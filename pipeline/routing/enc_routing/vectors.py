@@ -275,6 +275,14 @@ SYNTH_QUERIES = [
     {"id": "s15_advisories", "start": [-81.9995, 27.0035], "goal": [-81.9985, 27.0025],
      "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
      "note": "rows 2-3, columns 0-1: green legs, the sanctuary and the datum note listed once in summary.advisories"},
+    {"id": "s16_uncharted_bridge", "start": [-81.9955, 27.0005], "goal": [-81.9945, 27.0005],
+     "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
+     "note": "start under the fixed bridge part without charted clearance (col 4, row 0): passable, yellow "
+             "BRIDGE_UNCHARTED, listed in summary.uncharted_bridges, the crossing marked uncharted (format 1.3)"},
+    {"id": "s17_prohibited", "start": [-81.9935, 27.0035], "goal": [-81.9925, 27.0035],
+     "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
+     "note": "start in the entry-prohibited square (col 6, row 3): passable with a caution, yellow PROHIBITED_AREA, "
+             "listed in summary.prohibited_areas (format 1.3)"},
 ]
 
 SARASOTA_QUERIES = [

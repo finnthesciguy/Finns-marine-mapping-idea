@@ -69,7 +69,7 @@ struct PilotPerformanceTests {
               + "derivedAdjacency=\(pack.adjacencyWasDerived); arrays \(MemoryProbe.mb(pack.memoryFootprintBytes)); "
               + "RSS before \(MemoryProbe.mb(before.current)) after \(MemoryProbe.mb(after.current)); "
               + "peak \(MemoryProbe.mb(after.peak)) (peak before load \(MemoryProbe.mb(before.peak)))")
-        if pack.regionID == "pilot" { #expect(pack.triangleCount == 850_384) }   // a region pack has its own count
+        if pack.regionID == "pilot" { #expect(pack.triangleCount == 929_701) }   // a region pack has its own count
         // Repeat to get a steady-state load time.
         var best = loadTime
         for _ in 0..<2 {

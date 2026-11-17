@@ -9,6 +9,8 @@ struct TriBits: OptionSet {
     static let unknownUsed = TriBits(rawValue: 1 << 3)
     static let restricted = TriBits(rawValue: 1 << 4)
     static let lock = TriBits(rawValue: 1 << 5)
+    static let prohibited = TriBits(rawValue: 1 << 6)
+    static let uncharted = TriBits(rawValue: 1 << 7)
 }
 
 /// Spec B.3–B.5 and the B.9 yellow reasons for one profile, computed once per attribute class (a pack has a few
@@ -65,6 +67,7 @@ struct Classifier {
     static let fProhibited: UInt16 = 1 << 8
     static let fOutside: UInt16 = 1 << 9
     static let fLock: UInt16 = 1 << 13
+    static let fUncharted: UInt16 = 1 << 14
 
     /// The B.3 block reason code (0..4), or -1 when passable.
     @inline(__always) func reason(_ t: Int) -> Int { Int(reasons[Int(attrClass[t])]) }
@@ -76,10 +79,10 @@ struct Classifier {
     /// The B.9 yellow reasons of one triangle, as a mask in `CautionReason.allCases` order.
     @inline(__always) func yellowMask(_ t: Int) -> UInt16 { yellow[Int(attrClass[t])] }
 
-    private static func reason(_ c: AttributeClasses, _ k: Int, req: Int, air: Int, useMaintained: Bool,
+    static func reason(_ c: AttributeClasses, _ k: Int, req: Int, air: Int, useMaintained: Bool,
                                acceptUnknown: Bool, avoidOpenGulf: Bool) -> Int {
         let fl = c.flags[k]
-        if fl & fProhibited != 0 { return 0 }
+        // Format 1.3: PROHIBITED (code 0) is no longer a block reason; entry-prohibited areas are yellow and cost more.
         if avoidOpenGulf && fl & fOutside != 0 { return 1 }
         let d = Int(c.depth[k])
         let hasDepth = d != -32768
@@ -114,6 +117,8 @@ struct Classifier {
         if fl & fUnknown != 0 && !opening && hasOvh { b.insert(.unknownUsed) }
         if fl & fRestricted != 0 { b.insert(.restricted) }
         if fl & fLock != 0 { b.insert(.lock) }
+        if fl & fProhibited != 0 { b.insert(.prohibited) }
+        if fl & fUncharted != 0 { b.insert(.uncharted) }
         return b
     }
 
@@ -142,7 +147,11 @@ struct Classifier {
             f = f * 1.1
         }
         if b.contains(.viaSound) { f = f * 1.5 }
-        if b.contains(.restricted) { f = f * 2.0 }
+        if b.contains(.prohibited) {
+            f = f * 3.0
+        } else if b.contains(.restricted) {
+            f = f * 2.0
+        }
         if fl & fCaution != 0 { f = f * 1.25 }
         return f
     }
@@ -156,12 +165,14 @@ struct Classifier {
         if b.contains(.viaSound) { m |= 1 << 1 }
         if b.contains(.needsOpening) { m |= 1 << 2 }
         if b.contains(.lock) { m |= 1 << 3 }
-        if b.contains(.unknownUsed) { m |= 1 << 4 }
-        if fl & fRestricted != 0 { m |= 1 << 5 }
-        if fl & fCaution != 0 { m |= 1 << 6 }
-        if fl & fHazardDepth != 0 { m |= 1 << 7 }
-        if cz == 0 || cz == 5 || cz == 6 { m |= 1 << 8 }
-        if !b.contains(.viaMaint) && Int(c.depth[k]) - req < 3 && (cz == 0 || cz == 4 || cz == 5 || cz == 6) { m |= 1 << 9 }
+        if b.contains(.uncharted) { m |= 1 << 4 }
+        if b.contains(.unknownUsed) { m |= 1 << 5 }
+        if b.contains(.prohibited) { m |= 1 << 6 }
+        if fl & fRestricted != 0 { m |= 1 << 7 }
+        if fl & fCaution != 0 { m |= 1 << 8 }
+        if fl & fHazardDepth != 0 { m |= 1 << 9 }
+        if cz == 0 || cz == 5 || cz == 6 { m |= 1 << 10 }
+        if !b.contains(.viaMaint) && Int(c.depth[k]) - req < 3 && (cz == 0 || cz == 4 || cz == 5 || cz == 6) { m |= 1 << 11 }
         return m
     }
 }

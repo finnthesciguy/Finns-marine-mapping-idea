@@ -23,7 +23,7 @@ python -m enc_routing vectors [--out testdata/routing]     # synthetic pack, Sar
 python -m pytest -q                                        # offline, about 10 s
 ```
 
-Regions: `ncds_10` … `ncds_14` (the five chart regions, each grown by 15 nm, `regions.py`) and `pilot` (the Wave 2 box). Everything that is downloaded or generated goes under `$ENC_ROUTING_WORK` (default: the session scratchpad `.../scratchpad/gulf-packs`). The command `vectors` writes into `testdata/routing/` and needs the pilot pack built in the work directory.
+Regions: `ncds_10` … `ncds_14` (the five chart regions, each grown by 30 nm, `regions.py`) and `pilot` (the Wave 2 box). Everything that is downloaded or generated goes under `$ENC_ROUTING_WORK` (default: the session scratchpad `.../scratchpad/gulf-packs`). The command `vectors` writes into `testdata/routing/` and needs the pilot pack built in the work directory.
 
 ## How a pack is built
 
@@ -31,7 +31,7 @@ Regions: `ncds_10` … `ncds_14` (the five chart regions, each grown by 15 nm, `
 2. **Merge** (`merge.py`): one cell per location (band, then scale, then issue date). Each cell is clipped to its exclusive region on its own; the cache key covers the cell and every higher-priority cell overlapping it.
 3. **Derived layers** (`derived.py`), once for the whole Gulf: lock and floodgate zones from navigable GATCON gates, the area-wide classification of regulated areas, chart-datum notes for cells not on MLLW, and the extended sounding raise for depth areas whose band starts at or near zero (format spec C.2a, C.4b, C.7a). They become extra tile inputs (`LOCKZN`, `DATUMN`, `SNDEXT`).
 4. **Open-Gulf mask** (`mask.py`): derived from the data for the whole Gulf: water more than 5 km from land, connected to deep offshore water, grown back by 5 km (the opening of the water by a 5 km disk). Passes narrower than 10 km are sealed.
-5. **Tiles** (`tiles.py`, `mesh.py`): fixed 0.2° lon/lat tiles, each meshed independently in its own transverse Mercator, with inputs clipped to the tile plus 600 m. A tile's result is cached by a hash of its inputs, so a changed cell rebuilds only the tiles it touches, and the overlap of two regions is built once. Faces farther than 500 m from water some boat with a 2 ft requirement could use are not meshed (spec C.10a).
+5. **Tiles** (`tiles.py`, `mesh.py`): fixed 0.2° lon/lat tiles, each meshed independently in its own transverse Mercator, with inputs clipped to the tile plus 600 m. A tile's result is cached by a hash of its inputs, so a changed cell rebuilds only the tiles it touches, and the overlap of two regions is built once. Faces far from usable water can be left out (spec C.10a, `live_distance_m`; off by default since builder 3.2.0).
 6. **Assemble** (`assemble.py`): tiles are joined on their shared straight edges (T-junctions split exactly), the whole mesh must pass the topology validation, side tables are built from the full features, and the pack is written (`packfmt.py`).
 
 ## Code map

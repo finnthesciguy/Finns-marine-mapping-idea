@@ -93,6 +93,7 @@ struct VectorCrossing: Decodable {
     var clearanceDm: Int
     var opening: Bool
     var needsOpening: Bool?
+    var uncharted: Bool?
 }
 
 struct VectorLeg: Decodable {
@@ -156,6 +157,8 @@ struct VectorSummary: Decodable {
     var openings: [VectorRun]
     var unknownClearances: [VectorRun]
     var locks: [VectorLock]
+    var unchartedBridges: [VectorRun]
+    var prohibitedAreas: [VectorLock]
     var advisories: [VectorAdvisory]
     var maintainedTriangles: Int
     var dataDate: Int
@@ -267,6 +270,7 @@ struct VectorComparator {
             int(c.clearanceDm, x.clearanceDm, "\(f).crossing.clearance_dm")
             check(c.isOpeningSpan == x.opening, "\(f).crossing.opening")
             check(c.needsOpening == x.needsOpening, "\(f).crossing.needs_opening")
+            check(c.uncharted == x.uncharted, "\(f).crossing.uncharted")
         }
     }
 
@@ -300,6 +304,17 @@ struct VectorComparator {
         for (i, p) in zip(g.openings, w.openings).enumerated() { run(p.0, p.1, "openings[\(i)]") }
         int(g.unknownClearances.count, w.unknownClearances.count, "unknown_clearances.count")
         for (i, p) in zip(g.unknownClearances, w.unknownClearances).enumerated() { run(p.0, p.1, "unknown_clearances[\(i)]") }
+        int(g.unchartedBridges.count, w.unchartedBridges.count, "uncharted_bridges.count")
+        for (i, p) in zip(g.unchartedBridges, w.unchartedBridges).enumerated() { run(p.0, p.1, "uncharted_bridges[\(i)]") }
+        int(g.prohibitedAreas.count, w.prohibitedAreas.count, "prohibited_areas.count")
+        for (i, p) in zip(g.prohibitedAreas, w.prohibitedAreas).enumerated() {
+            let ga: LockRun = p.0
+            let wa: VectorLock = p.1
+            int(ga.corridorIndex, wa.corridorIndex, "prohibited_areas[\(i)].corridor_index")
+            int(ga.area ?? 0xFFFF, wa.area, "prohibited_areas[\(i)].area")
+            check(ga.name == wa.name, "prohibited_areas[\(i)].name")
+            degrees(ga.centroid, wa.lon, wa.lat, "prohibited_areas[\(i)].lon/lat")
+        }
         int(g.locks.count, w.locks.count, "locks.count")
         for (i, p) in zip(g.locks, w.locks).enumerated() {
             let gl: LockRun = p.0

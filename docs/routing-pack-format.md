@@ -1,6 +1,6 @@
-# Routing pack format and routing algorithm, version 1.2
+# Routing pack format and routing algorithm, version 1.3
 
-Status: Wave 4 round 2, 2026-11-15. Format 1.2 adds locks and navigable floodgates (a triangle flag, an `AREA` kind and a yellow reason), area-wide advisories (an `ATTR` column and the `ADVS` section, reported once per route instead of on every leg), and replaces the leg construction (B.8: legs follow real turns, not the triangles); see "Changes from 1.1" at the end. Format 1.1 added a checksum over the section table and made every reader check explicit (see "Changes from 1.0"). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
+Status: Wave 4 round 3, 2026-11-17. Format 1.3 applies the owner's decisions: entry-prohibited areas and fixed bridge parts without a charted clearance are passable with a caution (flag bit 14, two yellow reasons, two summary lists; see "Changes from 1.2"). Format 1.2 added locks and navigable floodgates (a triangle flag, an `AREA` kind and a yellow reason), area-wide advisories (an `ATTR` column and the `ADVS` section, reported once per route instead of on every leg), and replaces the leg construction (B.8: legs follow real turns, not the triangles); see "Changes from 1.1" at the end. Format 1.1 added a checksum over the section table and made every reader check explicit (see "Changes from 1.0"). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
 
 This document has four parts:
 
@@ -55,7 +55,7 @@ Writers store sections in this order. They are identified by their four-characte
 |---|---|---|---|
 | 0 | u8[8] | magic | ASCII `GCRTPACK` |
 | 8 | u16 | format_major | 1. A reader must reject any other major version. |
-| 10 | u16 | format_minor | 2. A reader accepts minor versions 0, 1 and 2 (A.4); a 1.0 or 1.1 file reads as a pack without locks and without area-wide advisories. A 1.1 reader rejects a 1.2 file (its `ATTR` rows are 19 bytes). |
+| 10 | u16 | format_minor | 3. A reader accepts minor versions 0 to 3 (A.4); a 1.0 or 1.1 file reads as a pack without locks and without area-wide advisories, and in a pack before 1.3 a fixed bridge part without clearance is solid (clearance 0). A 1.1 reader rejects 1.2 and 1.3 files (19-byte `ATTR` rows); a 1.2 reader would read a 1.3 file and must not be used with one. |
 | 12 | u32 | header_size | 256. Any other value is rejected. |
 | 16 | u32 | file_size | total file size in bytes. Must equal the actual size. |
 | 20 | u32 | section_count | number of section table entries, 1..4096 |
@@ -119,7 +119,7 @@ A writer sets `encoding = 0` and stores the section raw when zlib does not make 
     - **OVHD, HAZD**: `geom_type` is 1, 2 or 3; `geom_first + geom_count ≤` the number of GEOM points; a point has exactly 1 point, a polyline at least 2, a ring at least 3;
     - **string ids** in SRCS, OVHD, HAZD, CHAN and AREA are < N.
 
-INFO is never a reason to reject a file: readers decode it as UTF-8 replacing invalid sequences, and ignore lines without `=`. Readers ignore reserved bytes, reserved flag bits (header bits 1..31, ATTR flags bits 14..15) and record padding. The full A.9 guarantees (canonical order, GRID contents, ADJC equal to the derived adjacency) are checked by `enc_routing validate`; a reader need not check them.
+INFO is never a reason to reject a file: readers decode it as UTF-8 replacing invalid sequences, and ignore lines without `=`. Readers ignore reserved bytes, reserved flag bits (header bits 1..31, ATTR flags bit 15) and record padding. The full A.9 guarantees (canonical order, GRID contents, ADJC equal to the derived adjacency) are checked by `enc_routing validate`; a reader need not check them.
 
 **Compatibility.** Readers accept minor versions 0, 1 and 2 of major 1. A 1.0 file reads exactly like the same file in 1.1, except that it has no section-table checksum. A 1.0 or 1.1 file has no `ADVS` and 17-byte `ATTR` rows: every `advisory` is 0, no triangle has the LOCK flag and no `AREA` record is area-wide, so it routes exactly as before except for the leg construction of B.8, which applies to every pack. Readers written for 1.1 reject 1.2 files (`ATTR` length), so the app must update RoutingKit before 1.2 packs are published. No pack has been published; every pack the builder writes now is 1.2. `testdata/routing/synthetic-v11.pack` is the synthetic pack written as 1.1, for the compatibility tests.
 
@@ -221,12 +221,13 @@ Flags:
 | 5 | CAUTION | in a local caution area (CTNARE, such as "shoal reported", or a no-wake/speed area) that is not area-wide (C.7a) |
 | 6 | NEAR_HAZARD | within 30 m of any charted obstruction, wreck or rock |
 | 7 | HAZARD_DEPTH | within the clearance zone (12 m) of a hazard with **known** depth; depth_dm is then ≤ that hazard's VALSOU |
-| 8 | PROHIBITED | in an entry-prohibited area: never passable |
+| 8 | PROHIBITED | in an entry-prohibited area: passable with a caution and at a cost from format 1.3 (never passable before) |
 | 9 | OUTSIDE | open Gulf (outside the barrier islands and bay mouths) |
 | 10 | SOUNDING_REFINED | depth_dm was raised above the depth-area least depth by the sounding rule (C.4) |
 | 11–12 | shore class | 0: within shore_ring0_m (50 m) of land, a structure or a blocking hazard; 1: within shore_ring1_m (150 m); 3: farther; 2: unused |
 | 13 | LOCK | format 1.2: in the zone of a lock or navigable floodgate (C.2a); `area` names its AREA record (kind 4) |
-| 14–15 | reserved | 0 |
+| 14 | BRIDGE_UNCHARTED | format 1.3: under a fixed bridge part without a charted clearance (passable with a caution; the part takes no part in `clearance_dm`, UNKNOWN_CLEARANCE or OPENING_BRIDGE; `overhead` names it when no other object is there) |
+| 15 | reserved | 0 |
 
 #### GRID: point-location index (count = nx·ny)
 
@@ -253,7 +254,7 @@ and the same for rows with y. **Lookup** of a point (x, y): `j = clamp(floor((x 
 | off | type | field |
 |---|---|---|
 | 0 | u8 | kind: 1 bridge part, 2 overhead cable, 3 overhead pipe |
-| 1 | u8 | flags: bit 0 opening span; bit 1 clearance not charted, so this non-opening bridge part is treated as solid (clearance 0) |
+| 1 | u8 | flags: bit 0 opening span; bit 1 a non-opening bridge part without a charted clearance: from format 1.3 its clearance_dm is 0xFFFE and it is passed with a caution (B.10); before 1.3 its clearance_dm is 0 (solid) |
 | 2 | u16 | CATBRG bitmask: bit (c−1) set for each S-57 CATBRG value c (1 fixed, 2 opening, 3 swing, 4 lifting, 5 bascule, 6 pontoon, 7 drawbridge, 8 transporter, 9 footbridge, 10 viaduct, 11 aqueduct, 12 suspension) |
 | 4 | u16 | clearance_dm: VERCCL for an opening span, else VERCLR (VERCSA for a cable if present); `0xFFFE` unknown |
 | 6 | u16 | open_clearance_dm (VERCOP), `0xFFFE` unknown |
@@ -366,18 +367,18 @@ The bytes below are from `testdata/routing/synthetic.pack`. All values are littl
 **Header** (all 256 bytes; bytes 112..251 are zero and elided):
 
 ```
-0000  47 43 52 54 50 41 43 4B 01 00 02 00 00 01 00 00
-0010  00 08 00 00 0E 00 00 00 00 01 00 00 01 00 00 00
+0000  47 43 52 54 50 41 43 4B 01 00 03 00 00 01 00 00
+0010  20 08 00 00 0E 00 00 00 00 01 00 00 01 00 00 00
 0020  73 79 6E 74 68 65 74 69 63 00 00 00 00 00 00 00
 0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 0040  00 CB 1F CF 80 DF 17 10 80 03 21 CF C0 7B 18 10
 0050  ED 28 35 01 F8 28 35 01 C0 D4 01 00 2D 00 00 00
-0060  3E 00 00 00 78 00 6E 00 32 00 96 00 E1 4C 5E AE
+0060  3E 00 00 00 78 00 6E 00 32 00 96 00 19 F6 10 9D
 ...
-00F0  00 00 00 00 00 00 00 00 00 00 00 00 FD 4A E9 E2
+00F0  00 00 00 00 00 00 00 00 00 00 00 00 70 B3 FF F2
 ```
 
-Decoded: magic `GCRTPACK`; version 1.2; header_size 256; file_size 2048 (`00 08 00 00`); section_count 14; table at 256; flags 1 (ADJC present); region `synthetic`; bbox lon -820000000 .. -819920000, lat 270000000 .. 270040000 (for example `00 CB 1F CF` = -820000000 = -82.0000000°); data_date 20261101 (`ED 28 35 01`); build 20261112 120000; V = 45, T = 62; clearance_dm 120 (`78 00`); check_dm 110 (`6E 00`); shore rings 50 / 150 m; table_crc32 0xAE5E4CE1 (`E1 4C 5E AE`, the CRC-32 of the 448-byte table at 0x100); header_crc32 0xE2E94AFD.
+Decoded: magic `GCRTPACK`; version 1.3; header_size 256; file_size 2080 (`20 08 00 00`); section_count 14; table at 256; flags 1 (ADJC present); region `synthetic`; bbox lon -820000000 .. -819920000, lat 270000000 .. 270040000 (for example `00 CB 1F CF` = -820000000 = -82.0000000°); data_date 20261101 (`ED 28 35 01`); build 20261112 120000; V = 45, T = 62; clearance_dm 120 (`78 00`); check_dm 110 (`6E 00`); shore rings 50 / 150 m; table_crc32 0x9D10F619 (`19 F6 10 9D`, the CRC-32 of the 448-byte table at 0x100); header_crc32 0xF2FFB370.
 
 **Section table** (the first five entries):
 
@@ -385,28 +386,28 @@ Decoded: magic `GCRTPACK`; version 1.2; header_size 256; file_size 2048 (`00 08 
 0100  49 4E 46 4F 00 00 00 00 C0 02 00 00 00 00 00 00
 0110  33 00 00 00 33 00 00 00 3F F7 E7 FE 00 00 00 00
 0120  53 54 52 53 01 00 00 00 F8 02 00 00 00 00 00 00
-0130  15 01 00 00 98 01 00 00 C6 68 8E EF 14 00 00 00
-0140  53 52 43 53 00 00 00 00 10 04 00 00 00 00 00 00
+0130  1E 01 00 00 B1 01 00 00 C7 C6 8C A4 15 00 00 00
+0140  53 52 43 53 00 00 00 00 18 04 00 00 00 00 00 00
 0150  18 00 00 00 18 00 00 00 6C 12 80 F3 01 00 00 00
-0160  56 45 52 54 01 00 00 00 28 04 00 00 00 00 00 00
+0160  56 45 52 54 01 00 00 00 30 04 00 00 00 00 00 00
 0170  3F 00 00 00 B6 00 00 00 FE 8D 2E 60 2D 00 00 00
-0180  54 52 49 53 01 00 00 00 68 04 00 00 00 00 00 00
+0180  54 52 49 53 01 00 00 00 70 04 00 00 00 00 00 00
 0190  74 00 00 00 BA 00 00 00 4A 76 62 B3 3E 00 00 00
 ```
 
-Entry 0: tag `INFO`, encoding 0, offset 704 (the first multiple of 8 after the 256 + 14·32 = 704-byte header and table), stored 51, raw 51, crc32 0xFEE7F73F, count 0. Its stored bytes end at 755, so bytes 755..759 are zero padding and entry 1 (`STRS`) starts at 760. Entry 3: tag `VERT`, encoding 1 (zlib), offset 1064, stored 63, raw 182, count 45. Further on: `ATTR` raw 1178 bytes (19 · 62), `ADVS` count 3, raw 22 bytes.
+Entry 0: tag `INFO`, encoding 0, offset 704 (the first multiple of 8 after the 256 + 14·32 = 704-byte header and table), stored 51, raw 51, crc32 0xFEE7F73F, count 0. Its stored bytes end at 755, so bytes 755..759 are zero padding and entry 1 (`STRS`) starts at 760. Entry 3: tag `VERT`, encoding 1 (zlib), offset 1072, stored 63, raw 182, count 45. Further on: `ATTR` raw 1178 bytes (19 · 62), `OVHD` count 5, `ADVS` count 3, raw 22 bytes.
 
 **INFO** raw starts `62 75 69 6C 64 65 72 3D 65 6E 63 5F 72 6F 75 74 69 6E 67 20 73 79 6E 74` = `builder=enc_routing synt`...
 
 **STRS** raw starts
 
 ```
-0000  14 00 00 00 00 00 00 00 00 00 00 00 13 00 00 00
+0000  15 00 00 00 00 00 00 00 00 00 00 00 13 00 00 00
 0010  24 00 00 00 2E 00 00 00 38 00 00 00 44 00 00 00
 0020  49 00 00 00 55 00 00 00 64 00 00 00 73 00 00 00
 ```
 
-N = 20; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 of the blob = `Test Opening Bridge`. The blob starts at byte 4 + 4·(N+1) = 88.
+N = 21; offsets[0..2] = 0, 0, 19, so string 0 = `""` and string 1 = bytes 0..19 of the blob = `Test Opening Bridge`. The blob starts at byte 4 + 4·(N+1) = 92.
 
 **SRCS** record 0 (24 bytes): `0C 00 00 00 03 00 01 00 ED 28 35 01 E0 2E 00 00 05 01 00 00 00 00 00 00`. name = string 12 (`US5TEST1`), edition 3, update 1, issue date 20261101 (`ED 28 35 01`), cscale 12000 (`E0 2E 00 00`), band 5, used 1.
 
@@ -538,7 +539,7 @@ The triangle is **blocked**, with the first reason that applies in this order (r
 
 | code | reason | condition |
 |---|---|---|
-| 0 | PROHIBITED | `flags & PROHIBITED` |
+| 0 | PROHIBITED | never (format 1.3; before 1.3: `flags & PROHIBITED`). The code stays reserved. |
 | 1 | OPEN_GULF | `avoid_open_gulf && (flags & OUTSIDE)` |
 | 2 | DEPTH | `!(depth_ok || maint_ok)` |
 | 3 | CLEARANCE | `has_ovh && !opening && !known_ok` |
@@ -555,6 +556,8 @@ needs_opening = opening && has_ovh && (clr == 0xFFFE || clr < air)
 unknown_used  = unknown && !opening && has_ovh
 restricted    = flags & RESTRICTED
 lock          = flags & LOCK                                // format 1.2
+prohibited    = flags & PROHIBITED                          // format 1.3: passable, yellow, costs more
+uncharted     = flags & BRIDGE_UNCHARTED                    // format 1.3
 ```
 
 A lock zone is passable like any other water (its depth, clearance and area rules apply); it is never a block reason.
@@ -579,7 +582,8 @@ if via_maint:            f = f · 3.0
 else if spare < 3:       f = f · 1.3
 else if spare < 10:      f = f · 1.1
 if via_sound:            f = f · 1.5
-if restricted:           f = f · 2.0
+if prohibited:           f = f · 3.0                       (format 1.3)
+else if restricted:      f = f · 2.0
 if flags & CAUTION:      f = f · 1.25
 FMIN = 0.8                                           (heuristic multiplier)
 ```
@@ -592,6 +596,8 @@ Entry penalties are added, in metres, when the search steps from triangle t into
 | `unknown_used[u] && !unknown_used[t]` | +3000 |
 | `restricted[u] && !restricted[t]` | +1000 |
 | `lock[u] && !lock[t]` (format 1.2) | +2000 |
+| `prohibited[u] && !prohibited[t]` (format 1.3) | +5000 |
+| `uncharted[u] && !uncharted[t]` (format 1.3) | +3000 |
 | `blocked[u] && !blocked[t]` (only in the no-route search, B.11) | +100000 |
 
 ### B.6 Snapping the start and goal
@@ -727,7 +733,9 @@ For leg j, with TT = its triangles (B.8), the **yellow reasons** are tested in t
 | SOUNDING_DEPTH | via_sound |
 | BRIDGE_OPENING | needs_opening |
 | LOCK | lock (format 1.2) |
+| BRIDGE_UNCHARTED | uncharted (format 1.3) |
 | UNKNOWN_CLEARANCE | unknown_used |
+| PROHIBITED_AREA | prohibited (format 1.3) |
 | RESTRICTED_AREA | flags & RESTRICTED |
 | CAUTION_AREA | flags & CAUTION |
 | HAZARD_PROXIMITY | flags & HAZARD_DEPTH |
@@ -771,6 +779,7 @@ This is an independent check of each leg against HAZD and OVHD. The mesh already
    - **even–odd test** of point (px, py): `inside = false; j = n−1; for i in 0..n−1: if (R_i.Y > py) != (R_j.Y > py) and px < R_i.X + (py − R_i.Y)·(R_j.X − R_i.X)/(R_j.Y − R_i.Y): inside = !inside; j = i`.
 6. **Crossings and violations.** For each candidate passed under, in ascending record order:
    - an opening span (OVHD flags bit 0) is recorded as `{record, clearance_dm, opening: true, needs_opening: clr == 0xFFFE || clr < air}`;
+   - format 1.3: a record with flags bit 1 and `clr == 0xFFFE` (a fixed bridge part without a charted clearance) is recorded as `{record, clearance_dm, opening: false, uncharted: true}` and is not a violation;
    - otherwise `{record, clearance_dm, opening: false}` (no `needs_opening` key); and if `clr == 0xFFFE` it is a violation `{kind: "UNKNOWN_CLEARANCE", record}` unless accept_unknown_clearance is set; else if `clr < air` it is a violation `{kind: "CLEARANCE", record, clearance_dm}`.
 
    Every candidate passed under is listed in the leg's `crossings`. Each violation also carries `leg` (the leg index). The violations of a route are listed leg by leg; within a leg, the hazard violations in ascending record order, then the overhead ones in ascending record order.
@@ -801,6 +810,8 @@ From the corridor of B.8 (all positions) and the legs. Every field comes from th
 - `openings`: bridges that must open. Each maximal run of consecutive needs_opening corridor triangles gives one entry, from the run's first triangle: `{corridor_index, overhead, clearance_dm, name, lon, lat}` with `overhead` and `clearance_dm` from its ATTR, `name` as above and lon/lat its centroid.
 - `unknown_clearances`: the same for runs of unknown_used.
 - `locks` (format 1.2): each maximal run of consecutive `lock` corridor triangles gives `{corridor_index, area, name, lon, lat}` from the run's first triangle: `area` its ATTR area index (the lock's AREA record; 0xFFFF possible), `name` that record's name (`""` if 0xFFFF), lon/lat its centroid.
+- `uncharted_bridges` (format 1.3): the same as `openings` for runs of `uncharted` corridor triangles (`overhead` is the triangle's ATTR overhead, the uncharted part when no other object is there).
+- `prohibited_areas` (format 1.3): the same as `locks` for runs of `prohibited` corridor triangles (`area` the ATTR area, the prohibited record).
 - `advisories` (format 1.2): the union of the ADVS sets of all corridor triangles (ATTR `advisory`), in ascending AREA index, each `{area, kind, source, name, text}` from that AREA record (name and text as strings). Empty for 1.0 and 1.1 packs.
 - `maintained_triangles`: the number of corridor triangles with via_maint.
 - `data_date`: from the header.
@@ -834,9 +845,9 @@ An implementation may add its own failures outside this list (RoutingKit: cancel
 
 Builder: `python -m enc_routing build --region pilot`, with defaults from `enc_routing.config.BuildParams`.
 
-Builder version 3.1.1 (`enc_routing.config.BUILDER_VERSION`). The operator guide is [routing-build.md](routing-build.md).
+Builder version 3.2.0 (`enc_routing.config.BUILDER_VERSION`). The operator guide is [routing-build.md](routing-build.md).
 
-**C.1 Cells and merge.** The NOAA ENC catalog (via pipeline/catalog) selects the active cells covering the region; only cells of band 3 (coastal) and better are used (band 1–2 cells would only add open ocean at 1:1,000,000 and smaller). Each cell is downloaded and read with GDAL (updates applied), and the result is cached per edition and update. Every location is served by exactly one cell: the best band, then the largest scale, then the newest issue date. Each cell is clipped to its exclusive region on its own (the area claimed by higher-priority cells is closed by 5 m in a local transverse Mercator first, so hairline slivers between harbour cells go to the better cell); a cell without M_COVR falls back to its catalog coverage. A **routing region** is its chart region's box grown by 15 nautical miles on every side (30 nm before round 2), clipped to the Gulf area of interest; the pack holds the 0.2° tiles (C.10) that meet it.
+**C.1 Cells and merge.** The NOAA ENC catalog (via pipeline/catalog) selects the active cells covering the region; only cells of band 3 (coastal) and better are used (band 1–2 cells would only add open ocean at 1:1,000,000 and smaller). Each cell is downloaded and read with GDAL (updates applied), and the result is cached per edition and update. Every location is served by exactly one cell: the best band, then the largest scale, then the newest issue date. Each cell is clipped to its exclusive region on its own (the area claimed by higher-priority cells is closed by 5 m in a local transverse Mercator first, so hairline slivers between harbour cells go to the better cell); a cell without M_COVR falls back to its catalog coverage. A **routing region** is its chart region's box grown by 30 nautical miles on every side (15 nm in round 2 only), clipped to the Gulf area of interest; the pack holds the 0.2° tiles (C.10) that meet it.
 
 **C.2 Navigable water and the safety clearance.**
 
@@ -904,9 +915,10 @@ Legs relying on it are yellow with the same reason SOUNDING_DEPTH ("relies on sp
   - Polygons are used as charted, with no buffer, so adjacent bridge parts do not overlap.
   - Lines are buffered by 5 m, so a footprint contains its line with a 5 m margin, including around the line's ends and around the joint between two parts of one bridge. B.10 relies on this: a leg in passable water never touches the line of an object too low for the boat.
 - **Clearance.**
-  - An opening span (CATBRG 2, 3, 4, 5, 7 or 8) uses VERCCL, or VERCLR if VERCCL is missing.
+  - An opening span (CATBRG 2, 3, 4, 5, 6, 7 or 8) uses VERCCL, or VERCLR if VERCCL is missing.
   - Other objects use VERCLR, or VERCSA for cables.
-  - A bridge part with neither clearance counts as solid (0). In practice this is a fixed approach span next to the charted navigation span.
+  - A non-opening bridge part with neither clearance is **uncharted** (format 1.3, owner decision): it is passable with a caution (flag BRIDGE_UNCHARTED, reason BRIDGE_UNCHARTED, summary list `uncharted_bridges`). Before 1.3 it counted as solid (0). Often it is a fixed approach span next to the charted navigation span, sometimes a low fixed bridge with no published clearance: the boater must check.
+  - Pontoon bridges (CATBRG 6) count as opening spans (builder 3.2.0): with no closed clearance they are "bridge must open" legs.
 - **Duplicates.** Duplicate cable geometries are dropped; the one with the smallest feature key is kept. Side tables are sorted by feature key (cell + LNAM), so "lowest index wins" ties do not depend on the tiling.
 - **Bounding box.** The header bbox is the region box grown to include every vertex and every GEOM point (A.3).
 
@@ -922,7 +934,7 @@ Other RESAREs (for example anchoring prohibited) are ignored for routing. Member
 
 **C.7a Area-wide advisories (format 1.2).** A regulated area that covers a whole passage (the Florida Keys National Marine Sanctuary, a particularly sensitive sea area, the Mississippi River Regulated Navigation Area) made every leg yellow and so hid the local reasons. Such an area is **area-wide**; it sets no flag and no cost, and the route summary lists it once (B.12 `advisories`). The classification is computed once for the whole Gulf from the merged features:
 
-- prohibited areas are never area-wide (they stay impassable), nor are no-wake and speed areas (RESTRN 13 or 27, CATREA 24): they are local by nature;
+- prohibited areas are never area-wide (each is listed on its legs), nor are no-wake and speed areas (RESTRN 13 or 27, CATREA 24): they are local by nature;
 - a caution RESARE with an environmental category (CATREA 4 nature reserve, 5 bird sanctuary, 22 fish sanctuary, 23 ecological reserve, 27 environmentally sensitive sea area, 28 particularly sensitive sea area) is area-wide whatever its size;
 - any other restricted or caution area is area-wide when the connected part it belongs to covers at least 10 km². Parts join when they touch, within a group of the same object class, kind and OBJNAM (or the same INFORM text when unnamed), so an area cut by chart cells counts as one. A shoal-reported CTNARE or a security zone of a few km² stays local;
 - **chart-datum notes:** for each sounding datum other than MLLW (DSPM SDAT ≠ 12; in the Gulf data SDAT 24, local datum, in 56 harbour cells of the lower Mississippi River), one area-wide AREA record (kind 3, source 4, name "Chart datum", a text naming the datum) covers the exclusive regions of the cells that use it.
@@ -945,7 +957,7 @@ Triangles store the set of area-wide AREA records their sample disk meets (ATTR 
 - A face's attributes are sampled at the incentre of its fattest triangle.
 - Repairs run in exact integer arithmetic: flat triangles are removed by splitting the triangle across them, and T-junctions are split. The A.9 checks plus the exact area equality must pass, or the build fails.
 
-**C.10a Water no boat can use (builder 3.1.0).** A face is meshed only if it lies within 500 m of **live water**: depth areas with DRVAL1 ≥ 0.6 m (2 ft), sounding-raise regions (C.4, C.4b) of at least 0.6 m, and NCF reaches with a maintained depth of at least 0.6 m. Large marsh areas charted 0–1.8 m far from any channel are therefore left out (an estimated third of the triangles of the Louisiana packs were there, measured on the 30 nm Wave 4 packs). For a boat that needs 2 ft or more nothing changes in routing: those faces were impassable for it, so no route and no snap result changes. What changes: a point in such water is no longer "in the mesh" (B.6 `in_mesh` false, `located` null), and a no-route explanation (B.11) whose cheapest almost-route would have crossed more than 1 km of such water reports NOT_CONNECTED instead of DEPTH. A boat needing less than 2 ft could use some of that water and no longer can.
+**C.10a Water no boat can use (builder 3.1.x only; off from 3.2.0, `live_distance_m = 0`, because memory is no constraint and the full mesh keeps every in-mesh and no-route explanation).** When on, a face is meshed only if it lies within 500 m of **live water**: depth areas with DRVAL1 ≥ 0.6 m (2 ft), sounding-raise regions (C.4, C.4b) of at least 0.6 m, and NCF reaches with a maintained depth of at least 0.6 m. Large marsh areas charted 0–1.8 m far from any channel are therefore left out (an estimated third of the triangles of the Louisiana packs were there, measured on the 30 nm Wave 4 packs). For a boat that needs 2 ft or more nothing changes in routing: those faces were impassable for it, so no route and no snap result changes. What changes: a point in such water is no longer "in the mesh" (B.6 `in_mesh` false, `located` null), and a no-route explanation (B.11) whose cheapest almost-route would have crossed more than 1 km of such water reports NOT_CONNECTED instead of DEPTH. A boat needing less than 2 ft could use some of that water and no longer can.
 
 **C.11 Open Gulf.** The open-Gulf mask is derived: on a 0.002° raster, water farther than 5 km from land, connected to water charted ≥ 30 ft deep and ≥ 10 km from land, grown back by 5 km (the opening of the open water by a 5 km disk). Passes and gaps narrower than 10 km are sealed; no hand-placed seeds or barrier lines.
 
@@ -970,10 +982,10 @@ The regression test (`pipeline/routing/tests/test_regression.py`, ported to Rout
 
 | row | contents |
 |---|---|
-| 0 | 6 dm, CATZOC D 1950, shore class 0. Column 1 is a caution area (AREA 2). Column 2 is missing (an island). |
+| 0 | 6 dm, CATZOC D 1950, shore class 0. Column 1 is a caution area (AREA 2). Column 2 is missing (an island). Column 4 is under a fixed bridge part without charted clearance (BRIDGE_UNCHARTED, OVHD 4, a N–S line at column 4.5; format 1.3). |
 | 1 | the channel: 36 dm, maintained 27, CHANNEL+HIGHWAY, channel 0. Column 3 is shoaled to 9 dm. Column 5 is an opening bridge with closed clearance 18 dm (OVHD 0). Column 6 is a lock (LOCK, AREA 3). |
 | 2 | 21 dm. Column 2 has a cable of unknown clearance (OVHD 2). Column 4 is a known-depth wreck zone at 15 dm (HAZD 0, HAZARD_DEPTH), with an overhead point object of 50 m clearance (OVHD 3, referenced by no triangle) 4 units north of the row 1/row 2 boundary at column 4.5. Column 5 is a fixed bridge at 30 dm (OVHD 1). Column 6 is restricted (AREA 1). Column 7 has band 9 dm refined to 21 dm (SOUNDING_REFINED). |
-| 3 | 60 dm, with the cable at column 2, the fixed bridge at column 5, and a prohibited area at column 6 (AREA 0). |
+| 3 | 60 dm, with the cable at column 2, the fixed bridge at column 5, and a prohibited area at column 6 (AREA 0; passable with a caution from 1.3). |
 
 Everything else is CATZOC A2, 2010, shore class 3. Area-wide advisories: columns 0–3 of row 2 are in ADVS set 1 = {AREA 4, "Test Sanctuary"}, columns 0–3 of row 3 in set 2 = {AREA 4, AREA 5, "Chart datum"}. AREA 3 is kind 4 (lock), source 3; AREA 4 kind 3, source 1, area-wide; AREA 5 kind 3, source 4, area-wide.
 
@@ -1008,13 +1020,23 @@ Overhead lines (all N–S): OVHD 0 (opening span) from row 1's southern edge to 
 
 All integers (triangle ids, corridor, waypoints_units, dm values, reasons, grades) must match exactly. Floating-point fields must match within the stated tolerances. `legs[].from/to` and `waypoints` are `units/1e7` and are informative; compare `waypoints_units`.
 
-`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The synthetic queries s14 (a lock: yellow LOCK leg, `summary.locks`) and s15 (two area-wide advisories, green legs) cover format 1.2. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
+`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The synthetic queries s14 (a lock: yellow LOCK leg, `summary.locks`) and s15 (two area-wide advisories, green legs) cover format 1.2; s16 (under the uncharted bridge part) and s17 (in the prohibited square) cover format 1.3. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
 
 **Properties checked by both implementations** (`tests/test_rules.py`, RoutingKit `PropertyTests`): over every ordered pair of the 32 square centres of the synthetic pack and six profiles, the outcome class (route / no route / leg-validation failure) is the same in both directions and no leg fails validation; every snapped point lies in its triangle; and no leg of any route enters the interior of an impassable triangle (RoutingKit, exact).
 
 *Informative: the Python reference reproduces every vector from the pack file alone (`pytest pipeline/routing -k vectors`).*
 
 ---
+
+## Changes from 1.2
+
+Round 3, owner decisions. Packs must be rebuilt (builder 3.2.0).
+
+| # | 1.2 | 1.3 |
+|---|---|---|
+| 1 | Entry-prohibited areas blocked (reason PROHIBITED). | Passable with a caution: yellow reason PROHIBITED_AREA, summary list `prohibited_areas`, cost ×3 and +5000 m on entry. Block code 0 is no longer produced. |
+| 2 | A non-opening bridge part without charted clearance was solid (clearance 0). | Passable with a caution: flag BRIDGE_UNCHARTED (bit 14), reason BRIDGE_UNCHARTED, summary list `uncharted_bridges`, +3000 m on entry; OVHD flags bit 1 now means "uncharted" with clearance 0xFFFE; B.10 records the crossing as `uncharted: true`, no violation. Bridges with a charted clearance below the air draft still block. Cables and pipes of unknown clearance are unchanged (`accept_unknown_clearance`). |
+| 3 | — | Builder only: pontoon bridges open; 30 nm overlap again; every face meshed again (C.10a off). |
 
 ## Changes from 1.1
 

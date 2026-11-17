@@ -44,6 +44,10 @@ enum RoutingFixtures {
     static let synEast = endpoint("East", lon: -81.9925, lat: 27.0015)
     static let synNorthWest = endpoint("North-west", lon: -81.9995, lat: 27.0035)
     static let synSanctuary = endpoint("Sanctuary", lon: -81.9985, lat: 27.0025)
+    static let synUnderBridge = endpoint("Under bridge", lon: -81.9955, lat: 27.0005)
+    static let synPastBridge = endpoint("Past bridge", lon: -81.9945, lat: 27.0005)
+    static let synProhibited = endpoint("Prohibited", lon: -81.9935, lat: 27.0035)
+    static let synNorthEast = endpoint("North-east", lon: -81.9925, lat: 27.0035)
 }
 
 /// A library with copies of the test packs in a temporary side-load directory.
@@ -263,7 +267,7 @@ final class RoutingPackLibraryTests: XCTestCase {
         XCTAssertEqual(sarasota.id, "file:pilot-sarasota.pack")
         XCTAssertEqual(sarasota.dataDateRaw, 20261023)
         XCTAssertEqual(sarasota.version, "pilot-sarasota-20261023")
-        XCTAssertEqual(sarasota.formatVersion, "1.2")
+        XCTAssertEqual(sarasota.formatVersion, "1.3")
         XCTAssertEqual(sarasota.coverage, RoutingPackCoverage(south: 27.24, west: -82.62, north: 27.42, east: -82.5))
         let size = try FileManager.default.attributesOfItem(atPath: RoutingFixtures.url("sarasota.pack").path)[.size] as? NSNumber
         XCTAssertEqual(sarasota.byteSize, size?.int64Value)
@@ -564,6 +568,34 @@ final class AutoRoutePlannerTests: XCTestCase {
         let ids: [String] = p.summary.map(\.id)
         XCTAssertEqual(ids, ["distance", "time", "legs", "shallowest", "clearance", "openings", "advisory-4", "advisory-5",
                              "startSnap", "goalSnap", "data", "pack", "boat"])
+    }
+
+    /// synthetic.pack s16 and s17 (format 1.3, owner decisions): a fixed bridge without charted clearance and an
+    /// entry-prohibited area are passable with a caution, and listed in the summary.
+    func testUnchartedBridgeAndProhibitedAreaAreCautions() async throws {
+        let fixture = try PackFixture(packs: ["synthetic.pack"])
+        let planner = try await fixture.planner()
+        let boat = RoutingFixtures.profile(draftFeet: 1, marginFeet: 0.5, airFeet: 5)
+        let a = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.synUnderBridge, goal: RoutingFixtures.synPastBridge,
+                                                        profile: boat), now: RoutingFixtures.now)
+        let pa = try XCTUnwrap(a.proposal, "\(a)")
+        let titlesA: [String] = pa.legs[0].reasons.map(\.title)
+        XCTAssertTrue(titlesA.contains("Bridge clearance not charted"), "\(titlesA)")
+        let la = Dictionary(uniqueKeysWithValues: pa.summary.map { ($0.id, $0) })
+        XCTAssertTrue(la["unchartedBridges"]?.value.hasPrefix("1: Test Uncharted Bridge at ") ?? false, "\(String(describing: la["unchartedBridges"]))")
+        XCTAssertEqual(la["unchartedBridges"]?.isWarning, true)
+        let b = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.synProhibited, goal: RoutingFixtures.synNorthEast,
+                                                        profile: boat), now: RoutingFixtures.now)
+        let pb = try XCTUnwrap(b.proposal, "\(b)")
+        let titlesB: [String] = pb.legs[0].reasons.map(\.title)
+        XCTAssertEqual(titlesB, ["Entry prohibited area"])
+        let lb = Dictionary(uniqueKeysWithValues: pb.summary.map { ($0.id, $0) })
+        XCTAssertEqual(lb["prohibitedAreas"]?.value, "1: Prohibited Zone (check notices to mariners before you enter)")
+    }
+
+    func testBundledPackTitle() {
+        XCTAssertEqual(RoutingPackLibrary.title(forPackRegion: "ncds_12", fileName: "bundled-ncds_12.pack"), "ncds_12 (included with the app)")
+        XCTAssertEqual(RoutingPackLibrary.title(forPackRegion: "pilot-sarasota", fileName: "sarasota.pack"), "pilot-sarasota (side-loaded)")
     }
 
     func testLockReasonHasWords() {

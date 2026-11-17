@@ -253,8 +253,11 @@ def prepare_tile(merged, ncf_reach, ncf_line, gulf_ll, crs, p):
     live += [g for g, src, md in zip(chan.geometry.values, chan.source.values, chan.maint_dm.values)
              if src == 1 and md >= fl]
     live = robust_union(live)
-    live_zone = shapely.buffer(shapely.simplify(live, 5.0), p.live_distance_m, quad_segs=4) if not live.is_empty \
-        else shapely.Polygon()
+    if p.live_distance_m <= 0:   # format C.10a switched off (builder 3.2.0 default): every face is meshed
+        live_zone = None
+    else:
+        live_zone = shapely.buffer(shapely.simplify(live, 5.0), p.live_distance_m, quad_segs=4) \
+            if not live.is_empty else shapely.Polygon()
     return dict(areas=areas, water=water, domain=domain, obst_buffer=Bs, live_zone=live_zone,
                 rings=rings, haz=haz, hz_zone=hz_zone, hz_ring=hz_ring, snd=snd, refine=refine,
                 lower=lower, over=over, chan=chan, highway=hw, regs=regs, qual=qual, gulf=gulf,
@@ -529,8 +532,13 @@ def face_attributes(prep, pts_m, p):
         kinds = over.kind.values[j]
         opens = over.opens.values[j].astype(bool)
         cdm = over.clr_dm.values[j]
-        solid = (kinds == 1) & ~opens & (cdm == -32768)  # bridge part without clearance: solid
-        known = np.where(solid, 0, cdm)
+        # A fixed bridge part without a charted clearance (format 1.3): passable with a caution (flag
+        # BRIDGE_UNCHARTED); it takes no part in the clearance, UNKNOWN_CLEARANCE or OPENING_BRIDGE values.
+        uncharted = (kinds == 1) & ~opens & (cdm == -32768)
+        flags[np.unique(i[uncharted])] |= P.F_BRIDGE_UNCHARTED
+        ui, uj = i[uncharted], j[uncharted]
+        i, j, kinds, opens, cdm = i[~uncharted], j[~uncharted], kinds[~uncharted], opens[~uncharted], cdm[~uncharted]
+        known = cdm
         unknown = known == -32768
         all_open = np.ones(n, bool)
         anyov = np.zeros(n, bool)
@@ -549,6 +557,11 @@ def face_attributes(prep, pts_m, p):
         best = np.full(n, 1 << 50, np.int64)
         np.minimum.at(best, i, pri)
         ovid[anyov] = best[anyov] % 100000
+        # under uncharted bridge parts only: the lowest-index one
+        ub = np.full(n, 1 << 50, np.int64)
+        np.minimum.at(ub, ui, uj)
+        only_u = ~anyov & (ub < (1 << 50))
+        ovid[only_u] = ub[only_u]
     # --- quality: worst CATZOC, oldest survey year
     qual = prep["qual"]
     cz = np.zeros(n, np.int64)

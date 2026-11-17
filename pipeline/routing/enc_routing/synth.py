@@ -13,7 +13,8 @@ to north (0..3).
                            col 7 band 9 dm refined to 21 dm
   row 1  channel 36 dm   (HIGHWAY, NCF maintained 27 dm), col 3 shoaled to 9 dm, col 5 opening bridge closed 18 dm,
                            col 6 a lock (LOCK, AREA 3)
-  row 0  shallow 6 dm, CATZOC D | col 1 CAUTION | col 2 missing (island)
+  row 0  shallow 6 dm, CATZOC D | col 1 CAUTION | col 2 missing (island) | col 4 under a fixed bridge part
+                           without charted clearance (BRIDGE_UNCHARTED, OVHD 4; format 1.3)
 
 Area-wide advisories (format 1.2, ADVS): columns 0-3 of row 2 are in set 1 = {AREA 4, a sanctuary};
 columns 0-3 of row 3 in set 2 = {AREA 4, AREA 5, a chart-datum note}.
@@ -66,6 +67,9 @@ def square_values(c, r):
     if c == 7 and r == 2:
         d.update(depth=21, band=9)
         d["flags"] |= P.F_REFINED
+    if c == 4 and r == 0:
+        d["flags"] |= P.F_BRIDGE_UNCHARTED
+        d["overhead"] = 4
     if c == 6 and r == 1:
         d["flags"] |= P.F_LOCK
         d["area"] = 3
@@ -105,7 +109,7 @@ def build_synthetic() -> P.Pack:
                "Test Channel", "CUT-1", "Approach Cut", "Prohibited Zone", "Restricted Zone",
                "Caution Zone", "Shoal reported", "US5TEST1", "Test Overhead Point", "Test Lock",
                "Lock: operation and hours not charted", "Test Sanctuary", "Protected area: test regulations",
-               "Chart datum", "Depths refer to a local low-water datum, not MLLW"]
+               "Chart datum", "Depths refer to a local low-water datum, not MLLW", "Test Uncharted Bridge"]
     sid = {s: i for i, s in enumerate(strings)}
 
     def pt(c, r):  # units of a grid node
@@ -140,6 +144,12 @@ def build_synthetic() -> P.Pack:
     hx, hy = pt(4, 2)
     g3 = add([(hx + STEP // 2, hy + STEP // 2)])
     hz = np.array([(2, 3, 0, 1, 15, 0, hx + STEP // 2, hy + STEP // 2, *g3, sid["Test Wreck"], 0)], dtype=P.HAZD_DT)
+    # overhead 4 (format 1.3): a fixed bridge part without charted clearance across column 4 of row 0
+    x45 = LON0 + 4 * STEP + STEP // 2
+    g5 = add([(x45, LAT0), (x45, LAT0 + STEP)])
+    ovh = np.concatenate([ovh, np.array([
+        (1, 2, 1 << 0, P.CLR_UNKNOWN, P.CLR_UNKNOWN, P.CLR_UNKNOWN, 0, sid["Test Uncharted Bridge"], x45,
+         LAT0 + STEP // 2, *g5, 2, (0,) * 7)], dtype=P.OVHD_DT)])
     ch = np.array([(1, 1, 27, 27, 0, sid["Test Channel"], sid["CUT-1"], sid["Approach Cut"], 20260101,
                     LON0 + 40000, LAT0 + 15000)], dtype=P.CHAN_DT)
     ar = np.array([(1, 1, 0, 0, sid["Prohibited Zone"], 0, LON0 + 65000, LAT0 + 35000, (0, 0, 0)),

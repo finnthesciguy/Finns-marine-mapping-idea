@@ -55,7 +55,7 @@ def test_header_layout_and_crc(synth_pack):
     buf = synth_pack.read_bytes()
     assert buf[:8] == b"GCRTPACK"
     major, minor, hsize = struct.unpack_from("<HHI", buf, 8)
-    assert (major, minor, hsize) == (1, 2, 256)
+    assert (major, minor, hsize) == (1, 3, 256)
     assert struct.unpack_from("<I", buf, 16)[0] == len(buf)
     n = struct.unpack_from("<I", buf, 20)[0]
     assert struct.unpack_from("<I", buf, 108)[0] == zlib.crc32(buf[256:256 + 32 * n])

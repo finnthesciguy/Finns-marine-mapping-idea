@@ -88,16 +88,22 @@ let syntheticProfiles: [BoatProfile] = [
         return bad
     }
 
-    /// Every ordered pair of square centres under every profile, forwards and backwards (11,904 queries, each
-    /// forward one repeated): deterministic, the same outcome class in both directions, every route satisfies the
+    /// Every ordered pair of square centres under every profile (every third pair in debug builds), forwards and
+    /// backwards (11,904 queries in release, each forward one repeated): deterministic, the same outcome class in both directions, every route satisfies the
     /// invariants, and no leg fails validation (a leg running along a footprint edge is not under the object).
     @Test func syntheticAllPairs() {
         let pack = Fixtures.synthetic
+        // Debug builds run every third pair (about 2 minutes instead of 6.5); release builds run them all.
+        #if DEBUG
+        let stride = 3
+        #else
+        let stride = 1
+        #endif
         var routes = 0, noRoutes = 0, legValidations = 0
         var problems: [String] = []
         for profile in syntheticProfiles {
             for (i, a) in syntheticPoints.enumerated() {
-                for (j, b) in syntheticPoints.enumerated() where i != j {
+                for (j, b) in syntheticPoints.enumerated() where i != j && (i + j) % stride == 0 {
                     let req = RouteRequest(start: a, goal: b, profile: profile)
                     let rev = RouteRequest(start: b, goal: a, profile: profile)
                     let forward = Result { () throws(RoutingError) -> RouteResult in try pack.routeSynchronously(req) }
@@ -124,8 +130,8 @@ let syntheticProfiles: [BoatProfile] = [
             }
         }
         print("[property] synthetic: \(routes) routes, \(noRoutes) NO_ROUTE, \(legValidations) LEG_VALIDATION")
-        #expect(routes > 5000)
-        #expect(noRoutes > 1000)
+        #expect(routes > 5000 / stride)
+        #expect(noRoutes > 1000 / stride)
         #expect(legValidations == 0)
         #expect(problems.isEmpty, "\(problems.prefix(10))")
     }

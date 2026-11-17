@@ -1,6 +1,6 @@
 # Routing-pack build: operator guide
 
-Status: Wave 4 round 2, 2026-11-15 (builder 3.1.1). Code: [`pipeline/routing`](../pipeline/routing). Format: [routing-pack-format.md](routing-pack-format.md) (1.2: locks, area-wide advisories, new leg construction; packs must be rebuilt, readers still accept 1.0 and 1.1). Workflow: [`.github/workflows/routing-build.yml`](../.github/workflows/routing-build.yml) (manual only, uploads workflow artifacts, publishes nothing).
+Status: Wave 4 round 3, 2026-11-17 (builder 3.2.0). Code: [`pipeline/routing`](../pipeline/routing). Format: [routing-pack-format.md](routing-pack-format.md) (1.3: locks, area-wide advisories, new leg construction, passable prohibited areas and uncharted bridges; packs must be rebuilt, readers still accept 1.0 to 1.2). The five packs ship inside the app in `App/Resources/RoutingPacks/` (`ncds_10.pack` … `ncds_14.pack` and `manifest.json`). Workflow: [`.github/workflows/routing-build.yml`](../.github/workflows/routing-build.yml) (manual only, uploads workflow artifacts, publishes nothing).
 
 ## 1. What is built
 
@@ -8,15 +8,15 @@ One routing pack per chart region, with the chart region's id, so it installs al
 
 | pack | chart region | routing area |
 |---|---|---|
-| `ncds_10` | Tampa Bay to the Keys and Dry Tortugas | chart box + 15 nm, inside the Gulf AOI |
+| `ncds_10` | Tampa Bay to the Keys and Dry Tortugas | chart box + 30 nm, inside the Gulf AOI |
 | `ncds_11` | Tarpon Springs to Biloxi | same rule |
 | `ncds_12` | Mississippi River, Lake Pontchartrain, Louisiana waterways | same rule |
 | `ncds_13` | Louisiana coast south of 29.33° N | same rule |
 | `ncds_14` | Sabine to Brownsville | same rule |
 
-**Overlap policy.** The on-device engine routes inside one pack only. Every pack therefore extends 15 nautical miles past its chart box on every side (clipped to pipeline/catalog's Gulf area of interest; 30 nm until round 2, when 37 % of all stored triangles were overlap copies). Any passage that starts in a chart region and ends less than 15 nm past its edge can be planned in that region's pack. Examples: Clearwater to Anclote and St. Petersburg to Anclote (10/11 line at 28.1° N; Gulfport FL to Anclote now only in ncds_10); Gulfport to Mobile and Biloxi to the Rigolets (11/12 line at 89.07° W); Grand Isle, Venice and Port Fourchon to New Orleans (12/13 line at 29.33° N: the ncds_12 pack reaches 29.08° N and holds Head of Passes and Grand Isle; the ncds_13 pack reaches 29.58° N, so Houma's floodgate is in it but Morgan City is not — Atchafalaya Bay to Morgan City is now an ncds_12 route); Intracoastal City to Cameron (13/14 line at 92.46° W; the ncds_14 pack reaches 92.16° W, just past Freshwater Bayou). The upper Keys east of 80.6° W, outside every chart box, are in the ncds_10 pack.
+**Overlap policy.** The on-device engine routes inside one pack only. Every pack therefore extends 30 nautical miles past its chart box on every side (clipped to pipeline/catalog's Gulf area of interest; 15 nm in round 2 only). Any passage that starts in a chart region and ends less than 30 nm past its edge can be planned in that region's pack. Examples: Clearwater, St. Petersburg and Gulfport FL to Anclote (10/11 line at 28.1° N); Gulfport to Mobile and Biloxi to the Rigolets (11/12 line at 89.07° W); Grand Isle, Venice and Port Fourchon to New Orleans (12/13 line at 29.33° N: the ncds_12 pack reaches 28.83° N and holds the whole delta, the ncds_13 pack reaches 29.83° N and holds Houma and Morgan City); Intracoastal City to Cameron (13/14 line at 92.46° W). The upper Keys east of 80.6° W are in the ncds_10 pack.
 
-**Sizes.** The five packs are 12.0 / 12.7 / 15.1 / 8.0 / 13.0 MB (61 MB, 12.5 million triangles), against 13.2 / 20.1 / 22.8 / 18.6 / 14.5 MB (89 MB, 18.3 million triangles) before round 2. The reduction comes from the 15 nm overlap and from not meshing water no boat can use far from live water (format spec C.10a).
+**Sizes.** 13.3 / 20.2 / 23.0 / 18.8 / 14.6 MB (90 MB, 18.5 million triangles; about 37 % overlap copies). Every face is meshed (format spec C.10a is off since builder 3.2.0).
 
 **What still cannot be planned in one go.** A passage longer than the overlap across a region line, for example Texas to Florida, Morgan City to Galveston, Pensacola to Tampa, or Sarasota to Cedar Key. The app already refuses it with "Start and destination in different regions … plan to a point inside one region first". It should say which region line the passage crosses and suggest the hand-over points that both packs hold (for example "plan to Gulfport, then from Gulfport to Mobile"). A cross-pack planner (stitching two packs at a shared tile edge) is the real fix; the tiles of the overlap are identical in both packs, which makes such stitching possible later.
 
@@ -69,7 +69,7 @@ On the device (RoutingKit release build, Linux, glibc with `MALLOC_MMAP_THRESHOL
 | peak while running the 27 reference queries | 319 MB | 180 MB |
 | load time | 1.47 s | 1.6 s |
 
-With glibc's default (dynamic) mmap threshold the round 2 numbers are 183 / 202 / 188 MB, because glibc keeps freed decoder buffers in its heap. The saving is about half from the smaller pack and half from RoutingKit (attribute classes: 4 bytes per triangle instead of 17; adjacency derived from per-vertex corner lists; ATTR decoded before the mesh arrays; search state allocated in pages on first touch). The remaining load peak is the derived adjacency (about 16 bytes per triangle, transient).
+With glibc's default (dynamic) mmap threshold the round 2 numbers are 183 / 202 / 188 MB, because glibc keeps freed decoder buffers in its heap. These are round 2 figures, with the 15 nm overlap and C.10a. With round 3's packs (30 nm, every face) ncds_12 needs 176 MB of arrays and about 265 MB resident (295 MB peak while loading) in the cross-check run; memory is no longer a constraint. The RoutingKit saving is (attribute classes: 4 bytes per triangle instead of 17; adjacency derived from per-vertex corner lists; ATTR decoded before the mesh arrays; search state allocated in pages on first touch). The remaining load peak is the derived adjacency (about 16 bytes per triangle, transient).
 
 ## 4. Incremental rebuilds
 

@@ -1,11 +1,11 @@
 {
  "file": "sarasota.pack",
- "sha256": "5d71fb4afcec2e0245e7d7aaba2e1f947cbfc979c02181730be6512ac7e99f61",
+ "sha256": "3f21400ddeac2fff76006dc75a8afeb356a0a9341fc5090b4577b50bf25b08de",
  "header": {
   "major": 1,
-  "minor": 2,
+  "minor": 3,
   "header_size": 256,
-  "file_size": 214248,
+  "file_size": 214688,
   "section_count": 13,
   "section_table_offset": 256,
   "flags": 0,
@@ -15,16 +15,16 @@
   "max_lon": -825000000,
   "max_lat": 274200000,
   "data_date": 20261023,
-  "build_date": 20261116,
-  "build_time": 135212,
-  "vertex_count": 27349,
-  "triangle_count": 42101,
+  "build_date": 20261117,
+  "build_time": 14404,
+  "vertex_count": 27417,
+  "triangle_count": 42166,
   "clearance_dm": 120,
   "check_dm": 110,
   "shore_ring0_m": 50,
   "shore_ring1_m": 150,
-  "table_crc32": 136917316,
-  "header_crc32": 3349775872
+  "table_crc32": 2754116975,
+  "header_crc32": 1816526712
  },
  "sections": [
   {
@@ -32,9 +32,9 @@
    "count": 0,
    "encoding": 1,
    "offset": 672,
-   "stored_length": 676,
-   "raw_length": 1408,
-   "crc32": 396396349
+   "stored_length": 674,
+   "raw_length": 1405,
+   "crc32": 3177050405
   },
   {
    "name": "STRS",
@@ -56,54 +56,54 @@
   },
   {
    "name": "VERT",
-   "count": 27349,
+   "count": 27417,
    "encoding": 1,
    "offset": 3672,
-   "stored_length": 96868,
-   "raw_length": 107025,
-   "crc32": 421208819
+   "stored_length": 97114,
+   "raw_length": 107291,
+   "crc32": 1079723137
   },
   {
    "name": "TRIS",
-   "count": 42101,
+   "count": 42166,
    "encoding": 1,
-   "offset": 100544,
-   "stored_length": 71546,
-   "raw_length": 133986,
-   "crc32": 3828442277
+   "offset": 100792,
+   "stored_length": 71639,
+   "raw_length": 134181,
+   "crc32": 2487861754
   },
   {
    "name": "ATTR",
-   "count": 42101,
+   "count": 42166,
    "encoding": 1,
-   "offset": 172096,
-   "stored_length": 30947,
-   "raw_length": 799919,
-   "crc32": 3271310954
+   "offset": 172432,
+   "stored_length": 31051,
+   "raw_length": 801154,
+   "crc32": 1131283817
   },
   {
    "name": "GRID",
    "count": 216,
    "encoding": 1,
-   "offset": 203048,
-   "stored_length": 4985,
-   "raw_length": 49756,
-   "crc32": 1954598093
+   "offset": 203488,
+   "stored_length": 4989,
+   "raw_length": 49821,
+   "crc32": 3729694840
   },
   {
    "name": "OVHD",
    "count": 42,
    "encoding": 1,
-   "offset": 208040,
-   "stored_length": 680,
+   "offset": 208480,
+   "stored_length": 679,
    "raw_length": 1680,
-   "crc32": 2383217842
+   "crc32": 3739857360
   },
   {
    "name": "HAZD",
    "count": 116,
    "encoding": 1,
-   "offset": 208720,
+   "offset": 209160,
    "stored_length": 1409,
    "raw_length": 3712,
    "crc32": 2816004656
@@ -112,7 +112,7 @@
    "name": "CHAN",
    "count": 71,
    "encoding": 1,
-   "offset": 210136,
+   "offset": 210576,
    "stored_length": 946,
    "raw_length": 2272,
    "crc32": 1202476649
@@ -121,7 +121,7 @@
    "name": "AREA",
    "count": 7,
    "encoding": 1,
-   "offset": 211088,
+   "offset": 211528,
    "stored_length": 101,
    "raw_length": 224,
    "crc32": 2940770229
@@ -130,7 +130,7 @@
    "name": "ADVS",
    "count": 1,
    "encoding": 0,
-   "offset": 211192,
+   "offset": 211632,
    "stored_length": 8,
    "raw_length": 8,
    "crc32": 1696784233
@@ -139,20 +139,20 @@
    "name": "GEOM",
    "count": 489,
    "encoding": 1,
-   "offset": 211200,
+   "offset": 211640,
    "stored_length": 3042,
    "raw_length": 3912,
    "crc32": 3905434346
   }
  ],
  "info": {
-  "builder": "enc_routing 3.1.1",
-  "params": "{\"clearance_m\": 12.0, \"bridge_clearance_m\": 4.0, \"bridge_zone_m\": 60.0, \"fender_clearance_m\": 3.0, \"simplify_m\": 1.0, \"close_m\": 5.0, \"min_part_m2\": 200.0, \"hazard_ring_m\": 30.0, \"shore_rings_m\": [50.0, 150.0], \"ring_simplify_m\": 5.0, \"grid_deg\": 0.02, \"coarse_grid_deg\": 0.1, \"fine_zone_m\": 3000.0, \"sounding_near_m\": 12.0, \"tin_edge_frac\": 0.02, \"tin_edge_cap_m\": 400.0, \"ncf_tolerance_m\": 15.0, \"track_buffer_m\": 15.0, \"highway_buffer_m\": 30.0, \"overhead_line_buffer_m\": 5.0, \"overhead_poly_buffer_m\": 0.0, \"index_cell_deg\": 0.01, \"sample_radius_units\": 3.0, \"tile_deg\": 0.2, \"tile_margin_m\": 600.0, \"line_margin_m\": 200.0, \"mask_res_deg\": 0.002, \"mask_seal_m\": 5000.0, \"mask_seed_depth_dm\": 91, \"mask_seed_dist_m\": 10000.0, \"lock_group_m\": 500.0, \"lock_zone_m\": 60.0, \"areawide_km2\": 10.0, \"ext_d1_max_dm\": 6, \"ext_edge_max_m\": 2000.0, \"ext_min_angle_deg\": 25.0, \"ext_spread_max_dm\": 10, \"ext_margin_dm\": 3, \"ext_clear_m\": 200.0, \"ext_shoal_m\": 1000.0, \"ext_boundary_m\": 150.0, \"live_floor_dm\": 6, \"live_distance_m\": 500.0}",
-  "params_key": "10087b24872a770c",
+  "builder": "enc_routing 3.2.0",
+  "params": "{\"clearance_m\": 12.0, \"bridge_clearance_m\": 4.0, \"bridge_zone_m\": 60.0, \"fender_clearance_m\": 3.0, \"simplify_m\": 1.0, \"close_m\": 5.0, \"min_part_m2\": 200.0, \"hazard_ring_m\": 30.0, \"shore_rings_m\": [50.0, 150.0], \"ring_simplify_m\": 5.0, \"grid_deg\": 0.02, \"coarse_grid_deg\": 0.1, \"fine_zone_m\": 3000.0, \"sounding_near_m\": 12.0, \"tin_edge_frac\": 0.02, \"tin_edge_cap_m\": 400.0, \"ncf_tolerance_m\": 15.0, \"track_buffer_m\": 15.0, \"highway_buffer_m\": 30.0, \"overhead_line_buffer_m\": 5.0, \"overhead_poly_buffer_m\": 0.0, \"index_cell_deg\": 0.01, \"sample_radius_units\": 3.0, \"tile_deg\": 0.2, \"tile_margin_m\": 600.0, \"line_margin_m\": 200.0, \"mask_res_deg\": 0.002, \"mask_seal_m\": 5000.0, \"mask_seed_depth_dm\": 91, \"mask_seed_dist_m\": 10000.0, \"lock_group_m\": 500.0, \"lock_zone_m\": 60.0, \"areawide_km2\": 10.0, \"ext_d1_max_dm\": 6, \"ext_edge_max_m\": 2000.0, \"ext_min_angle_deg\": 25.0, \"ext_spread_max_dm\": 10, \"ext_margin_dm\": 3, \"ext_clear_m\": 200.0, \"ext_shoal_m\": 1000.0, \"ext_boundary_m\": 150.0, \"live_floor_dm\": 6, \"live_distance_m\": 0.0}",
+  "params_key": "c3779faaa0aabe02",
   "crs": "per-tile transverse Mercator (tile centre)",
   "tiles": "80",
   "cells": "106",
-  "topology": "{\"boundary_edges\": 219924, \"bowtie_vertices\": 36, \"seam_splits\": 500}",
+  "topology": "{\"boundary_edges\": 259427, \"bowtie_vertices\": 0, \"seam_splits\": 603}",
   "ncf": "USACE National Channel Framework (ChannelReach, ChannelLine)",
   "attribution": "NOAA ENC and USACE NCF data; not for navigation",
   "cut_from": "pilot",
@@ -188,12 +188,12 @@
    "lat": 272402060
   },
   {
-   "index": 13674,
-   "lon": -825432119,
-   "lat": 273223789
+   "index": 13708,
+   "lon": -825417338,
+   "lat": 273228244
   },
   {
-   "index": 27348,
+   "index": 27416,
    "lon": -825099771,
    "lat": 272417814
   }
@@ -269,19 +269,19 @@
    "advisory": 0
   },
   {
-   "index": 21050,
+   "index": 21083,
    "v": [
-    13799,
-    13800,
-    13801
+    13813,
+    13817,
+    13818
    ],
    "nbr": [
-    21043,
-    21053,
-    21051
+    21082,
+    -1,
+    21084
    ],
-   "depth_dm": 0,
-   "band_depth_dm": 0,
+   "depth_dm": 9,
+   "band_depth_dm": 9,
    "maint_dm": -32768,
    "clearance_dm": 65535,
    "flags": 0,
@@ -292,14 +292,14 @@
    "advisory": 0
   },
   {
-   "index": 42100,
+   "index": 42165,
    "v": [
-    27346,
-    27348,
-    27347
+    27414,
+    27416,
+    27415
    ],
    "nbr": [
-    42099,
+    42164,
     -1,
     -1
    ],
@@ -321,7 +321,7 @@
   "cell": 100000,
   "nx": 12,
   "ny": 18,
-  "total_ids": 48985,
+  "total_ids": 49050,
   "cells": [
    {
     "cell": 0,
@@ -343,7 +343,6 @@
    {
     "cell": 88,
     "ids": [
-     31722,
      31723,
      31724,
      31725,
@@ -402,16 +401,16 @@
      31778,
      31779,
      31780,
-     31784,
+     31781,
      31785,
      31786,
      31787,
-     31789,
+     31788,
      31790,
      31791,
      31792,
      31793,
-     31798,
+     31794,
      31799,
      31800,
      31801,
@@ -427,35 +426,35 @@
      31811,
      31812,
      31813,
-     31816,
+     31814,
      31817,
      31818,
      31819,
      31820,
-     31824,
+     31821,
      31825,
      31826,
      31827,
-     31829,
+     31828,
      31830,
-     31842,
+     31831,
      31843,
-     32066,
+     31844,
      32067,
-     32070,
-     32076,
+     32068,
+     32071,
      32077,
      32078,
      32079,
      32080,
-     32082,
+     32081,
      32083,
-     32085,
-     32089,
+     32084,
+     32086,
      32090,
      32091,
      32092,
-     32094,
+     32093,
      32095,
      32096,
      32097,
@@ -729,11 +728,11 @@
      32365,
      32366,
      32367,
-     32372,
-     32374,
+     32368,
+     32373,
      32375,
      32376,
-     32411,
+     32377,
      32412,
      32413,
      32414,
@@ -765,17 +764,18 @@
      32440,
      32441,
      32442,
-     32457,
-     32474,
+     32443,
+     32458,
      32475,
      32476,
-     32556,
+     32477,
      32557,
      32558,
      32559,
      32560,
      32561,
-     32562
+     32562,
+     32563
     ]
    },
    {

@@ -31,8 +31,12 @@ public enum CautionReason: String, Hashable, Sendable, Codable, CaseIterable {
     case bridgeOpening = "BRIDGE_OPENING"
     /// Passes a lock or navigable floodgate: operation, hours and restrictions are not known to the app.
     case lock = "LOCK"
+    /// Passes under a fixed bridge part whose clearance is not charted (format 1.3).
+    case bridgeUncharted = "BRIDGE_UNCHARTED"
     /// Passes under an object of unknown clearance.
     case unknownClearance = "UNKNOWN_CLEARANCE"
+    /// Crosses an area the chart marks entry prohibited (format 1.3: passable with a caution).
+    case prohibitedArea = "PROHIBITED_AREA"
     case restrictedArea = "RESTRICTED_AREA"
     case cautionArea = "CAUTION_AREA"
     /// Within the clearance zone of a hazard of known depth.
@@ -76,6 +80,8 @@ public struct OverheadCrossing: Hashable, Sendable {
     /// For an opening span: true when it must open for the boat (closed clearance unknown or below air draft).
     /// Nil for fixed objects.
     public var needsOpening: Bool?
+    /// A fixed bridge part without a charted clearance, passed with a caution (format 1.3). Nil otherwise.
+    public var uncharted: Bool? = nil
     /// The object's name ("" if unnamed).
     public var name: String
 }
@@ -133,7 +139,8 @@ public struct OverheadRun: Hashable, Sendable {
     public var centroid: GridPoint
 }
 
-/// A lock or navigable floodgate along the route (spec B.12 `locks`).
+/// A lock or navigable floodgate, or an entry-prohibited area, along the route (spec B.12 `locks`,
+/// `prohibited_areas`).
 public struct LockRun: Hashable, Sendable {
     public var corridorIndex: Int
     /// `AREA` record of the lock (kind 4), or nil if the triangle names none.
@@ -169,6 +176,10 @@ public struct RouteSummary: Hashable, Sendable {
     public var unknownClearances: [OverheadRun]
     /// Locks and navigable floodgates passed, in order (format 1.2).
     public var locks: [LockRun]
+    /// Fixed bridge parts without a charted clearance passed under, in order (format 1.3).
+    public var unchartedBridges: [OverheadRun]
+    /// Entry-prohibited areas crossed, in order (format 1.3).
+    public var prohibitedAreas: [LockRun]
     /// Area-wide advisories (sanctuaries, regulated navigation areas, non-MLLW chart datum), by `AREA` index.
     public var advisories: [AreaAdvisory]
     public var maintainedTriangles: Int

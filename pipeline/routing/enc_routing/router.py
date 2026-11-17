@@ -33,6 +33,9 @@ OPENING_PENALTY_M = 1500.0
 UNKNOWN_CLR_PENALTY_M = 3000.0
 RESTRICTED_PENALTY_M = 1000.0
 LOCK_PENALTY_M = 2000.0             # entering a lock or floodgate zone (format 1.2)
+PROHIBITED_FACTOR = 3.0             # format 1.3: entry-prohibited areas are passable, at a cost
+PROHIBITED_PENALTY_M = 5000.0
+UNCHARTED_BRIDGE_PENALTY_M = 3000.0 # format 1.3: under a fixed bridge part without a charted clearance
 BLOCKED_FACTOR = 50.0
 BLOCKED_PENALTY_M = 100000.0
 MAX_SNAP_M = 750.0
@@ -44,8 +47,8 @@ OVERHEAD_POINT_M = 1.0              # spec B.10: a point object within this dist
 # block reasons (spec B.3), in precedence order
 BLOCK_REASONS = ["PROHIBITED", "OPEN_GULF", "DEPTH", "CLEARANCE", "UNKNOWN_CLEARANCE"]
 # yellow reasons (spec B.9), in report order
-YELLOW_REASONS = ["MAINTAINED_DEPTH", "SOUNDING_DEPTH", "BRIDGE_OPENING", "LOCK", "UNKNOWN_CLEARANCE",
-                  "RESTRICTED_AREA", "CAUTION_AREA", "HAZARD_PROXIMITY", "LOW_DATA_QUALITY",
+YELLOW_REASONS = ["MAINTAINED_DEPTH", "SOUNDING_DEPTH", "BRIDGE_OPENING", "LOCK", "BRIDGE_UNCHARTED",
+                  "UNKNOWN_CLEARANCE", "PROHIBITED_AREA", "RESTRICTED_AREA", "CAUTION_AREA", "HAZARD_PROXIMITY", "LOW_DATA_QUALITY",
                   "THIN_MARGIN"]
 LOW_QUALITY_CATZOC = (0, 5, 6)      # unknown, D, U
 THIN_MARGIN_CATZOC = (0, 4, 5, 6)   # unknown, C, D, U
@@ -130,7 +133,8 @@ class Classified:
         clr_block = has_ovh & ~opening & ~known_ok
         unk_block = has_ovh & ~opening & known_ok & unk & (not prof.accept_unknown_clearance)
         reason = np.full(len(depth), -1, np.int64)
-        conds = [(fl & P.F_PROHIBITED) > 0,
+        # format 1.3: PROHIBITED (code 0) is no longer a block reason; entry-prohibited areas are yellow and cost more
+        conds = [np.zeros(len(depth), bool),
                  ((fl & P.F_OUTSIDE) > 0) & prof.avoid_open_gulf,
                  ~(depth_ok | maint_ok), clr_block, unk_block]
         for k in reversed(range(len(conds))):
@@ -143,10 +147,12 @@ class Classified:
         self.unknown_used = unk & ~opening & has_ovh
         self.restricted = (fl & P.F_RESTRICTED) > 0
         self.lock = (fl & P.F_LOCK) > 0
+        self.prohibited = (fl & P.F_PROHIBITED) > 0
+        self.uncharted = (fl & P.F_BRIDGE_UNCHARTED) > 0
         # spec B.9: the yellow reasons of each triangle as a bit mask (bit k = YELLOW_REASONS[k])
         cz = (a["quality"] & 7).astype(np.int64)
-        conds = [self.via_maint, self.via_sound, self.needs_opening, self.lock, self.unknown_used,
-                 self.restricted, (fl & P.F_CAUTION) > 0, (fl & P.F_HAZARD_DEPTH) > 0,
+        conds = [self.via_maint, self.via_sound, self.needs_opening, self.lock, self.uncharted, self.unknown_used,
+                 self.prohibited, self.restricted, (fl & P.F_CAUTION) > 0, (fl & P.F_HAZARD_DEPTH) > 0,
                  np.isin(cz, LOW_QUALITY_CATZOC),
                  ~self.via_maint & ((depth - req) < THIN_MARGIN_DM) & np.isin(cz, THIN_MARGIN_CATZOC)]
         bits = np.zeros(len(depth), np.int64)
@@ -165,7 +171,7 @@ class Classified:
         f = np.where(via_maint, f * MAINTAINED_FACTOR,
                      np.where(spare < 3, f * SPARE_LT_3DM_FACTOR, np.where(spare < 10, f * SPARE_LT_10DM_FACTOR, f)))
         f = np.where(self.via_sound, f * SOUNDING_FACTOR, f)
-        f = np.where(self.restricted, f * RESTRICTED_FACTOR, f)
+        f = np.where(self.prohibited, f * PROHIBITED_FACTOR, np.where(self.restricted, f * RESTRICTED_FACTOR, f))
         f = np.where((fl & P.F_CAUTION) > 0, f * CAUTION_FACTOR, f)
         self.factor = f
         self.req, self.air = req, air
@@ -291,13 +297,16 @@ class Router:
         b = self._tri_l[t][(k + 1) % 3]
         return ((self._vx[a] + self._vx[b]) / 2e7, (self._vy[a] + self._vy[b]) / 2e7)
 
-    def astar(self, s, gt, S, G, ok, factor, pen_open, pen_unk, pen_rest, pen_lock, extra_pen=None):
+    def penalties(self, cls):
+        """Spec B.5 entry penalties, in order."""
+        return [(cls.needs_opening, OPENING_PENALTY_M), (cls.unknown_used, UNKNOWN_CLR_PENALTY_M),
+                (cls.restricted, RESTRICTED_PENALTY_M), (cls.lock, LOCK_PENALTY_M),
+                (cls.prohibited, PROHIBITED_PENALTY_M), (cls.uncharted, UNCHARTED_BRIDGE_PENALTY_M)]
+
+    def astar(self, s, gt, S, G, ok, factor, penalties, extra_pen=None):
         ok = ok.tolist() if isinstance(ok, np.ndarray) else ok
         factor = factor.tolist()
-        po = pen_open.tolist()
-        pu = pen_unk.tolist()
-        pr = pen_rest.tolist()
-        pk = pen_lock.tolist()
+        pens = [(m.tolist(), v) for m, v in penalties]
         pb = extra_pen.tolist() if extra_pen is not None else None
         gx, gy = G
         gcost = {s: 0.0}
@@ -325,14 +334,9 @@ class Router:
                     continue
                 mx, my = self.edge_mid(t, k)
                 step = dist_m(px, py, mx, my) * ((ft + factor[u]) * 0.5)
-                if po[u] and not po[t]:
-                    step += OPENING_PENALTY_M
-                if pu[u] and not pu[t]:
-                    step += UNKNOWN_CLR_PENALTY_M
-                if pr[u] and not pr[t]:
-                    step += RESTRICTED_PENALTY_M
-                if pk[u] and not pk[t]:
-                    step += LOCK_PENALTY_M
+                for m, v in pens:
+                    if m[u] and not m[t]:
+                        step += v
                 if pb is not None and pb[u] and not pb[t]:
                     step += BLOCKED_PENALTY_M
                 ng = gt_ + step
@@ -427,6 +431,8 @@ class Router:
                 item = {"record": int(o), "clearance_dm": clr, "opening": opening}
                 if opening:
                     item["needs_opening"] = clr == P.CLR_UNKNOWN or clr < air
+                elif clr == P.CLR_UNKNOWN and r["flags"] & 2:
+                    item["uncharted"] = True  # format 1.3: a fixed bridge part without clearance, passed with a caution
                 elif clr == P.CLR_UNKNOWN:
                     if not prof.accept_unknown_clearance:
                         viol.append({"kind": "UNKNOWN_CLEARANCE", "record": int(o)})
@@ -456,8 +462,7 @@ class Router:
         s, g = ends[0]["triangle"], ends[1]["triangle"]
         S = (ends[0]["x"] / UNITS, ends[0]["y"] / UNITS)
         G = (ends[1]["x"] / UNITS, ends[1]["y"] / UNITS)
-        corridor, expanded = self.astar(s, g, S, G, cls.ok, cls.factor, cls.needs_opening,
-                                        cls.unknown_used, cls.restricted, cls.lock)
+        corridor, expanded = self.astar(s, g, S, G, cls.ok, cls.factor, self.penalties(cls))
         res["expanded"] = expanded
         if corridor is None:
             res["error"] = "NO_ROUTE"
@@ -666,6 +671,8 @@ class Router:
             "openings": runs(cls.needs_opening, overhead_item),
             "unknown_clearances": runs(cls.unknown_used, overhead_item),
             "locks": runs(cls.lock, lock_item),
+            "uncharted_bridges": runs(cls.uncharted, overhead_item),
+            "prohibited_areas": runs(cls.prohibited, lock_item),
             "advisories": advisories,
             "maintained_triangles": int(cls.via_maint[tt].sum()),
             "data_date": int(p.data_date),
@@ -676,8 +683,7 @@ class Router:
         ok = np.ones(len(cls.ok), bool)
         blocked = ~cls.ok
         factor = np.where(blocked, BLOCKED_FACTOR, cls.factor)
-        corridor, _ = self.astar(s, g, S, G, ok, factor, cls.needs_opening, cls.unknown_used, cls.restricted,
-                                 cls.lock, extra_pen=blocked)
+        corridor, _ = self.astar(s, g, S, G, ok, factor, self.penalties(cls), extra_pen=blocked)
         if corridor is None:
             # Disconnected water: no option can connect it, so every hint is false (no search needed).
             hints = {opt: False for opt in ("use_maintained", "accept_unknown_clearance") if not getattr(prof, opt)}
@@ -703,8 +709,7 @@ class Router:
             if not (c2.ok[s] and c2.ok[g]):
                 hints[opt] = False
                 continue
-            cor2, _ = self.astar(s, g, S, G, c2.ok, c2.factor, c2.needs_opening, c2.unknown_used, c2.restricted,
-                                 c2.lock)
+            cor2, _ = self.astar(s, g, S, G, c2.ok, c2.factor, self.penalties(c2))
             hints[opt] = cor2 is not None
         return {"reason": out[0]["reason"] if out else "NOT_CONNECTED", "blocked": out, "hints": hints}
 

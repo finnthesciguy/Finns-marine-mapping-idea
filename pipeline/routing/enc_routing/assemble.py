@@ -131,7 +131,7 @@ def overhead_table(source, keys, st: SideTables):
             clr = row.clr_dm
             fl = 1 if row.opens else 0
             if row.kind == 1 and not row.opens and clr == -32768:
-                clr, fl = 0, fl | 2  # not charted: treated as solid
+                fl = fl | 2  # fixed bridge part without a charted clearance (format 1.3: passable with a caution)
             recs.append((row.kind, fl, row.catbrg, P.CLR_UNKNOWN if clr == -32768 else clr,
                          P.CLR_UNKNOWN if row.open_dm == -32768 else row.open_dm,
                          P.CLR_UNKNOWN if row.hor_dm == -32768 else row.hor_dm, 0,

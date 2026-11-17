@@ -227,6 +227,8 @@ public struct TriangleFlags: OptionSet, Hashable, Sendable {
     public static let soundingRefined = TriangleFlags(rawValue: 1 << 10)
     /// In a lock or navigable floodgate zone (format 1.2).
     public static let lock = TriangleFlags(rawValue: 1 << 13)
+    /// Under a fixed bridge part without a charted clearance (format 1.3).
+    public static let bridgeUncharted = TriangleFlags(rawValue: 1 << 14)
 }
 
 /// Sentinels used in the pack.

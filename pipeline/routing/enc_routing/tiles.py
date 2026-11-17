@@ -332,7 +332,7 @@ def build_tile(inp) -> dict:
     grid = mesh.tile_grid_lines(rect, lb, int(round(p.coarse_grid_deg * UNITS)), int(round(p.grid_deg * UNITS)),
                                 inp["fine_cells"])
     lz = prep["live_zone"]
-    keep_zone = U.geoms_to_units([lz])[0] if not lz.is_empty else shapely.Polygon()
+    keep_zone = None if lz is None else (U.geoms_to_units([lz])[0] if not lz.is_empty else shapely.Polygon())
     faces, coords, tris, face_of, topo = mesh.faces_and_triangles(lines_u, domain_u, None, p, grid=grid,
                                                                   keep_rect=rect, keep_zone=keep_zone)
     if not topo["ok"]:

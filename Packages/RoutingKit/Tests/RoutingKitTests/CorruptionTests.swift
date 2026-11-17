@@ -143,7 +143,7 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
 
         b = try Fixtures.bytes("synthetic.pack")
         b[8] = 2
-        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 2)) { try RoutingPack(bytes: b) }
+        #expect(throws: PackError.unsupportedVersion(major: 2, minor: 3)) { try RoutingPack(bytes: b) }
 
         b = try Fixtures.bytes("synthetic.pack")
         b[200] ^= 1
@@ -229,7 +229,7 @@ func loadAndExercise(_ bytes: [UInt8]) -> RoutingPack? {
         let crc: UInt32 = b.withUnsafeBufferPointer { CRC32.checksum(UnsafeBufferPointer(rebasing: $0[0..<252])) }
         put32(&b, 252, crc)
         let v10 = try RoutingPack(bytes: b)
-        #expect(current.header.formatMinor == 2 && v11.header.formatMinor == 1 && v10.header.formatMinor == 0)
+        #expect(current.header.formatMinor == 3 && v11.header.formatMinor == 1 && v10.header.formatMinor == 0)
         #expect(v10.header.tableCRC32 == 0)
         #expect(sameContent(v10, v11))
         #expect(v11.advisorySets == [[]])

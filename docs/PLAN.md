@@ -265,6 +265,20 @@ Routing packs for the whole Gulf ([operator guide](routing-build.md)). Built fro
 - **Reference routes** (strict / maintained / relaxed / failed): ncds_10 9/2/0/1, ncds_11 5/1/1/2, ncds_12 3/1/2/4, ncds_13 7/1/0/0, ncds_14 9/0/0/1 (two routes moved packs with the smaller overlap). No route touches land, structures or blocking hazards or passes under a fixed object below the air draft; RoutingKit reproduces all 147 reference queries exactly.
 - **Found and fixed on the way:** with long legs, the raw-data check must follow the leg in lon/lat (a 40 km leg projected end to end bows by metres); blocking hazards now keep the full 12 m clearance inside bridge and lock zones (a leg near the Bob Sikes bridge failed leg validation).
 
+**Round 3 (owner decisions, 17 Nov 2026; format 1.3, builder 3.2.0).** Applied: entry-prohibited danger zones are passable with a caution (yellow "entry prohibited area" leg, listed in the summary, routes avoid them where they can: cost ×3 and +5000 m); fixed bridge parts with no charted clearance are passable with a caution (yellow "bridge clearance not charted" leg, listed in the summary by name and position, +3000 m); bridges with a charted clearance below the air draft still block; pontoon bridges count as opening bridges, swing bridges already did; area-wide advisories stay free; the single "Chart datum" advisory stays for the lower Mississippi; the 30 nm overlap is back and every face is meshed again (memory is no longer a constraint; the attribute-class savings are kept).
+
+| pack | triangles | size (in the app, `App/Resources/RoutingPacks/`) |
+|---|---|---|
+| ncds_10 | 2.68 M | 13.3 MB |
+| ncds_11 | 4.20 M | 20.2 MB |
+| ncds_12 | 4.79 M | 23.0 MB |
+| ncds_13 | 3.87 M | 18.8 MB |
+| ncds_14 | 2.95 M | 14.6 MB |
+
+- **Reference routes** (strict / maintained / relaxed / failed): ncds_10 8/2/0/1, ncds_11 7/1/1/1, ncds_12 3/1/2/3, ncds_13 8/1/0/0, ncds_14 9/1/0/0. Newly found: Destin to Pensacola (through the Santa Rosa Sound danger zone, yellow), Rigolets to Bay St. Louis (under an uncharted bridge part), Freshwater Bayou to Calcasieu (89 nm, with locks and maintained channels). Grand Isle to New Orleans is strict again (137 nm round the delta) because the passes are back in the pack. No route touches land, structures or blocking hazards; RoutingKit reproduces all 147 reference queries exactly. The largest pack needs 176 MB of arrays (about 265–295 MB process RSS on Linux).
+- **GIWW still cut** (strict and maintained, default boat): Boca Grande to Venice and the Biloxi, Bay St. Louis, New Orleans–Houma, Calcasieu–Port Arthur and Port Arthur–Galveston stretches by overhead objects of unknown clearance (cables; with "accept unknown clearance" they pass), the Bay St. Louis railroad swing bridge by a fixed part charted too low, Clearwater to Anclote, the Rigolets to the Industrial Canal and Freeport to the Colorado River by depth, Port Mansfield to Brazos Santiago by the endpoint. Apalachicola to West Bay, Destin to Santa Rosa Sound and Freshwater Bayou to Calcasieu now connect.
+- **Lake Pontchartrain** routes still fail: the lake's open water is raised from soundings, but the approaches near Mandeville, the south-shore marinas and the Industrial Canal have no soundings close enough to the shore.
+
 
 ## 6. What the owner has to do
 

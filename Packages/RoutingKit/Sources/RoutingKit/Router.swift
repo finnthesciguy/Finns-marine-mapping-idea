@@ -46,7 +46,10 @@ extension RoutingPack {
 
     /// Why triangle `t` is impassable for `profile`, or nil when it is passable (spec B.3).
     public func blockReason(triangle t: Int, profile: BoatProfile) -> BlockReason? {
-        let r = Classifier(pack: self, profile: profile).reason(t)
+        // One class only: building a whole Classifier would classify every attribute class.
+        let r = Classifier.reason(classes, Int(attrClass[t]), req: profile.requiredDepthDm, air: profile.requiredAirDm,
+                                  useMaintained: profile.useMaintainedChannels,
+                                  acceptUnknown: profile.acceptUnknownClearance, avoidOpenGulf: profile.avoidOpenGulf)
         return r < 0 ? nil : BlockReason.allCases[r]
     }
 
@@ -389,6 +392,8 @@ struct RouteEngine {
                 if bu.contains(.unknownUsed) && !bt.contains(.unknownUsed) { step += 3000.0 }
                 if bu.contains(.restricted) && !bt.contains(.restricted) { step += 1000.0 }
                 if bu.contains(.lock) && !bt.contains(.lock) { step += 2000.0 }
+                if bu.contains(.prohibited) && !bt.contains(.prohibited) { step += 5000.0 }
+                if bu.contains(.uncharted) && !bt.contains(.uncharted) { step += 3000.0 }
                 if blockedU && !blockedT { step += 100_000.0 }
                 let ng = gt + step
                 if ng < state.cost(u) {
@@ -717,8 +722,11 @@ struct RouteEngine {
             let c = Int(r.clearanceDm)
             let opening = r.isOpeningSpan
             var needs: Bool?
+            var uncharted: Bool?
             if opening {
                 needs = c == 0xFFFE || c < cls.air
+            } else if c == 0xFFFE && r.flags & 2 != 0 {
+                uncharted = true  // a fixed bridge part without clearance: passed with a caution (format 1.3)
             } else if c == 0xFFFE {
                 if !cls.acceptUnknown {
                     violations.append(LegViolation(kind: .unknownClearance, leg: leg, record: o, distanceMeters: nil,
@@ -729,7 +737,7 @@ struct RouteEngine {
                                                clearanceDm: c))
             }
             crossings.append(OverheadCrossing(record: o, clearanceDm: c, isOpeningSpan: opening, needsOpening: needs,
-                                              name: pack.string(r.name)))
+                                              uncharted: uncharted, name: pack.string(r.name)))
         }
         return (violations, crossings)
     }
@@ -773,18 +781,24 @@ struct RouteEngine {
             }
             return out
         }
-        var locks: [LockRun] = []
-        var prevLock = false
-        var advisoryIDs = Set<Int>()
-        for (i, t) in corridor.enumerated() {
-            let on = cls.bits(t).contains(.lock)
-            if on && !prevLock {
-                let ar = pack.areaIndex(t)
-                locks.append(LockRun(corridorIndex: i, area: ar == PackSentinel.noIndex ? nil : Int(ar),
-                                     name: ar == PackSentinel.noIndex ? "" : pack.string(pack.areas[Int(ar)].name),
-                                     centroid: pack.centroid(of: t)))
+        func areaRuns(_ bit: TriBits) -> [LockRun] {
+            var out: [LockRun] = []
+            var prev = false
+            for (i, t) in corridor.enumerated() {
+                let on = cls.bits(t).contains(bit)
+                if on && !prev {
+                    let ar = pack.areaIndex(t)
+                    out.append(LockRun(corridorIndex: i, area: ar == PackSentinel.noIndex ? nil : Int(ar),
+                                       name: ar == PackSentinel.noIndex ? "" : pack.string(pack.areas[Int(ar)].name),
+                                       centroid: pack.centroid(of: t)))
+                }
+                prev = on
             }
-            prevLock = on
+            return out
+        }
+        let locks: [LockRun] = areaRuns(.lock)
+        var advisoryIDs = Set<Int>()
+        for t in corridor {
             for a in pack.advisorySets[pack.advisorySet(t)] { advisoryIDs.insert(a) }
         }
         let advisories: [AreaAdvisory] = advisoryIDs.sorted().map { a in
@@ -800,7 +814,8 @@ struct RouteEngine {
                             greenLegs: legs.filter { $0.grade == .green }.count,
                             yellowLegs: legs.filter { $0.grade == .yellow }.count,
                             shallowest: shallowest, lowestClearance: low, openings: runs(.needsOpening),
-                            unknownClearances: runs(.unknownUsed), locks: locks, advisories: advisories,
+                            unknownClearances: runs(.unknownUsed), locks: locks, unchartedBridges: runs(.uncharted),
+                            prohibitedAreas: areaRuns(.prohibited), advisories: advisories,
                             maintainedTriangles: maintained, dataDate: pack.dataDate)
     }
 

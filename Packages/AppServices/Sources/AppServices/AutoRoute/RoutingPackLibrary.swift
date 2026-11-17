@@ -238,15 +238,18 @@ public final class RoutingPackLibrary: @unchecked Sendable {
     static func sideLoadedEntry(url: URL, header: PackHeader, id: String) -> RoutingPackEntry {
         let size: Int64 = RoutingPackLibrary.fileSize(url)
         return RoutingPackEntry(
-            id: id, origin: .sideLoaded, chartRegionID: nil, title: RoutingPackLibrary.title(forPackRegion: header.regionID),
+            id: id, origin: .sideLoaded, chartRegionID: nil, title: RoutingPackLibrary.title(forPackRegion: header.regionID,
+                                                                                    fileName: url.lastPathComponent),
             packRegionID: header.regionID, fileURL: url, byteSize: size, dataDate: header.dataDate.date,
             dataDateRaw: header.dataDate.rawValue, version: "\(header.regionID)-\(header.dataDate.rawValue)",
             formatVersion: "\(header.formatMajor).\(header.formatMinor)", coverage: RoutingPackCoverage(header: header))
     }
 
-    /// `pilot-sarasota` → "pilot-sarasota (side-loaded)".
-    static func title(forPackRegion regionID: String) -> String {
+    /// `pilot-sarasota` → "pilot-sarasota (side-loaded)"; a pack whose file name starts with `bundled-` (linked from
+    /// the app bundle) → "ncds_12 (included with the app)".
+    static func title(forPackRegion regionID: String, fileName: String = "") -> String {
         let name: String = regionID.isEmpty ? "Routing pack" : regionID
+        if fileName.hasPrefix("bundled-") { return "\(name) (included with the app)" }
         return "\(name) (side-loaded)"
     }
 

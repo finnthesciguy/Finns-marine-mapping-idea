@@ -53,7 +53,9 @@ CUTS = {
 # 3.1.0: format 1.2 (locks, area-wide advisories), extended sounding raise, dead-water faces dropped,
 #        15 nm overlap.
 # 3.1.1: blocking hazards keep the full 12 m clearance inside bridge and lock zones.
-BUILDER_VERSION = "3.1.1"
+# 3.2.0: owner decisions of round 3: fixed bridge parts without clearance passable (BRIDGE_UNCHARTED), pontoon
+#        bridges open, 30 nm overlap again, every face meshed (C.10a off).
+BUILDER_VERSION = "3.2.0"
 
 
 @dataclass(frozen=True)
@@ -108,7 +110,7 @@ class BuildParams:
     ext_boundary_m: float = 150.0      # never within this of the depth area's boundary (shore, contours)
     # water no boat can use (spec C.10a): faces kept only within this distance of live water
     live_floor_dm: int = 6             # live water: least depth or maintained depth >= 0.6 m (2 ft)
-    live_distance_m: float = 500.0
+    live_distance_m: float = 0.0       # 0 = off (builder 3.2.0: memory is no constraint, every face is meshed)
 
     def key(self) -> str:
         return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:16]

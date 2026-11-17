@@ -90,6 +90,12 @@ public struct AutoRouteReason: Sendable, Equatable {
         case CautionReason.unknownClearance.rawValue:
             return AutoRouteReason(code: code, title: "Clearance not charted",
                                    detail: "This leg passes under a bridge or cable whose clearance is not on the chart. Find out the clearance before you go under.")
+        case CautionReason.bridgeUncharted.rawValue:
+            return AutoRouteReason(code: code, title: "Bridge clearance not charted",
+                                   detail: "This leg passes under a bridge whose clearance is not on the chart. Find out its clearance (bridge signs, Coast Pilot, the bridge owner) before you go under, and be ready to turn back.")
+        case CautionReason.prohibitedArea.rawValue:
+            return AutoRouteReason(code: code, title: "Entry prohibited area",
+                                   detail: "The chart marks this area as entry prohibited (for example a military danger zone). It is often open, but check the notices to mariners and listen for closures before you enter.")
         case CautionReason.restrictedArea.rawValue:
             return AutoRouteReason(code: code, title: "Restricted area",
                                    detail: "This leg crosses a regulated area (for example a speed, no-wake or protected zone). Check the rules that apply.")
@@ -151,7 +157,8 @@ public struct AutoRouteLegRow: Sendable, Equatable, Identifiable {
 
 /// One line of the route summary card.
 public struct AutoRouteSummaryLine: Sendable, Equatable, Identifiable {
-    /// Stable key: `distance`, `time`, `legs`, `shallowest`, `clearance`, `openings`, `unknownClearance`, `locks`,
+    /// Stable key: `distance`, `time`, `legs`, `shallowest`, `clearance`, `openings`, `unknownClearance`, `unchartedBridges`,
+    /// `prohibitedAreas`, `locks`,
     /// `advisory-<AREA index>` (one per area-wide advisory), `startSnap`, `goalSnap`, `data`, `pack`, `boat`.
     public var id: String
     public var label: String
@@ -449,6 +456,22 @@ public enum AutoRoutePresenter {
             }
             lines.append(AutoRouteSummaryLine(id: "unknownClearance", label: "Clearance not charted",
                                               value: "\(s.unknownClearances.count): " + names.joined(separator: "; "), isWarning: true))
+        }
+        if !s.unchartedBridges.isEmpty {
+            let names: [String] = s.unchartedBridges.map { run in
+                (run.name.isEmpty ? "unnamed bridge" : run.name) + " at " + NavFormat.position(run.centroid.coordinate)
+            }
+            lines.append(AutoRouteSummaryLine(id: "unchartedBridges", label: "Bridge clearance not charted",
+                                              value: "\(s.unchartedBridges.count): " + names.joined(separator: "; ")
+                                                  + " (check the clearance before you go under)", isWarning: true))
+        }
+        if !s.prohibitedAreas.isEmpty {
+            let names: [String] = s.prohibitedAreas.map { run in
+                run.name.isEmpty ? "entry prohibited area at " + NavFormat.position(run.centroid.coordinate) : run.name
+            }
+            lines.append(AutoRouteSummaryLine(id: "prohibitedAreas", label: "Entry prohibited areas",
+                                              value: "\(s.prohibitedAreas.count): " + names.joined(separator: "; ")
+                                                  + " (check notices to mariners before you enter)", isWarning: true))
         }
         if !s.locks.isEmpty {
             let names: [String] = s.locks.map { run in
