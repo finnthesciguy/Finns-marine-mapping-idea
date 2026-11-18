@@ -52,7 +52,7 @@ do {
 | `corridor`, `waypoints_units` | `corridor: [Int]`, `waypointsUnits: [GridPoint]`. These are the exact values to compare. |
 | legs `{triangles: [lo, hi], length_m, grade, reasons, min_depth_dm, min_spare_dm, crossings}` | `RouteLeg.corridorRange`, `.lengthMeters`, `.grade` (`RouteGrade`), `.reasons` (`[CautionReason]`, raw values are the spec names), `.minDepthDm`, `.minSpareDm`, `.crossings` |
 | summary (B.12) | `RouteSummary`. `overhead` is `nil` where the pack has `0xFFFF`. |
-| `NO_ROUTE` `{reason, blocked, hints}` | `NoRouteReport.reason` (`.blocked(BlockReason)` or `.notConnected`), `.blocked`, `.hints`. A hint is `nil` when that option was already on, which is when the spec omits the key; for `NOT_CONNECTED` every other hint is `false`. |
+| `NO_ROUTE` `{reason, blocked, hints}` | `NoRouteReport.reason` (`.blocked(BlockReason)` or `.notConnected`), `.blocked`, `.hints`. A hint is `nil` when that option was already on, which is when the spec omits the key; for `NOT_CONNECTED` every other hint is `false`. `acceptUnknownClearance` is always `nil` (round 4: cables and pipes without a charted clearance are passable with a caution, so the option has no effect). |
 | `INVALID_REQUEST` | `RoutingError.invalidRequest` (spec B.2 valid-profile rule) |
 | `LEG_VALIDATION` `{violations}` | `LegValidationReport.violations` (`LegViolation`) and `.corridor` |
 | Errors `START_…` and `GOAL_…` | `SnapFailure.code`. `.start` carries the snapped start when the goal failed. `.noWaterNearby(locatedTriangle:nearestMeters:)` |
@@ -108,29 +108,32 @@ do {
   - `timeLimit`.
   - Progress reporting.
   - Concurrent queries on one shared pack.
-- **Pilot pack (gated).** Set `ROUTINGKIT_PILOT_PACK=/path/routing-pilot-20261023.pack`, and optionally
+- **Pilot pack (gated).** Set `ROUTINGKIT_PILOT_PACK=/path/to/a.pack` (for example `App/Resources/RoutingPacks/ncds_12.pack`), and optionally
   `ROUTINGKIT_PILOT_VECTORS=/path/pilot.vectors.json` to compare the reference routes exactly (generate that file with
   `enc_routing.vectors.make_vectors` over `enc_routing.places.ROUTES`). The suite is skipped cleanly when the variable is unset.
   For release numbers, run `swift test -c release -Xswiftc -enable-testing --filter PilotPerformanceTests`.
 
-## Performance (pilot pack, 4.3 MB, 860,420 triangles, 548,089 vertices, derived adjacency; Linux x86-64, 4 cores)
+## Performance (the five Gulf packs, format 1.3; Linux x86-64, 4 cores, release build)
 
-| | debug | release |
-|---|---|---|
-| Load: map, CRC, inflate, decode, validate, derive adjacency | 1.56 s | 0.25–0.28 s |
-| Decoded arrays | 42.8 MB | 42.8 MB |
-| RSS: before load → after load → peak during load | 24.5 → 72.6 → 81.3 MB | 24.1 → 71.8 → 80.0 MB |
-| Peak RSS while running all 19 reference routes | 91.5 MB | 89.2 MB |
-| a strict, St Pete → Marina Jack (33.4 nm) | 0.39 s | 25 ms |
-| b strict, Venice → Punta Gorda (47.2 nm) | 0.22 s | 18 ms |
-| c relaxed, Bradenton Beach → Boca Grande (52.1 nm, 333 legs) | 0.31 s | 26 ms |
-| r11 Egmont → Boca Grande offshore (61.4 nm) | 0.45 s | 28 ms |
-| c strict (NO_ROUTE, with relaxed search and 2 hint searches) | 4.1 s | 0.28 s |
-| Latency from a mid-search cancel to return | 12 ms | 0.5 ms |
+Measured 2026-11-18 with `PilotPerformanceTests` on each pack in `App/Resources/RoutingPacks/` (the same files as the
+build output), `ROUTINGKIT_PILOT_VECTORS` set to that region's `reference.vectors.json`. RSS is the whole test process,
+so "before load" includes the test runner and whatever an earlier test left resident.
 
-- All 19 pilot reference routes match the Python reference exactly (format 1.1 pack, rebuilt 2026-11-12). The Python reference takes about 14 s for all 19.
-- Loading costs about 56 MB above baseline at its peak and about 48 MB once loaded.
-- Pack sizes vary by region. About 45 MB of packs across five regions averages about 9 MB per pack, or about twice the pilot. Expect about 90 MB of arrays for such a region, and load one region at a time.
+| pack | triangles | attribute classes | load (map, CRC, inflate, decode, validate, derive adjacency) | decoded arrays | RSS before → after load (peak during load) | peak RSS while routing | slowest reference query |
+|---|---|---|---|---|---|---|---|
+| ncds_10 | 2,678,072 | 26,244 | 0.97 s | 104.2 MB | 306.6 → 310.3 MB (310.3) | 354.6 MB | 0.10 s |
+| ncds_11 | 4,201,863 | 35,079 | 1.63 s | 156.5 MB | 83.4 → 237.4 MB (259.2) | 237.4 MB | 0.71 s |
+| ncds_12 | 4,791,487 | 39,165 | 1.86 s | 176.3 MB | 80.6 → 276.2 MB (302.3) | 286.4 MB | 1.53 s |
+| ncds_13 | 3,867,703 | 25,783 | 1.49 s | 144.6 MB | 91.9 → 274.8 MB (283.1) | 274.8 MB | 0.04 s |
+| ncds_14 | 2,945,235 | 28,415 | 1.11 s | 112.8 MB | 120.2 → 244.8 MB (278.3) | 244.8 MB | 0.04 s |
+
+- All 147 reference queries (strict, maintained and relaxed for every reference route of the five regions) match the
+  Python reference exactly. A typical successful route takes 10–300 ms; the slowest queries are `NO_ROUTE` answers,
+  which run the relaxed search and the hint search as well (up to about 2 s on ncds_12).
+- Cancelling a query 30 ms into the search returns in well under 1 ms (ncds_10; the cancellation test is skipped on
+  packs that do not cover its Sarasota trip).
+- Debug builds are several times slower; use the release numbers for the phone. Load one region at a time: the
+  largest pack needs about 176 MB of arrays and about 200–220 MB above the process baseline at its peak.
 
 ## Turning a `RouteResult` into Persistence's `Route` + `AutoRouteInfo` (app side; no dependency here)
 

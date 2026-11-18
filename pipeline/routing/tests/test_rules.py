@@ -64,9 +64,12 @@ def test_passability_clearance(rt):
     assert lo.ok[opening] and lo.needs_opening[opening] and hi.needs_opening[opening]
     low6 = Classified(rt.p, Profile(4, 1, 5))     # air 15 dm < 18: no opening needed
     assert low6.ok[opening] and not low6.needs_opening[opening]
-    assert not lo.ok[cable] and lo.reason[cable] == 4
+    # round 4 (owner decision): a cable or pipe without a charted clearance is passable with a caution;
+    # accept_unknown_clearance no longer changes anything
+    assert lo.ok[cable] and lo.unknown_used[cable] and lo.reason[cable] == -1
+    assert lo.ybits[cable] & (1 << YELLOW_REASONS.index("UNKNOWN_CLEARANCE"))
     acc = Classified(rt.p, Profile(4, 1, 9, accept_unknown_clearance=True))
-    assert acc.ok[cable] and acc.unknown_used[cable]
+    assert acc.ok[cable] and acc.unknown_used[cable] and acc.factor[cable] == lo.factor[cable]
 
 
 def test_prohibited_and_outside(rt):
@@ -175,10 +178,16 @@ def test_legs_follow_real_turns_only(rt):
 
 
 def test_no_route_reports_blocked_place_and_hint(rt):
+    # round 4: the cable of unknown clearance no longer closes the detour north of the shoal
     res = rt.route((-81.9995, 27.0015), (-81.9925, 27.0015), Profile(4, 1, 20))
+    assert res["ok"] and any("UNKNOWN_CLEARANCE" in leg["reasons"] for leg in res["legs"])
+    assert [u["name"] for u in res["summary"]["unknown_clearances"]] == ["Test Cable"]
+    assert res["summary"]["unknown_clearances"][0]["kind"] == 2
+    # 24 dm needed: row 2 (21 dm) is too shallow for the detour, only the maintained channel helps
+    res = rt.route((-81.9995, 27.0015), (-81.9925, 27.0015), Profile(7, 1, 20))
     assert not res["ok"] and res["error"] == "NO_ROUTE"
     assert res["blocked"][0]["reason"] == "DEPTH" and res["blocked"][0]["maint_dm"] == 27
-    assert res["hints"] == {"use_maintained": True, "accept_unknown_clearance": True}
+    assert res["hints"] == {"use_maintained": True}
 
 
 def test_leg_validation_catches_a_hazard(rt):
@@ -239,7 +248,8 @@ def test_leg_along_a_row_boundary_is_not_under_the_cable_end(rt):
         assert not v and [c["record"] for c in cr] == [3]
     v, cr = rt.validate_leg((synth.LON0 + 20000, synth.LAT0 + 25000), (synth.LON0 + 30000, synth.LAT0 + 25000),
                             Profile(1, 0.5, 5))
-    assert [x["kind"] for x in v] == ["UNKNOWN_CLEARANCE"] and cr[0]["record"] == 2
+    # round 4: passing under the cable of unknown clearance is recorded, not a violation
+    assert not v and cr[0]["record"] == 2 and cr[0]["uncharted"] is True
 
 
 # ------------------------------------------------------------------ B.6 snapping and B.13 inputs
@@ -308,4 +318,4 @@ def test_synthetic_all_pairs_symmetric(rt):
                 assert f == g, (prof, a, b, f, g)
                 counts[f] = counts.get(f, 0) + 2
     assert "validation" not in counts, counts
-    assert counts["route"] > 4000 and counts["no_route"] > 1000
+    assert counts["route"] > 4000 and counts["no_route"] > 400

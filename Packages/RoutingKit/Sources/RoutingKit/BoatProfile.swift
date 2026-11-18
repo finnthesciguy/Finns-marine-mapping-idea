@@ -16,7 +16,9 @@ public struct BoatProfile: Hashable, Sendable, Codable {
     /// Allow USACE maintained (project) depth where the chart is shallower ("use maintained channels").
     /// Such legs are always yellow (`MAINTAINED_DEPTH`).
     public var useMaintainedChannels: Bool
-    /// Allow passing under overhead objects of unknown clearance (yellow `UNKNOWN_CLEARANCE`).
+    /// No effect since round 4: overhead cables and pipes without a charted clearance are always passable with
+    /// a caution (yellow `UNKNOWN_CLEARANCE`), like fixed bridge parts without one (`BRIDGE_UNCHARTED`).
+    /// Kept so existing callers and stored profiles still compile and decode.
     public var acceptUnknownClearance: Bool
     /// Inside route only: open-Gulf triangles are impassable.
     public var avoidOpenGulf: Bool
@@ -61,10 +63,9 @@ public struct BoatProfile: Hashable, Sendable, Codable {
     }
 
     /// The same profile with one option changed.
-    func with(useMaintained: Bool? = nil, acceptUnknown: Bool? = nil) -> BoatProfile {
+    func with(useMaintained: Bool? = nil) -> BoatProfile {
         var p = self
         if let useMaintained { p.useMaintainedChannels = useMaintained }
-        if let acceptUnknown { p.acceptUnknownClearance = acceptUnknown }
         return p
     }
 }

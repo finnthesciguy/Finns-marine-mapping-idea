@@ -101,7 +101,6 @@ final class AutoRouteModel {
         selectedProfileID = id
         // Option overrides belong to the profile they were made for.
         options.useMaintainedChannels = nil
-        options.acceptUnknownClearance = nil
     }
 
     func choose(_ choice: EndChoice, for end: End) {
@@ -150,9 +149,8 @@ final class AutoRouteModel {
         }
     }
 
-    /// Effective values of the two profile options for this plan.
+    /// Effective value of the profile option for this plan.
     var useMaintainedChannels: Bool { options.useMaintainedChannels ?? profile?.useMaintainedChannels ?? false }
-    var acceptUnknownClearance: Bool { options.acceptUnknownClearance ?? profile?.acceptUnknownClearance ?? false }
 
     var canPlan: Bool {
         noticeNeeded == false && !isPlanning && profile != nil && endpoint(startChoice) != nil && endpoint(goalChoice) != nil

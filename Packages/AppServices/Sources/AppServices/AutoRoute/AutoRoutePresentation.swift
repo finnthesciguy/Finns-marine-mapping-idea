@@ -88,8 +88,9 @@ public struct AutoRouteReason: Sendable, Equatable {
             return AutoRouteReason(code: code, title: "Lock or floodgate",
                                    detail: "This leg passes through a lock or floodgate. Its operation, hours and restrictions are not known to the app: call the lock or check the local notices before you go, and expect to wait.")
         case CautionReason.unknownClearance.rawValue:
-            return AutoRouteReason(code: code, title: "Clearance not charted",
-                                   detail: "This leg passes under a bridge or cable whose clearance is not on the chart. Find out the clearance before you go under.")
+            // Stronger than a bridge without a charted clearance: a power cable can kill without being touched.
+            return AutoRouteReason(code: code, title: "Cable or pipe clearance not charted",
+                                   detail: "This leg passes under an overhead cable or pipe whose clearance is not on the chart. Power cables are the most dangerous thing to misjudge: electricity can jump to a mast that only comes close, and the cable sags lower in hot weather. Do not go under until you know the clearance from a reliable source (signs at the crossing, the Coast Pilot, the utility or the harbor master) and it is well above your air draft. If you cannot find out, do not go under: turn back or go another way.")
         case CautionReason.bridgeUncharted.rawValue:
             return AutoRouteReason(code: code, title: "Bridge clearance not charted",
                                    detail: "This leg passes under a bridge whose clearance is not on the chart. Find out its clearance (bridge signs, Coast Pilot, the bridge owner) before you go under, and be ready to turn back.")
@@ -125,6 +126,7 @@ public struct AutoRouteReason: Sendable, Equatable {
         case .clearance:
             return AutoRouteReason(code: reason.rawValue, title: "Too low", detail: "A bridge or cable is lower than your air draft.")
         case .unknownClearance:
+            // Not produced since round 4 (cables and pipes without a charted clearance are passable with a caution).
             return AutoRouteReason(code: reason.rawValue, title: "Clearance not charted",
                                    detail: "A bridge or cable here has no charted clearance.")
         case .prohibited:
@@ -212,7 +214,6 @@ public struct AutoRouteBlockedPlace: Sendable, Equatable, Identifiable {
 public struct AutoRouteHintAction: Sendable, Equatable, Identifiable {
     public enum Kind: String, Sendable, Equatable {
         case useMaintainedChannels
-        case acceptUnknownClearance
     }
 
     public var id: String { kind.rawValue }
@@ -226,9 +227,6 @@ public struct AutoRouteHintAction: Sendable, Equatable, Identifiable {
         case .useMaintainedChannels:
             return AutoRouteHintAction(kind: kind, title: "Allow maintained channels",
                                        explanation: "A route exists if legs may rely on the Army Corps maintained (project) depth where the chart shows less water. Those legs are yellow: maintained depth is not guaranteed and channels shoal between dredgings.")
-        case .acceptUnknownClearance:
-            return AutoRouteHintAction(kind: kind, title: "Accept unknown clearance",
-                                       explanation: "A route exists if the boat may pass under bridges or cables whose clearance is not charted. Those legs are yellow: find out the clearance before you go under.")
         }
     }
 
@@ -237,7 +235,6 @@ public struct AutoRouteHintAction: Sendable, Equatable, Identifiable {
         var next: AutoRouteOptions = options
         switch kind {
         case .useMaintainedChannels: next.useMaintainedChannels = true
-        case .acceptUnknownClearance: next.acceptUnknownClearance = true
         }
         return next
     }
@@ -413,6 +410,44 @@ public enum AutoRoutePresenter {
         return NavFormat.depth(Double(dm) / 10, unit: units.depth)
     }
 
+    /// The overhead object's kind as words (`OverheadRun.kind`: 1 bridge, 2 cable, 3 pipe).
+    static func overheadKindText(_ kind: Int) -> String {
+        switch kind {
+        case 1: return "bridge"
+        case 2: return "overhead cable"
+        case 3: return "overhead pipe"
+        default: return "overhead object"
+        }
+    }
+
+    /// Overhead cables and pipes without a charted clearance on the route: each by kind, name and position, with a
+    /// note to check the clearance. The cable wording is stronger than the bridge one (a power cable is the worse
+    /// thing to be wrong about).
+    static func unknownClearanceLine(_ runs: [OverheadRun]) -> AutoRouteSummaryLine {
+        let items: [String] = runs.map { run in
+            let kind: String = overheadKindText(run.kind)
+            let named: String = run.name.isEmpty ? "unnamed " + kind : kind + " " + run.name
+            return named + " at " + NavFormat.position(run.centroid.coordinate)
+        }
+        let kinds: Set<Int> = Set(runs.map(\.kind))
+        let label: String
+        if kinds == [2] {
+            label = "Overhead cable clearance not charted"
+        } else if kinds == [3] {
+            label = "Overhead pipe clearance not charted"
+        } else {
+            label = "Cable or pipe clearance not charted"
+        }
+        let note: String
+        if kinds.contains(3) && !kinds.contains(2) {
+            note = " (check the clearance before you go under)"
+        } else {
+            note = " (check the clearance before you go under. A power cable can arc to a mast that only comes close: if you cannot confirm the clearance is well above your air draft, do not go under)"
+        }
+        return AutoRouteSummaryLine(id: "unknownClearance", label: label,
+                                    value: "\(runs.count): " + items.joined(separator: "; ") + note, isWarning: true)
+    }
+
     static func summaryLines(_ result: RouteResult, context: Context) -> [AutoRouteSummaryLine] {
         let units: UnitPreferences = context.units
         let s: RouteSummary = result.summary
@@ -451,11 +486,7 @@ public enum AutoRoutePresenter {
                                               value: "\(s.openings.count): " + names.joined(separator: "; "), isWarning: true))
         }
         if !s.unknownClearances.isEmpty {
-            let names: [String] = s.unknownClearances.map { run in
-                run.name.isEmpty ? "unnamed object at " + NavFormat.position(run.centroid.coordinate) : run.name
-            }
-            lines.append(AutoRouteSummaryLine(id: "unknownClearance", label: "Clearance not charted",
-                                              value: "\(s.unknownClearances.count): " + names.joined(separator: "; "), isWarning: true))
+            lines.append(unknownClearanceLine(s.unknownClearances))
         }
         if !s.unchartedBridges.isEmpty {
             let names: [String] = s.unchartedBridges.map { run in
@@ -548,7 +579,6 @@ public enum AutoRoutePresenter {
             + NavFormat.depth(boat.airDraft.meters, unit: units.depth)
         var options: [String] = []
         if boat.useMaintainedChannels { options.append("maintained channels allowed") }
-        if boat.acceptUnknownClearance { options.append("unknown clearance accepted") }
         if boat.avoidOpenGulf { options.append("inside route only") }
         if !options.isEmpty { text += "; " + options.joined(separator: ", ") }
         return text
@@ -605,6 +635,7 @@ public enum AutoRoutePresenter {
             case .clearance:
                 message = "No route for \(boat.name): a bridge or cable is lower than your air draft of \(NavFormat.depth(boat.airDraft.meters, unit: units.depth)) at the place marked on the chart."
             case .unknownClearance:
+                // Not produced since round 4; kept for an older router.
                 message = "No route for \(boat.name): every way passes under a bridge or cable whose clearance is not charted, at the place marked on the chart."
             case .prohibited:
                 message = "No route for \(boat.name): every way passes through an area where entry is prohibited, at the place marked on the chart."
@@ -620,12 +651,10 @@ public enum AutoRoutePresenter {
         }
         var hints: [AutoRouteHintAction] = []
         if report.hints.useMaintainedChannels == true { hints.append(.make(.useMaintainedChannels)) }
-        if report.hints.acceptUnknownClearance == true { hints.append(.make(.acceptUnknownClearance)) }
         var noHint: String? = nil
         if hints.isEmpty {
             var off: [String] = []
             if report.hints.useMaintainedChannels != nil { off.append("\"use maintained channels\"") }
-            if report.hints.acceptUnknownClearance != nil { off.append("\"accept unknown clearance\"") }
             if off.isEmpty {
                 noHint = "No other setting would give a route for this boat."
             } else {

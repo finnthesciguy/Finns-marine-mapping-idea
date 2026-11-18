@@ -1837,8 +1837,7 @@
      }
     ],
     "hints": {
-     "use_maintained": true,
-     "accept_unknown_clearance": false
+     "use_maintained": true
     },
     "data_date": 20261023
    }
@@ -2931,9 +2930,7 @@
       "area": ""
      }
     ],
-    "hints": {
-     "accept_unknown_clearance": false
-    },
+    "hints": {},
     "data_date": 20261023
    }
   },
@@ -3036,8 +3033,7 @@
     "reason": "NOT_CONNECTED",
     "blocked": [],
     "hints": {
-     "use_maintained": false,
-     "accept_unknown_clearance": false
+     "use_maintained": false
     },
     "data_date": 20261023
    }

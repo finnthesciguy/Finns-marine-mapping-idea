@@ -19,11 +19,10 @@ struct Classifier {
     let req: Int
     let air: Int
     let useMaintained: Bool
-    let acceptUnknown: Bool
     let avoidOpenGulf: Bool
 
     let attrClass: ContiguousArray<UInt32>
-    /// Per class: the B.3 block reason (0..4) or -1.
+    /// Per class: the B.3 block reason (1..3 since round 4) or -1.
     private let reasons: ContiguousArray<Int8>
     private let classBits: ContiguousArray<TriBits>
     private let factors: ContiguousArray<Double>
@@ -34,7 +33,6 @@ struct Classifier {
         req = profile.requiredDepthDm
         air = profile.requiredAirDm
         useMaintained = profile.useMaintainedChannels
-        acceptUnknown = profile.acceptUnknownClearance
         avoidOpenGulf = profile.avoidOpenGulf
         attrClass = pack.attrClass
         let c = pack.classes
@@ -44,7 +42,7 @@ struct Classifier {
         var f = ContiguousArray<Double>(repeating: 1, count: n)
         var y = ContiguousArray<UInt16>(repeating: 0, count: n)
         for k in 0..<n {
-            r[k] = Int8(Self.reason(c, k, req: req, air: air, useMaintained: useMaintained, acceptUnknown: acceptUnknown,
+            r[k] = Int8(Self.reason(c, k, req: req, air: air, useMaintained: useMaintained,
                                     avoidOpenGulf: avoidOpenGulf))
             b[k] = Self.bits(c, k, req: req, air: air, useMaintained: useMaintained)
             f[k] = Self.factor(c, k, b[k], req: req)
@@ -80,7 +78,7 @@ struct Classifier {
     @inline(__always) func yellowMask(_ t: Int) -> UInt16 { yellow[Int(attrClass[t])] }
 
     static func reason(_ c: AttributeClasses, _ k: Int, req: Int, air: Int, useMaintained: Bool,
-                               acceptUnknown: Bool, avoidOpenGulf: Bool) -> Int {
+                               avoidOpenGulf: Bool) -> Int {
         let fl = c.flags[k]
         // Format 1.3: PROHIBITED (code 0) is no longer a block reason; entry-prohibited areas are yellow and cost more.
         if avoidOpenGulf && fl & fOutside != 0 { return 1 }
@@ -95,7 +93,8 @@ struct Classifier {
         let opening = fl & fOpening != 0
         let knownOK = cl == 0xFFFE || Int(cl) >= air
         if hasOvh && !opening && !knownOK { return 3 }
-        if hasOvh && !opening && knownOK && fl & fUnknown != 0 && !acceptUnknown { return 4 }
+        // Round 4: an object without a charted clearance (cable, pipe) is passable with a caution, so code 4
+        // (UNKNOWN_CLEARANCE) is no longer produced; `acceptUnknownClearance` has no effect.
         return -1
     }
 

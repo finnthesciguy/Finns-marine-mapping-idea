@@ -68,8 +68,10 @@ What the app does so far:
   and the data date of each installed chart. Saved immediately in Persistence.
 - **Boat profiles** (`Sources/AutoRoute/BoatProfilesScreen.swift`, from Settings > Boat profiles and from the
   planner's Boat row): list (default first), add, edit, delete, make default. Name, draft, safety margin, air
-  draft, beam, cruising speed (in the Settings depth and speed units), "use maintained channels", "accept
-  unknown clearance" (both off by default). A new profile starts at 4.5 ft draft, 1.5 ft margin, 20 ft air draft,
+  draft, beam, cruising speed (in the Settings depth and speed units), "use maintained channels" (off by default).
+  The "accept unknown clearance" toggle still shown has had no effect since routing round 4 (overhead cables
+  and pipes without a charted clearance are always passable with a caution, like bridges without one) and is to
+  be removed. A new profile starts at 4.5 ft draft, 1.5 ft margin, 20 ft air draft,
   6 kn; air draft is required for routing. Parsing and checks: `AppServices.BoatProfileForm`; the store keeps
   exactly one default.
 - **Auto-routing** (`Sources/AutoRoute`, map button `map.autoRouteButton` or Routes > "Plan an auto-route"):
@@ -77,10 +79,11 @@ What the app does so far:
   picked point) and the boat; the screen shows which routing pack (and data date) will be used. Plan shows
   progress and can be cancelled (30 s limit). A result shows the planned route on the chart in grade colours
   (white casing, green/yellow), a summary (distance, time at the cruising speed, legs by grade, shallowest charted
-  depth and where, lowest overhead clearance, bridges that must open, clearances not charted, how far start and
+  depth and where, lowest overhead clearance, bridges that must open, cables, pipes and bridges whose clearance is not charted
+  (each by name and position, with a note to check the clearance before going under), how far start and
   end were moved onto water, chart data date and age, pack, boat), the legs with their reasons, and Save, Save and
-  follow, Show on the chart, Discard. "Options for this plan" (maintained channels, unknown clearance, inside
-  route only) change the next plan only. A failure shows the explanation; for "no route", the blocked places are
+  follow, Show on the chart, Discard. "Options for this plan" (maintained channels, inside route only; the
+  unknown-clearance toggle has no effect since round 4) change the next plan only. A failure shows the explanation; for "no route", the blocked places are
   red dots on the chart and listed, and each option that would give a route is a button ("Allow maintained
   channels and plan again"). Snap failures say which end, why and how far the nearest suitable water is. Saved
   auto-routes appear in Routes with their "Route check" section and per-leg colours and are followed like any

@@ -131,7 +131,10 @@ class Classified:
         has_ovh = clr != P.CLR_NONE
         known_ok = (clr == P.CLR_UNKNOWN) | (clr >= air)
         clr_block = has_ovh & ~opening & ~known_ok
-        unk_block = has_ovh & ~opening & known_ok & unk & (not prof.accept_unknown_clearance)
+        # Round 4 (owner decision): objects without a charted clearance (now only cables and pipes; fixed bridge
+        # parts are BRIDGE_UNCHARTED) are passable with a caution. Block code 4 is no longer produced and
+        # accept_unknown_clearance has no effect.
+        unk_block = np.zeros(len(depth), bool)
         reason = np.full(len(depth), -1, np.int64)
         # format 1.3: PROHIBITED (code 0) is no longer a block reason; entry-prohibited areas are yellow and cost more
         conds = [np.zeros(len(depth), bool),
@@ -431,11 +434,9 @@ class Router:
                 item = {"record": int(o), "clearance_dm": clr, "opening": opening}
                 if opening:
                     item["needs_opening"] = clr == P.CLR_UNKNOWN or clr < air
-                elif clr == P.CLR_UNKNOWN and r["flags"] & 2:
-                    item["uncharted"] = True  # format 1.3: a fixed bridge part without clearance, passed with a caution
                 elif clr == P.CLR_UNKNOWN:
-                    if not prof.accept_unknown_clearance:
-                        viol.append({"kind": "UNKNOWN_CLEARANCE", "record": int(o)})
+                    # no charted clearance (a fixed bridge part, a cable or a pipe): passed with a caution
+                    item["uncharted"] = True
                 elif clr < air:
                     viol.append({"kind": "CLEARANCE", "record": int(o), "clearance_dm": clr})
                 cross.append(item)
@@ -653,6 +654,12 @@ class Router:
             return {"overhead": ov, "clearance_dm": int(a["clearance_dm"][t]),
                     "name": p.string(int(p.overhead[ov]["name"])) if ov != P.ID_NONE else ""}
 
+        def unknown_item(t):
+            d = overhead_item(t)
+            ov = d["overhead"]
+            d["kind"] = int(p.overhead[ov]["kind"]) if ov != P.ID_NONE else 0
+            return d
+
         def lock_item(t):
             ar = int(a["area"][t])
             return {"area": ar, "name": p.string(int(p.areas[ar]["name"])) if ar != P.ID_NONE else ""}
@@ -669,7 +676,7 @@ class Router:
                            "maintained": bool(cls.via_maint[tt[k]])},
             "lowest_clearance": low,
             "openings": runs(cls.needs_opening, overhead_item),
-            "unknown_clearances": runs(cls.unknown_used, overhead_item),
+            "unknown_clearances": runs(cls.unknown_used, unknown_item),
             "locks": runs(cls.lock, lock_item),
             "uncharted_bridges": runs(cls.uncharted, overhead_item),
             "prohibited_areas": runs(cls.prohibited, lock_item),
@@ -686,7 +693,7 @@ class Router:
         corridor, _ = self.astar(s, g, S, G, ok, factor, self.penalties(cls), extra_pen=blocked)
         if corridor is None:
             # Disconnected water: no option can connect it, so every hint is false (no search needed).
-            hints = {opt: False for opt in ("use_maintained", "accept_unknown_clearance") if not getattr(prof, opt)}
+            hints = {opt: False for opt in ("use_maintained",) if not getattr(prof, opt)}
             return {"reason": "NOT_CONNECTED", "blocked": [], "hints": hints}
         a = self.p.attrs
         out, prev = [], False
@@ -702,7 +709,7 @@ class Router:
                             "area": self.p.string(int(self.p.areas[ar]["name"])) if ar != P.ID_NONE else ""})
             prev = bool(blocked[t])
         hints = {}
-        for opt in ("use_maintained", "accept_unknown_clearance"):
+        for opt in ("use_maintained",):   # accept_unknown_clearance can no longer open a route (round 4)
             if getattr(prof, opt):
                 continue
             c2 = Classified(self.p, Profile(**{**asdict(prof), opt: True}))

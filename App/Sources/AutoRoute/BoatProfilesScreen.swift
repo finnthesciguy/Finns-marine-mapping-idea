@@ -126,12 +126,10 @@ struct BoatProfileEditor: View {
                 Section {
                     Toggle("Use maintained channels", isOn: $form.useMaintainedChannels)
                         .accessibilityIdentifier("profile.edit.maintained")
-                    Toggle("Accept unknown clearance", isOn: $form.acceptUnknownClearance)
-                        .accessibilityIdentifier("profile.edit.unknownClearance")
                 } header: {
                     Text("Routing options")
                 } footer: {
-                    Text("Both are off by default. Legs that rely on them are always yellow and say why.")
+                    Text("Off by default. Legs that rely on it are always yellow and say why.")
                 }
                 if !problems.isEmpty {
                     Section {

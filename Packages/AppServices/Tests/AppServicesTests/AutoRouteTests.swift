@@ -535,7 +535,7 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertTrue(n.blocked[0].description.hasPrefix("Too low: Ringling Causeway Bridge A / SR 789, clearance 65.0 ft, your air draft 66.0 ft at "),
                       n.blocked[0].description)
         XCTAssertEqual(n.hints, [])
-        XCTAssertEqual(n.noHintText, "Turning on \"accept unknown clearance\" would not give a route either.")
+        XCTAssertEqual(n.noHintText, "No other setting would give a route for this boat.")
 
         let separate = await planner.plan(AutoRoutePlanRequest(start: RoutingFixtures.smallWater, goal: RoutingFixtures.longboat,
                                                                profile: defaultBoat), now: RoutingFixtures.now)
@@ -544,7 +544,7 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertEqual(s.title, "No water connection")
         XCTAssertEqual(s.blocked, [])
         XCTAssertEqual(s.hints, [])
-        XCTAssertEqual(s.noHintText, "Turning on \"use maintained channels\" or \"accept unknown clearance\" would not give a route either.")
+        XCTAssertEqual(s.noHintText, "Turning on \"use maintained channels\" would not give a route either.")
     }
 
     /// synthetic.pack s15: area-wide advisories are listed once in the summary, never on a leg.
@@ -604,7 +604,8 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertTrue(r.detail.contains("not known to the app"))
     }
 
-    /// synthetic.pack s2 (bridge opening, maintained depth, lock), s3 (unknown clearance, restricted area, hazard), s1 hints.
+    /// synthetic.pack s2 (bridge opening, maintained depth, lock), s3 (unknown clearance, restricted area, hazard), s1 hints,
+    /// s18 (round 4: under the cable of unknown clearance without any option).
     func testSyntheticBridgeOpeningsAndRestrictedAreas() async throws {
         let fixture = try PackFixture(packs: ["synthetic.pack"])
         let planner = try await fixture.planner()
@@ -637,18 +638,33 @@ final class AutoRoutePlannerTests: XCTestCase {
         XCTAssertEqual(p3.greenLegs, 1)
         XCTAssertEqual(p3.yellowLegs, 3)
         let titles3: Set<String> = Set(p3.legs.flatMap { $0.reasons.map(\.title) })
-        XCTAssertEqual(titles3, ["Clearance not charted", "Restricted area", "Near a charted hazard", "Relies on spot soundings"])
+        XCTAssertEqual(titles3, ["Cable or pipe clearance not charted", "Restricted area", "Near a charted hazard", "Relies on spot soundings"])
         let l3 = Dictionary(uniqueKeysWithValues: p3.summary.map { ($0.id, $0) })
-        XCTAssertEqual(l3["unknownClearance"]?.value, "1: Test Cable")
+        let cable3: String = l3["unknownClearance"]?.value ?? ""
+        XCTAssertEqual(l3["unknownClearance"]?.label, "Overhead cable clearance not charted")
+        XCTAssertTrue(cable3.hasPrefix("1: overhead cable Test Cable at "), cable3)
+        XCTAssertTrue(cable3.hasSuffix(" (check the clearance before you go under. A power cable can arc to a mast that only comes close: if you cannot confirm the clearance is well above your air draft, do not go under)"), cable3)
+        XCTAssertEqual(l3["unknownClearance"]?.isWarning, true)
         XCTAssertEqual(l3["clearance"]?.value, "Test Fixed Bridge: 9.8 ft")
         XCTAssertEqual(l3["openings"]?.value, "None")
 
-        let s1 = await planner.plan(AutoRoutePlanRequest(
+        let s18 = await planner.plan(AutoRoutePlanRequest(
             start: RoutingFixtures.synWest, goal: RoutingFixtures.synEast,
             profile: RoutingFixtures.profile(draftFeet: 4, marginFeet: 1, airFeet: 20)), now: RoutingFixtures.now)
+        let p18 = try XCTUnwrap(s18.proposal, "\(s18)")
+        let titles18: [String] = p18.legs.flatMap { $0.reasons.map(\.title) }
+        XCTAssertTrue(titles18.contains("Cable or pipe clearance not charted"), "\(titles18)")
+        let l18 = Dictionary(uniqueKeysWithValues: p18.summary.map { ($0.id, $0) })
+        XCTAssertTrue(l18["unknownClearance"]?.value.hasPrefix("1: overhead cable Test Cable at ") ?? false, "\(String(describing: l18["unknownClearance"]))")
+        guard case .needsConfirmation(let c18) = p18.safety else { return XCTFail("\(p18.safety)") }
+        XCTAssertTrue(c18.reasons.contains("Cable or pipe clearance not charted (1 leg)"), "\(c18.reasons)")
+
+        let s1 = await planner.plan(AutoRoutePlanRequest(
+            start: RoutingFixtures.synWest, goal: RoutingFixtures.synEast,
+            profile: RoutingFixtures.profile(draftFeet: 7, marginFeet: 1, airFeet: 20)), now: RoutingFixtures.now)
         let n1 = try XCTUnwrap(s1.noRoute)
-        XCTAssertEqual(n1.hints.map(\.kind), [.useMaintainedChannels, .acceptUnknownClearance])
-        XCTAssertEqual(n1.hints.map(\.title), ["Allow maintained channels", "Accept unknown clearance"])
+        XCTAssertEqual(n1.hints.map(\.kind), [.useMaintainedChannels])
+        XCTAssertEqual(n1.hints.map(\.title), ["Allow maintained channels"])
 
         // Start outside the pack's box (s6) is caught by pack selection, before routing.
         let outside = await planner.plan(AutoRoutePlanRequest(

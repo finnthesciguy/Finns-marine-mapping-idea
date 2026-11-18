@@ -58,7 +58,12 @@ def test_records_reproduced(name):
 def test_synthetic_vectors_cover_the_cases():
     doc = json.loads((TESTDATA / "synthetic.vectors.json").read_text())
     exp = {q["id"]: q["expected"] for q in doc["queries"]}
-    assert exp["s1_shoal_blocks"]["error"] == "NO_ROUTE"
+    assert exp["s1_shoal_blocks"]["error"] == "NO_ROUTE" and exp["s1_shoal_blocks"]["hints"] == {"use_maintained": True}
+    under = exp["s18_under_cable"]["summary"]["unknown_clearances"]
+    assert [(x["name"], x["kind"]) for x in under] == [("Test Cable", 2)]
+    # passing under the cable's line is recorded on the crossing (B.10), not a violation
+    assert {"record": 2, "clearance_dm": 0xFFFE, "opening": False, "uncharted": True} in \
+        exp["s5_low_air_north"]["legs"][0]["crossings"]
     assert exp["s2_maintained"]["legs"][0]["reasons"] == ["MAINTAINED_DEPTH", "BRIDGE_OPENING", "LOCK"]
     assert [x["name"] for x in exp["s14_lock"]["summary"]["locks"]] == ["Test Lock"]
     assert [x["area"] for x in exp["s15_advisories"]["summary"]["advisories"]] == [4, 5]

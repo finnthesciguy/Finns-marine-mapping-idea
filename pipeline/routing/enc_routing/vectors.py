@@ -231,19 +231,21 @@ def _np(o):
 
 SYNTH_QUERIES = [
     {"id": "s1_shoal_blocks", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
-     "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
-     "note": "channel shoaled to 9 dm at col 3; detour north blocked by the unknown-clearance cable: NO_ROUTE, hint use_maintained"},
+     "profile": {"draft_ft": 7, "margin_ft": 1, "air_draft_ft": 20},
+     "note": "8 ft needs 24 dm: channel shoaled to 9 dm at col 3 and row 2 (21 dm) too shallow for a detour: "
+             "NO_ROUTE, hint use_maintained (maintained 27 dm)"},
     {"id": "s2_maintained", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
      "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20, "use_maintained": True},
      "note": "straight along the channel: maintained depth + bridge opening (closed 18 dm < 61 dm)"},
     {"id": "s3_unknown_detour", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
      "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 8, "accept_unknown_clearance": True},
-     "note": "under the cable, around the shoal, under the 30 dm fixed bridge (air 24 dm), through the restricted square"},
+     "note": "under the cable, around the shoal, under the 30 dm fixed bridge (air 24 dm), through the restricted "
+             "square (accept_unknown_clearance has had no effect since round 4)"},
     {"id": "s4_too_deep", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
      "profile": {"draft_ft": 12, "margin_ft": 1, "air_draft_ft": 20},
      "note": "13 ft needs 39 dm: only row 3 (60 dm) is deep enough"},
     {"id": "s5_low_air_north", "start": [-81.9995, 27.0035], "goal": [-81.9935, 27.0035],
-     "profile": {"draft_ft": 5, "margin_ft": 1, "air_draft_ft": 9, "accept_unknown_clearance": True},
+     "profile": {"draft_ft": 5, "margin_ft": 1, "air_draft_ft": 9},
      "note": "row 3 west to east: cable (yellow), fixed bridge 30 dm >= 27 dm, then prohibited col 6 forces a detour south"},
     {"id": "s6_outside_pack", "start": [-82.0100, 27.0015], "goal": [-81.9925, 27.0015],
      "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20}, "note": "start west of the pack bbox"},
@@ -283,6 +285,10 @@ SYNTH_QUERIES = [
      "profile": {"draft_ft": 1, "margin_ft": 0.5, "air_draft_ft": 5},
      "note": "start in the entry-prohibited square (col 6, row 3): passable with a caution, yellow PROHIBITED_AREA, "
              "listed in summary.prohibited_areas (format 1.3)"},
+    {"id": "s18_under_cable", "start": [-81.9995, 27.0015], "goal": [-81.9925, 27.0015],
+     "profile": {"draft_ft": 4, "margin_ft": 1, "air_draft_ft": 20},
+     "note": "round 4: the cable without a charted clearance is passable with a caution, so the detour north of "
+             "the shoal goes under it (yellow UNKNOWN_CLEARANCE, listed in summary.unknown_clearances with kind 2)"},
 ]
 
 SARASOTA_QUERIES = [

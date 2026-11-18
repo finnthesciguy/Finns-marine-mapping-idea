@@ -131,7 +131,8 @@ let syntheticProfiles: [BoatProfile] = [
         }
         print("[property] synthetic: \(routes) routes, \(noRoutes) NO_ROUTE, \(legValidations) LEG_VALIDATION")
         #expect(routes > 5000 / stride)
-        #expect(noRoutes > 1000 / stride)
+        // Round 4: the cable of unknown clearance no longer blocks, so fewer pairs have no route.
+        #expect(noRoutes > 400 / stride)
         #expect(legValidations == 0)
         #expect(problems.isEmpty, "\(problems.prefix(10))")
     }

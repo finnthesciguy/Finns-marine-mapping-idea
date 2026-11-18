@@ -126,6 +126,8 @@ struct VectorRun: Decodable {
     var overhead: Int
     var clearanceDm: Int
     var name: String
+    /// Only on `unknown_clearances` runs (round 4).
+    var kind: Int?
     var lon: Double
     var lat: Double
 }
@@ -279,6 +281,7 @@ struct VectorComparator {
         int(g.overhead ?? 0xFFFF, w.overhead, "\(f).overhead")
         int(g.clearanceDm, w.clearanceDm, "\(f).clearance_dm")
         check(g.name == w.name, "\(f).name: got \(g.name)")
+        if let wk = w.kind { int(g.kind, wk, "\(f).kind") }
         degrees(g.centroid, w.lon, w.lat, "\(f).lon/lat")
     }
 

@@ -58,6 +58,8 @@ public struct BoatProfileForm: Sendable, Equatable {
     public var beam: String
     public var cruisingSpeed: String
     public var useMaintainedChannels: Bool
+    /// No effect on routing since round 4 (cables and pipes without a charted clearance are always passable with a
+    /// caution); kept so the stored profile round-trips. The app should no longer show a toggle for it.
     public var acceptUnknownClearance: Bool
     public var isDefault: Bool
     public var lengthUnit: DepthUnit
@@ -267,7 +269,6 @@ public struct BoatProfileRow: Sendable, Equatable, Identifiable {
         detail = parts.joined(separator: " · ")
         var opts: [String] = []
         if profile.useMaintainedChannels { opts.append("Uses maintained channels") }
-        if profile.acceptUnknownClearance { opts.append("Accepts unknown clearance") }
         options = opts
     }
 }
@@ -277,7 +278,8 @@ public struct AutoRouteOptions: Sendable, Equatable {
     /// Overrides the profile's "use maintained channels" for this plan (nil: the profile's setting). Set only
     /// when the user picks the hint action or the option in the planner.
     public var useMaintainedChannels: Bool?
-    /// Overrides the profile's "accept unknown clearance" for this plan (nil: the profile's setting).
+    /// Overrides the profile's "accept unknown clearance" for this plan (nil: the profile's setting). No effect on
+    /// routing since round 4; kept so existing callers compile. The app should no longer show a toggle for it.
     public var acceptUnknownClearance: Bool?
     /// Inside route only: open-Gulf water is not used.
     public var avoidOpenGulf: Bool

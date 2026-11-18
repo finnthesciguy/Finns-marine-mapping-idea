@@ -157,16 +157,13 @@ struct AutoRouteScreen: View {
                 Toggle("Use maintained channels", isOn: Binding(get: { model.useMaintainedChannels },
                                                                 set: { model.options.useMaintainedChannels = $0 }))
                     .accessibilityIdentifier("autoroute.option.maintained")
-                Toggle("Accept unknown clearance", isOn: Binding(get: { model.acceptUnknownClearance },
-                                                                 set: { model.options.acceptUnknownClearance = $0 }))
-                    .accessibilityIdentifier("autoroute.option.unknownClearance")
                 Toggle("Inside route only", isOn: Binding(get: { model.options.avoidOpenGulf },
                                                           set: { model.options.avoidOpenGulf = $0 }))
                     .accessibilityIdentifier("autoroute.option.inside")
             } header: {
                 Text("Options for this plan")
             } footer: {
-                Text("Changes apply to the next plan only; the boat profile keeps its own settings. Legs relying on maintained channels or unknown clearances are yellow.")
+                Text("Changes apply to the next plan only; the boat profile keeps its own settings. Legs relying on maintained channels are yellow.")
             }
         }
     }

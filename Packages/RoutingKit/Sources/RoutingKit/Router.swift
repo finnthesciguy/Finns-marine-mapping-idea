@@ -48,8 +48,7 @@ extension RoutingPack {
     public func blockReason(triangle t: Int, profile: BoatProfile) -> BlockReason? {
         // One class only: building a whole Classifier would classify every attribute class.
         let r = Classifier.reason(classes, Int(attrClass[t]), req: profile.requiredDepthDm, air: profile.requiredAirDm,
-                                  useMaintained: profile.useMaintainedChannels,
-                                  acceptUnknown: profile.acceptUnknownClearance, avoidOpenGulf: profile.avoidOpenGulf)
+                                  useMaintained: profile.useMaintainedChannels, avoidOpenGulf: profile.avoidOpenGulf)
         return r < 0 ? nil : BlockReason.allCases[r]
     }
 
@@ -725,13 +724,10 @@ struct RouteEngine {
             var uncharted: Bool?
             if opening {
                 needs = c == 0xFFFE || c < cls.air
-            } else if c == 0xFFFE && r.flags & 2 != 0 {
-                uncharted = true  // a fixed bridge part without clearance: passed with a caution (format 1.3)
             } else if c == 0xFFFE {
-                if !cls.acceptUnknown {
-                    violations.append(LegViolation(kind: .unknownClearance, leg: leg, record: o, distanceMeters: nil,
-                                                   valsouDm: nil, clearanceDm: nil))
-                }
+                // No charted clearance (a fixed bridge part, a cable or a pipe): passed with a caution,
+                // recorded on the crossing, never a violation (round 4).
+                uncharted = true
             } else if c < cls.air {
                 violations.append(LegViolation(kind: .clearance, leg: leg, record: o, distanceMeters: nil, valsouDm: nil,
                                                clearanceDm: c))
@@ -773,9 +769,10 @@ struct RouteEngine {
                 let on = cls.bits(t).contains(bit)
                 if on && !prev {
                     let ov = pack.overheadIndex(t)
+                    let kind: Int = ov == PackSentinel.noIndex ? 0 : Int(pack.overheadObjects[Int(ov)].kind)
                     out.append(OverheadRun(corridorIndex: i, overhead: ov == PackSentinel.noIndex ? nil : Int(ov),
                                            clearanceDm: Int(pack.clearance(t)), name: overheadName(ov),
-                                           centroid: pack.centroid(of: t)))
+                                           kind: kind, centroid: pack.centroid(of: t)))
                 }
                 prev = on
             }
@@ -824,8 +821,9 @@ struct RouteEngine {
     func noRouteReport(start: SnappedEndpoint, goal: SnappedEndpoint, cls: Classifier) throws(RoutingError) -> NoRouteReport {
         let profile = request.profile
         let relaxed = try astar(start: start, goal: goal, cls: cls, mode: .relaxed, phase: .noRouteReport)
+        // Round 4: "accept unknown clearance" can no longer open a route, so it is never offered (always nil).
         var hints = RouteHints(useMaintainedChannels: profile.useMaintainedChannels ? nil : false,
-                               acceptUnknownClearance: profile.acceptUnknownClearance ? nil : false)
+                               acceptUnknownClearance: nil)
         guard let corridor = relaxed.corridor else {
             // Disconnected water: no option can connect it, so every hint is false without searching.
             return NoRouteReport(requiredDepthDm: cls.req, requiredAirDm: cls.air, start: start, goal: goal,
@@ -852,7 +850,6 @@ struct RouteEngine {
             return try astar(start: start, goal: goal, cls: c2, mode: .normal, phase: .hints).corridor != nil
         }
         if !profile.useMaintainedChannels { hints.useMaintainedChannels = try hint(profile.with(useMaintained: true)) }
-        if !profile.acceptUnknownClearance { hints.acceptUnknownClearance = try hint(profile.with(acceptUnknown: true)) }
         let reason: NoRouteReason = blocked.first.map { .blocked($0.reason) } ?? .notConnected
         return NoRouteReport(requiredDepthDm: cls.req, requiredAirDm: cls.air, start: start, goal: goal, reason: reason,
                              blocked: blocked, hints: hints, dataDate: pack.dataDate)

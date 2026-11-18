@@ -20,16 +20,16 @@
     27.0015
    ],
    "profile": {
-    "draft_ft": 4,
+    "draft_ft": 7,
     "margin_ft": 1,
     "air_draft_ft": 20
    },
-   "note": "channel shoaled to 9 dm at col 3; detour north blocked by the unknown-clearance cable: NO_ROUTE, hint use_maintained",
+   "note": "8 ft needs 24 dm: channel shoaled to 9 dm at col 3 and row 2 (21 dm) too shallow for a detour: NO_ROUTE, hint use_maintained (maintained 27 dm)",
    "max_snap_m": 750.0,
    "expected": {
     "ok": false,
     "error": "NO_ROUTE",
-    "req_dm": 15,
+    "req_dm": 24,
     "air_dm": 60,
     "start": {
      "lon": -81.9995,
@@ -65,8 +65,7 @@
      }
     ],
     "hints": {
-     "use_maintained": true,
-     "accept_unknown_clearance": true
+     "use_maintained": true
     },
     "data_date": 20261101
    }
@@ -245,7 +244,7 @@
     "air_draft_ft": 8,
     "accept_unknown_clearance": true
    },
-   "note": "under the cable, around the shoal, under the 30 dm fixed bridge (air 24 dm), through the restricted square",
+   "note": "under the cable, around the shoal, under the 30 dm fixed bridge (air 24 dm), through the restricted square (accept_unknown_clearance has had no effect since round 4)",
    "max_snap_m": 750.0,
    "expected": {
     "ok": true,
@@ -453,6 +452,7 @@
        "overhead": 2,
        "clearance_dm": 65534,
        "name": "Test Cable",
+       "kind": 2,
        "lon": -81.9973334,
        "lat": 27.0023333
       }
@@ -516,24 +516,23 @@
      "snap_m": 166.793,
      "in_mesh": true
     },
-    "reason": "UNKNOWN_CLEARANCE",
+    "reason": "CLEARANCE",
     "blocked": [
      {
-      "corridor_index": 3,
-      "triangle": 20,
-      "reason": "UNKNOWN_CLEARANCE",
-      "lon": -81.9976667,
+      "corridor_index": 9,
+      "triangle": 52,
+      "reason": "CLEARANCE",
+      "lon": -81.9946667,
       "lat": 27.0036666,
       "depth_dm": 60,
       "maint_dm": -32768,
-      "clearance_dm": 65534,
-      "overhead": "Test Cable",
+      "clearance_dm": 30,
+      "overhead": "Test Fixed Bridge",
       "area": ""
      }
     ],
     "hints": {
-     "use_maintained": false,
-     "accept_unknown_clearance": false
+     "use_maintained": false
     },
     "data_date": 20261101
    }
@@ -551,8 +550,7 @@
    "profile": {
     "draft_ft": 5,
     "margin_ft": 1,
-    "air_draft_ft": 9,
-    "accept_unknown_clearance": true
+    "air_draft_ft": 9
    },
    "note": "row 3 west to east: cable (yellow), fixed bridge 30 dm >= 27 dm, then prohibited col 6 forces a detour south",
    "max_snap_m": 750.0,
@@ -643,7 +641,8 @@
        {
         "record": 2,
         "clearance_dm": 65534,
-        "opening": false
+        "opening": false,
+        "uncharted": true
        }
       ]
      }
@@ -674,6 +673,7 @@
        "overhead": 2,
        "clearance_dm": 65534,
        "name": "Test Cable",
+       "kind": 2,
        "lon": -81.9976667,
        "lat": 27.0036666
       }
@@ -2150,6 +2150,270 @@
     },
     "data_date": 20261101,
     "distance_m": 99.07245801997485
+   }
+  },
+  {
+   "id": "s18_under_cable",
+   "start": [
+    -81.9995,
+    27.0015
+   ],
+   "goal": [
+    -81.9925,
+    27.0015
+   ],
+   "profile": {
+    "draft_ft": 4,
+    "margin_ft": 1,
+    "air_draft_ft": 20
+   },
+   "note": "round 4: the cable without a charted clearance is passable with a caution, so the detour north of the shoal goes under it (yellow UNKNOWN_CLEARANCE, listed in summary.unknown_clearances with kind 2)",
+   "max_snap_m": 750.0,
+   "expected": {
+    "ok": true,
+    "req_dm": 15,
+    "air_dm": 60,
+    "start": {
+     "lon": -81.9995,
+     "lat": 27.0015,
+     "x": -819995000,
+     "y": 270015000,
+     "triangle": 4,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "goal": {
+     "lon": -81.9925,
+     "lat": 27.0015,
+     "x": -819925000,
+     "y": 270015000,
+     "triangle": 58,
+     "snap_m": 0.0,
+     "in_mesh": true
+    },
+    "corridor": [
+     4,
+     5,
+     6,
+     18,
+     17,
+     21,
+     26,
+     50,
+     44,
+     33,
+     32,
+     41,
+     38,
+     39,
+     40,
+     58
+    ],
+    "waypoints_units": [
+     [
+      -819995000,
+      270015000
+     ],
+     [
+      -819978000,
+      270016000
+     ],
+     [
+      -819964000,
+      270024000
+     ],
+     [
+      -819956000,
+      270018000
+     ],
+     [
+      -819925000,
+      270015000
+     ]
+    ],
+    "waypoints": [
+     [
+      -81.9995,
+      27.0015
+     ],
+     [
+      -81.9978,
+      27.0016
+     ],
+     [
+      -81.9964,
+      27.0024
+     ],
+     [
+      -81.9956,
+      27.0018
+     ],
+     [
+      -81.9925,
+      27.0015
+     ]
+    ],
+    "legs": [
+     {
+      "from": [
+       -81.9995,
+       27.0015
+      ],
+      "to": [
+       -81.9978,
+       27.0016
+      ],
+      "triangles": [
+       0,
+       3
+      ],
+      "length_m": 168.79275605129374,
+      "grade": "green",
+      "reasons": [],
+      "min_depth_dm": 36,
+      "min_spare_dm": 21,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.9978,
+       27.0016
+      ],
+      "to": [
+       -81.9964,
+       27.0024
+      ],
+      "triangles": [
+       3,
+       6
+      ],
+      "length_m": 164.7779853912913,
+      "grade": "yellow",
+      "reasons": [
+       "UNKNOWN_CLEARANCE"
+      ],
+      "min_depth_dm": 21,
+      "min_spare_dm": 6,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.9964,
+       27.0024
+      ],
+      "to": [
+       -81.9956,
+       27.0018
+      ],
+      "triangles": [
+       6,
+       9
+      ],
+      "length_m": 103.60089860632921,
+      "grade": "yellow",
+      "reasons": [
+       "HAZARD_PROXIMITY"
+      ],
+      "min_depth_dm": 15,
+      "min_spare_dm": 0,
+      "crossings": []
+     },
+     {
+      "from": [
+       -81.9956,
+       27.0018
+      ],
+      "to": [
+       -81.9925,
+       27.0015
+      ],
+      "triangles": [
+       9,
+       15
+      ],
+      "length_m": 308.9359598868108,
+      "grade": "yellow",
+      "reasons": [
+       "BRIDGE_OPENING",
+       "LOCK"
+      ],
+      "min_depth_dm": 36,
+      "min_spare_dm": 21,
+      "crossings": [
+       {
+        "record": 0,
+        "clearance_dm": 18,
+        "opening": true,
+        "needs_opening": true
+       }
+      ]
+     }
+    ],
+    "summary": {
+     "distance_m": 746.107599935725,
+     "distance_nm": 0.4028658746953159,
+     "legs": 4,
+     "green_legs": 1,
+     "yellow_legs": 3,
+     "shallowest": {
+      "depth_dm": 15,
+      "triangle": 50,
+      "lon": -81.9956667,
+      "lat": 27.0026666,
+      "maintained": false
+     },
+     "lowest_clearance": {
+      "clearance_dm": 18,
+      "overhead": 0,
+      "name": "Test Opening Bridge",
+      "opening": true
+     },
+     "openings": [
+      {
+       "corridor_index": 11,
+       "overhead": 0,
+       "clearance_dm": 18,
+       "name": "Test Opening Bridge",
+       "lon": -81.9946667,
+       "lat": 27.0016666
+      }
+     ],
+     "unknown_clearances": [
+      {
+       "corridor_index": 4,
+       "overhead": 2,
+       "clearance_dm": 65534,
+       "name": "Test Cable",
+       "kind": 2,
+       "lon": -81.9973334,
+       "lat": 27.0023333
+      }
+     ],
+     "locks": [
+      {
+       "corridor_index": 13,
+       "area": 3,
+       "name": "Test Lock",
+       "lon": -81.9936667,
+       "lat": 27.0016666
+      }
+     ],
+     "uncharted_bridges": [],
+     "prohibited_areas": [],
+     "advisories": [
+      {
+       "area": 4,
+       "kind": 3,
+       "source": 1,
+       "name": "Test Sanctuary",
+       "text": "Protected area: test regulations"
+      }
+     ],
+     "maintained_triangles": 0,
+     "data_date": 20261101
+    },
+    "data_date": 20261101,
+    "distance_m": 746.107599935725
    }
   }
  ]

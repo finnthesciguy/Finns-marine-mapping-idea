@@ -130,11 +130,9 @@ def check_route(ck, waypoints, prof: Profile, p) -> dict:
             if r.opens:
                 continue
             if clr == -32768:
-                if int(r.kind) == 1:
-                    pass  # a fixed bridge part without a charted clearance: passable with a caution (format 1.3)
-                elif not prof.accept_unknown_clearance:
-                    viol.append(f"under a {kind} of unknown clearance ({name or 'unnamed'}) in a profile "
-                                "that does not accept it")
+                # no charted clearance (a fixed bridge part since format 1.3, a cable or pipe since
+                # round 4): passable with a caution, never a violation
+                pass
             elif clr < air:
                 viol.append(f"under a fixed {kind} of {clr} dm < air draft {air} dm ({name or 'unnamed'})")
     out["overhead_crossed"] = crossed
@@ -171,7 +169,9 @@ def run_reference(pack_path, region, routes=None, modes=("strict", "maintained",
                     "nm": round(s["distance_nm"], 2), "green": s["green_legs"], "yellow": s["yellow_legs"],
                     "reasons": sorted({x for leg in res["legs"] for x in leg["reasons"]}),
                     "openings": [o["name"] or f"unnamed {o['lat']:.3f}N" for o in s["openings"]],
-                    "unknown_clearances": [o["name"] or f"unnamed {o['lat']:.3f}N" for o in s["unknown_clearances"]],
+                    "unknown_clearances": [f"{ {1: 'bridge', 2: 'cable', 3: 'pipe'}.get(o.get('kind'), 'object')} "
+                                           f"{o['name'] or 'unnamed'} {o['lat']:.4f}N {-o['lon']:.4f}W"
+                                           for o in s["unknown_clearances"]],
                     "shallowest_dm": s["shallowest"]["depth_dm"],
                     "lowest_clearance": s["lowest_clearance"],
                     "snap_m": [res["start"]["snap_m"], res["goal"]["snap_m"]],

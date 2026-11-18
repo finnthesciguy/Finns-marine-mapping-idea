@@ -2,6 +2,7 @@ import Foundation
 import NavCore
 
 /// Why a triangle is impassable for the profile (spec B.3, codes 0..4 in precedence order).
+/// `.prohibited` (format 1.3) and `.unknownClearance` (round 4) are no longer produced; they stay for the codes.
 public enum BlockReason: String, Hashable, Sendable, Codable, CaseIterable {
     case prohibited = "PROHIBITED"
     case openGulf = "OPEN_GULF"
@@ -33,7 +34,8 @@ public enum CautionReason: String, Hashable, Sendable, Codable, CaseIterable {
     case lock = "LOCK"
     /// Passes under a fixed bridge part whose clearance is not charted (format 1.3).
     case bridgeUncharted = "BRIDGE_UNCHARTED"
-    /// Passes under an object of unknown clearance.
+    /// Passes under an overhead cable or pipe whose clearance is not charted (passable with a caution since
+    /// round 4). The summary's `unknownClearances` lists each one with its kind and position.
     case unknownClearance = "UNKNOWN_CLEARANCE"
     /// Crosses an area the chart marks entry prohibited (format 1.3: passable with a caution).
     case prohibitedArea = "PROHIBITED_AREA"
@@ -136,6 +138,8 @@ public struct OverheadRun: Hashable, Sendable {
     /// The triangle's `clearance_dm`.
     public var clearanceDm: Int
     public var name: String
+    /// The `OVHD` record's kind: 1 bridge, 2 overhead cable, 3 overhead pipe; 0 when the triangle names none.
+    public var kind: Int
     public var centroid: GridPoint
 }
 
@@ -173,6 +177,8 @@ public struct RouteSummary: Hashable, Sendable {
     public var shallowest: ShallowestPoint
     public var lowestClearance: LowestClearance?
     public var openings: [OverheadRun]
+    /// Overhead cables and pipes without a charted clearance passed under, in order (round 4): each run's
+    /// `kind` says which (2 cable, 3 pipe).
     public var unknownClearances: [OverheadRun]
     /// Locks and navigable floodgates passed, in order (format 1.2).
     public var locks: [LockRun]
@@ -290,7 +296,8 @@ public enum NoRouteReason: Hashable, Sendable {
 public struct RouteHints: Hashable, Sendable {
     /// True if switching on "use maintained channels" alone would give a route.
     public var useMaintainedChannels: Bool?
-    /// True if switching on "accept unknown clearance" alone would give a route.
+    /// Always nil since round 4: objects without a charted clearance are passable with a caution, so this
+    /// option can no longer give a route. Kept so existing callers compile.
     public var acceptUnknownClearance: Bool?
 }
 
@@ -312,6 +319,7 @@ public struct LegViolation: Hashable, Sendable {
     public enum Kind: String, Hashable, Sendable {
         case hazard = "HAZARD"
         case clearance = "CLEARANCE"
+        /// No longer produced (round 4): crossings without a charted clearance are recorded as `uncharted`.
         case unknownClearance = "UNKNOWN_CLEARANCE"
     }
 

@@ -1,6 +1,6 @@
 # Routing pack format and routing algorithm, version 1.3
 
-Status: Wave 4 round 3, 2026-11-17. Format 1.3 applies the owner's decisions: entry-prohibited areas and fixed bridge parts without a charted clearance are passable with a caution (flag bit 14, two yellow reasons, two summary lists; see "Changes from 1.2"). Format 1.2 added locks and navigable floodgates (a triangle flag, an `AREA` kind and a yellow reason), area-wide advisories (an `ATTR` column and the `ADVS` section, reported once per route instead of on every leg), and replaces the leg construction (B.8: legs follow real turns, not the triangles); see "Changes from 1.1" at the end. Format 1.1 added a checksum over the section table and made every reader check explicit (see "Changes from 1.0"). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
+Status: Wave 4 round 4, 2026-11-18. Round 4 changes only the routing rules (part B), not the file: overhead cables and pipes without a charted clearance are passable with a caution, like fixed bridge parts without one (block code 4 is no longer produced, `accept_unknown_clearance` has no effect and is never a hint, B.10 records the crossing instead of failing, and `unknown_clearances` entries carry the object's kind); see "Round 4 (rules only)" after "Changes from 1.2". Format 1.3 applies the owner's decisions: entry-prohibited areas and fixed bridge parts without a charted clearance are passable with a caution (flag bit 14, two yellow reasons, two summary lists; see "Changes from 1.2"). Format 1.2 added locks and navigable floodgates (a triangle flag, an `AREA` kind and a yellow reason), area-wide advisories (an `ATTR` column and the `ADVS` section, reported once per route instead of on every leg), and replaces the leg construction (B.8: legs follow real turns, not the triangles); see "Changes from 1.1" at the end. Format 1.1 added a checksum over the section table and made every reader check explicit (see "Changes from 1.0"). Reference implementation: [`pipeline/routing`](../pipeline/routing) (`enc_routing.packfmt` writes and reads the file, `enc_routing.router` implements part B and reads only the pack). Test vectors: [`testdata/routing`](../testdata/routing).
 
 This document has four parts:
 
@@ -508,7 +508,7 @@ This is equirectangular about the mean latitude. Every distance in the router us
 | margin_ft | double | – | safety margin under the keel, in feet |
 | air_draft_ft | double | – | height above the waterline, in feet |
 | use_maintained | bool | false | allow USACE maintained depth where the chart is shallower ("use maintained channels") |
-| accept_unknown_clearance | bool | false | allow passing under overhead objects of unknown clearance |
+| accept_unknown_clearance | bool | false | no effect (round 4): objects without a charted clearance are always passable with a caution. Kept so existing requests stay valid. |
 | avoid_open_gulf | bool | false | inside route only: OUTSIDE triangles are impassable |
 
 ```
@@ -543,9 +543,9 @@ The triangle is **blocked**, with the first reason that applies in this order (r
 | 1 | OPEN_GULF | `avoid_open_gulf && (flags & OUTSIDE)` |
 | 2 | DEPTH | `!(depth_ok || maint_ok)` |
 | 3 | CLEARANCE | `has_ovh && !opening && !known_ok` |
-| 4 | UNKNOWN_CLEARANCE | `has_ovh && !opening && known_ok && unknown && !accept_unknown_clearance` |
+| 4 | UNKNOWN_CLEARANCE | never (round 4; before: `has_ovh && !opening && known_ok && unknown && !accept_unknown_clearance`). The code stays reserved. |
 
-Otherwise it is **passable**. Opening bridges are always passable. Maintained depth never overrides a charted hazard (HAZARD_DEPTH).
+Otherwise it is **passable**. Only a charted clearance below the air draft (code 3) blocks for height: an overhead cable or pipe without a charted clearance is passable with a caution (unknown_used: yellow UNKNOWN_CLEARANCE, +3000 m on entry, listed in `unknown_clearances`), as is a fixed bridge part without one (uncharted, format 1.3). Opening bridges are always passable. Maintained depth never overrides a charted hazard (HAZARD_DEPTH).
 
 Derived per-triangle booleans (for passable triangles):
 
@@ -779,8 +779,10 @@ This is an independent check of each leg against HAZD and OVHD. The mesh already
    - **even–odd test** of point (px, py): `inside = false; j = n−1; for i in 0..n−1: if (R_i.Y > py) != (R_j.Y > py) and px < R_i.X + (py − R_i.Y)·(R_j.X − R_i.X)/(R_j.Y − R_i.Y): inside = !inside; j = i`.
 6. **Crossings and violations.** For each candidate passed under, in ascending record order:
    - an opening span (OVHD flags bit 0) is recorded as `{record, clearance_dm, opening: true, needs_opening: clr == 0xFFFE || clr < air}`;
-   - format 1.3: a record with flags bit 1 and `clr == 0xFFFE` (a fixed bridge part without a charted clearance) is recorded as `{record, clearance_dm, opening: false, uncharted: true}` and is not a violation;
-   - otherwise `{record, clearance_dm, opening: false}` (no `needs_opening` key); and if `clr == 0xFFFE` it is a violation `{kind: "UNKNOWN_CLEARANCE", record}` unless accept_unknown_clearance is set; else if `clr < air` it is a violation `{kind: "CLEARANCE", record, clearance_dm}`.
+   - any other record with `clr == 0xFFFE` (a fixed bridge part without a charted clearance, format 1.3, or an overhead cable or pipe without one, round 4) is recorded as `{record, clearance_dm, opening: false, uncharted: true}` and is not a violation;
+   - otherwise `{record, clearance_dm, opening: false}` (no `needs_opening` key), and if `clr < air` it is a violation `{kind: "CLEARANCE", record, clearance_dm}`.
+
+   (Before round 4 a cable or pipe with `clr == 0xFFFE` was a violation `{kind: "UNKNOWN_CLEARANCE", record}` unless accept_unknown_clearance was set. That kind is no longer produced.)
 
    Every candidate passed under is listed in the leg's `crossings`. Each violation also carries `leg` (the leg index). The violations of a route are listed leg by leg; within a leg, the hazard violations in ascending record order, then the overhead ones in ascending record order.
 
@@ -796,7 +798,7 @@ The result is `{ok: false, error: "NO_ROUTE", reason, blocked, hints}`:
 
 - **blocked.** Each maximal run of consecutive blocked triangles along the relaxed corridor, in order. Each entry is: `corridor_index`, `triangle` (the run's first triangle), `reason` (its B.3 reason name), `lon/lat` (its centroid: `floor((x_a+x_b+x_c)/3)`, same for y, then /1e7), `depth_dm`, `maint_dm`, `clearance_dm`, the overhead name and the area name. The **best blocked location** shown to the user is `blocked[0]`: the first place along the cheapest almost-route where the boat cannot go.
 - **reason.** `blocked[0].reason`, or `NOT_CONNECTED` if even the relaxed search fails, meaning the start and goal are in disconnected water. `blocked` is then empty.
-- **hints.** An object with one key for each option among `use_maintained` and `accept_unknown_clearance` that is currently false (an option already on has no key). The value is true if the B.7 search, from the same s, g, S and G, finds a corridor with that option alone switched on. This uses the B.3 rules for the changed profile, and is false if s or g is not passable under it. For `NOT_CONNECTED` every present key is false, without searching (no option can connect disconnected water). For example, "this route exists if you trust maintained channels". The app should offer the option rather than silently applying it.
+- **hints.** An object with one key for each option among `use_maintained` that is currently false (an option already on has no key; round 4: `accept_unknown_clearance` can no longer give a route and never has a key). The value is true if the B.7 search, from the same s, g, S and G, finds a corridor with that option alone switched on. This uses the B.3 rules for the changed profile, and is false if s or g is not passable under it. For `NOT_CONNECTED` every present key is false, without searching (no option can connect disconnected water). For example, "this route exists if you trust maintained channels". The app should offer the option rather than silently applying it.
 - Each `blocked` entry has exactly the keys `corridor_index`, `triangle`, `reason`, `lon`, `lat`, `depth_dm` (ATTR), `maint_dm` (ATTR), `clearance_dm` (ATTR), `overhead` (the **name** string of OVHD[ATTR.overhead], `""` if 0xFFFF or unnamed) and `area` (the name of AREA[ATTR.area], `""` if 0xFFFF).
 
 ### B.12 Route summary
@@ -808,7 +810,7 @@ From the corridor of B.8 (all positions) and the legs. Every field comes from th
 - `shallowest`: the first corridor triangle with the minimum ATTR `depth_dm`: `{depth_dm, triangle, lon, lat, maintained}`, where lon/lat is its centroid (B.11) in degrees and `maintained` is via_maint. This is the **charted** depth even where maintained depth was used.
 - `lowest_clearance`: among corridor triangles with ATTR `clearance_dm < 0xFFFE`, the first with the minimum value: `{clearance_dm, overhead, name, opening}`, where `overhead` is the triangle's ATTR overhead index (0xFFFF possible), `name` the name of that OVHD record (`""` if 0xFFFF) and `opening` the triangle's ATTR flag OPENING_BRIDGE (not the record's flag). null if there is none.
 - `openings`: bridges that must open. Each maximal run of consecutive needs_opening corridor triangles gives one entry, from the run's first triangle: `{corridor_index, overhead, clearance_dm, name, lon, lat}` with `overhead` and `clearance_dm` from its ATTR, `name` as above and lon/lat its centroid.
-- `unknown_clearances`: the same for runs of unknown_used.
+- `unknown_clearances`: the same for runs of unknown_used, plus `kind`, the OVHD record's kind (1 bridge, 2 cable, 3 pipe; 0 if `overhead` is 0xFFFF): `{corridor_index, overhead, clearance_dm, name, kind, lon, lat}` (round 4). The app lists each by kind, name and position with a note to check the clearance before going under.
 - `locks` (format 1.2): each maximal run of consecutive `lock` corridor triangles gives `{corridor_index, area, name, lon, lat}` from the run's first triangle: `area` its ATTR area index (the lock's AREA record; 0xFFFF possible), `name` that record's name (`""` if 0xFFFF), lon/lat its centroid.
 - `uncharted_bridges` (format 1.3): the same as `openings` for runs of `uncharted` corridor triangles (`overhead` is the triangle's ATTR overhead, the uncharted part when no other object is there).
 - `prohibited_areas` (format 1.3): the same as `locks` for runs of `prohibited` corridor triangles (`area` the ATTR area, the prohibited record).
@@ -1020,7 +1022,7 @@ Overhead lines (all N–S): OVHD 0 (opening span) from row 1's southern edge to 
 
 All integers (triangle ids, corridor, waypoints_units, dm values, reasons, grades) must match exactly. Floating-point fields must match within the stated tolerances. `legs[].from/to` and `waypoints` are `units/1e7` and are informative; compare `waypoints_units`.
 
-`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The synthetic queries s14 (a lock: yellow LOCK leg, `summary.locks`) and s15 (two area-wide advisories, green legs) cover format 1.2; s16 (under the uncharted bridge part) and s17 (in the prohibited square) cover format 1.3. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
+`expected` holds exactly the B.13 keys of that result: for example `violations` only for `LEG_VALIDATION`, `hints` for every `NO_ROUTE`, and no `req_dm` for `INVALID_REQUEST`. The synthetic queries s14 (a lock: yellow LOCK leg, `summary.locks`) and s15 (two area-wide advisories, green legs) cover format 1.2; s16 (under the uncharted bridge part) and s17 (in the prohibited square) cover format 1.3; s18 (under the cable of unknown clearance, no option) covers round 4, and s1 now needs 24 dm so that only the maintained channel gives a route. The queries cover every result kind except `LEG_VALIDATION` (a consistent pack produces none; the B.10 rules are covered by unit tests in both implementations) and every input rule of B.2 and B.6 that can be written in JSON (non-finite inputs are covered by unit tests).
 
 **Properties checked by both implementations** (`tests/test_rules.py`, RoutingKit `PropertyTests`): over every ordered pair of the 32 square centres of the synthetic pack and six profiles, the outcome class (route / no route / leg-validation failure) is the same in both directions and no leg fails validation; every snapped point lies in its triangle; and no leg of any route enters the interior of an impassable triangle (RoutingKit, exact).
 
@@ -1037,6 +1039,17 @@ Round 3, owner decisions. Packs must be rebuilt (builder 3.2.0).
 | 1 | Entry-prohibited areas blocked (reason PROHIBITED). | Passable with a caution: yellow reason PROHIBITED_AREA, summary list `prohibited_areas`, cost ×3 and +5000 m on entry. Block code 0 is no longer produced. |
 | 2 | A non-opening bridge part without charted clearance was solid (clearance 0). | Passable with a caution: flag BRIDGE_UNCHARTED (bit 14), reason BRIDGE_UNCHARTED, summary list `uncharted_bridges`, +3000 m on entry; OVHD flags bit 1 now means "uncharted" with clearance 0xFFFE; B.10 records the crossing as `uncharted: true`, no violation. Bridges with a charted clearance below the air draft still block. Cables and pipes of unknown clearance are unchanged (`accept_unknown_clearance`). |
 | 3 | — | Builder only: pontoon bridges open; 30 nm overlap again; every face meshed again (C.10a off). |
+
+## Round 4 (rules only)
+
+Owner decision, 2026-11-18. The file format stays 1.3 and packs are unchanged (byte-identical); only part B changes, in both implementations together.
+
+| # | before | round 4 |
+|---|---|---|
+| 1 | An overhead cable or pipe without a charted clearance blocked (B.3 code 4) unless `accept_unknown_clearance`. | Passable with a caution: yellow UNKNOWN_CLEARANCE, +3000 m on entry (unchanged), listed in `unknown_clearances`. Code 4 is no longer produced. Cables and pipes with a charted clearance below the air draft still block (code 3). |
+| 2 | B.10: crossing such an object was a violation `UNKNOWN_CLEARANCE` unless accepted. | Recorded as `uncharted: true` on the crossing, no violation. |
+| 3 | B.11 hints had a key `accept_unknown_clearance`. | No such key: the option has no effect. The profile field stays (ignored). |
+| 4 | `unknown_clearances` entries: `{corridor_index, overhead, clearance_dm, name, lon, lat}`. | Plus `kind` (1 bridge, 2 cable, 3 pipe, 0 none). |
 
 ## Changes from 1.1
 
