@@ -1,5 +1,6 @@
 import ChartKit
 import Foundation
+import RoutingKit
 
 /// Routing packs shipped inside the app (`RoutingPacks/` in the app bundle: `ncds_10.pack` … `ncds_14.pack` and a
 /// `manifest.json`), made available to `RoutingPackLibrary` without a download.
@@ -7,7 +8,10 @@ import Foundation
 /// The library lists `*.pack` files in its side-load folder, so each bundled pack is linked there as
 /// `bundled-<name>.pack` (a symbolic link to the file in the bundle: no 60–90 MB copy). Links are made on the
 /// first launch and again whenever the bundled set changes (fingerprint of `manifest.json`, or of the pack names
-/// and sizes when there is no manifest), each pack checked by `validate` first. Because the bundle can move
+/// and sizes when there is no manifest), each pack checked by `validate` first. The default check is cheap
+/// (`quickCheck`: size and SHA-256 from the manifest, then the 256-byte header); the full decode happens when a
+/// route is planned (`RoutingPackLibrary.open`, which validates the whole pack). Callers run `install` off the
+/// main thread: the app starts it in the background after the first screen is up. Because the bundle can move
 /// when the app is updated, links whose target is gone are repaired on every launch. A bundled pack the user
 /// removed stays removed until the bundled set changes. A missing or empty `RoutingPacks/` folder is not an
 /// error (nothing to install).
@@ -62,11 +66,73 @@ public enum BundledRoutingPacks {
     }
 
     /// Links the bundled packs into `library`'s side-load folder when needed (see the type comment).
-    /// `validate` checks a pack (default: the library's full check, which decodes the pack; blocking).
+    /// `validate` checks a pack (default: `quickCheck` against the bundled manifest). Blocking: call off the main
+    /// thread.
     public static func install(from directory: URL?, library: RoutingPackLibrary,
                                validate: ((URL) throws -> Void)? = nil) -> Outcome {
-        let check: (URL) throws -> Void = validate ?? { url in try library.validate(fileAt: url) }
+        let expected: [String: ExpectedPack] = directory.map { manifestPacks(in: $0) } ?? [:]
+        let check: (URL) throws -> Void = validate ?? { url in try quickCheck(url, expected: expected[url.lastPathComponent]) }
         return install(from: directory, into: library.sideLoadDirectory, validate: check)
+    }
+
+    // MARK: Cheap check
+
+    /// What the manifest says about one bundled pack (`regions[].routingPack`, file `<region id>.pack`).
+    public struct ExpectedPack: Sendable, Equatable {
+        public var byteSize: Int64?
+        /// Lowercase hex; nil when absent or a placeholder of zeros.
+        public var sha256: String?
+    }
+
+    struct ManifestJSON: Decodable {
+        struct Region: Decodable {
+            struct Pack: Decodable {
+                var byteSize: Int64?
+                var sha256: String?
+            }
+            var id: String
+            var routingPack: Pack?
+        }
+        var regions: [Region]
+    }
+
+    /// Expected size and checksum per pack file name, from `manifest.json` (empty when it is missing or unreadable).
+    public static func manifestPacks(in directory: URL) -> [String: ExpectedPack] {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(manifestName, isDirectory: false)),
+              let manifest = try? JSONDecoder().decode(ManifestJSON.self, from: data) else { return [:] }
+        var out: [String: ExpectedPack] = [:]
+        for region in manifest.regions {
+            guard let pack = region.routingPack else { continue }
+            var sha: String? = pack.sha256?.lowercased()
+            if let value = sha, value.isEmpty || value.allSatisfy({ $0 == "0" }) { sha = nil }
+            out[region.id + "." + RoutingPackLibrary.sideLoadedExtension] = ExpectedPack(byteSize: pack.byteSize, sha256: sha)
+        }
+        return out
+    }
+
+    /// Size and SHA-256 against the manifest (when it lists the pack), then the header (format and region).
+    /// Reads the file once for the checksum but never decodes its sections.
+    public static func quickCheck(_ url: URL, expected: ExpectedPack?) throws {
+        if let size = expected?.byteSize {
+            let actual: Int64 = RoutingPackLibrary.fileSize(url)
+            guard actual == size else {
+                throw RoutingPackRejection(reason: "size \(actual) bytes, the manifest says \(size)")
+            }
+        }
+        if let sha = expected?.sha256 {
+            let actual: String
+            do {
+                actual = try StreamingSHA256.hash(fileAt: url)
+            } catch {
+                throw RoutingPackRejection(reason: "could not be read (\(error.localizedDescription))")
+            }
+            guard actual == sha else { throw RoutingPackRejection(reason: "checksum does not match the manifest") }
+        }
+        do {
+            _ = try RoutingPack.header(contentsOf: url)
+        } catch {
+            throw RoutingPackRejection(reason: RoutingPackLibrary.describe(error))
+        }
     }
 
     static func install(from directory: URL?, into target: URL, validate: (URL) throws -> Void) -> Outcome {

@@ -45,6 +45,7 @@ final class AppModel {
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var liveStatusTask: Task<Void, Never>?
+    @ObservationIgnored private var bundledInstallTask: Task<Void, Never>?
 
     init(environment: AppEnvironment, manifest: ManifestLoader.Loaded, navigation: NavigationModel,
          notices: [StartupNotice]) {
@@ -152,7 +153,14 @@ final class AppModel {
             await installFixtureRouting()
         }
         if environment.launch.installsBundledRoutingPacks {
-            await installBundledRoutingPacks()
+            // In the background: the first screen must not wait for ~90 MB of packs to be checked (it did, and the
+            // disclaimer took over two minutes to appear on CI). Planning says the packs are being prepared until
+            // this finishes.
+            autoRoute.bundledPacksPreparing = true
+            charts.bundledPacksPreparing = true
+            bundledInstallTask = Task { [weak self] in
+                await self?.installBundledRoutingPacks()
+            }
         }
         await startLiveCharts()
         await plotter.start(resumedRecording: recovery.resumed)
@@ -182,7 +190,7 @@ final class AppModel {
     private func installBundledRoutingPacks() async {
         let directory: URL? = BundledRoutingPacks.directory(in: Bundle.main)
         let library: RoutingPackLibrary = environment.routingPacks
-        let outcome: BundledRoutingPacks.Outcome = await Task.detached(priority: .userInitiated) {
+        let outcome: BundledRoutingPacks.Outcome = await Task.detached(priority: .utility) {
             BundledRoutingPacks.install(from: directory, library: library)
         }.value
         let catalog: RoutingPackCatalog = await library.catalog()
@@ -193,6 +201,10 @@ final class AppModel {
                                          message: "Some routing packs shipped with the app could not be used: "
                                              + outcome.problems.joined(separator: "; ")))
         }
+        autoRoute.bundledPacksPreparing = false
+        charts.bundledPacksPreparing = false
+        await autoRoute.refreshPacks()
+        await charts.refresh()
     }
 
     // MARK: Online NOAA charts

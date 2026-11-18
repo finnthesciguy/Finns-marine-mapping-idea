@@ -105,7 +105,13 @@ struct RoutingPacksSection: View {
 
     var body: some View {
         Section {
-            if model.routingCatalog.entries.isEmpty {
+            if model.bundledPacksPreparing {
+                Label("Preparing the routing packs included with the app…", systemImage: "hourglass")
+                    .font(.footnote)
+                    .foregroundStyle(Color.secondary)
+                    .accessibilityIdentifier("routingPacks.preparing")
+            }
+            if model.routingCatalog.entries.isEmpty && !model.bundledPacksPreparing {
                 Text("No routing packs installed.")
                     .foregroundStyle(Color.secondary)
             }

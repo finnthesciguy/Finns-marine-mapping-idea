@@ -114,9 +114,10 @@ extension GulfNavUITests {
     /// A first launch as a downloaded Release build behaves: no fixture chart or routing pack, online NOAA charts on
     /// (`GULFNAV_LIVE_CHARTS=1`, the Release default) and the routing packs shipped in the app linked
     /// (`GULFNAV_BUNDLED_ROUTING=1`). The chart shows a chart source (no "No charts installed" banner), the
-    /// Charts screen has the online source with its status, and every bundled pack is registered with the
-    /// routing-pack library (0 packs is accepted while the app ships none yet). NOAA's service may or may not be
-    /// reachable from CI: its connection state is only reported, not asserted.
+    /// Charts screen has the online source with its status, and all five bundled packs (ncds_10…14) are checked
+    /// and registered with the routing-pack library. The disclaimer must appear at once: the packs are prepared in
+    /// the background (on 68ab73c the launch waited for them and the disclaimer never appeared within 120 s).
+    /// NOAA's service may or may not be reachable from CI: its connection state is only reported, not asserted.
     @MainActor
     func testMacFreshLaunchHasAChartSourceAndBundledRoutingPacks() throws {
         let app: XCUIApplication = GulfNavUITests.makeApp(root: GulfNavUITests.uniqueRoot("mac-fresh"), reset: true)
@@ -125,14 +126,16 @@ extension GulfNavUITests {
         app.launch()
         acceptDisclaimer(app)
         waitForStatus(app, "liveOn", "yes")
-        waitUntil(GulfNavUITests.stepTimeout, "bundled routing packs linked, status: \(GulfNavUITests.appStatusValue(app))") {
+        // Checking ~90 MB of packs (size, SHA-256, header) in a debug build takes a while; the UI is usable meanwhile.
+        let started: Date = Date()
+        waitUntil(300, "bundled routing packs linked, status: \(GulfNavUITests.appStatusValue(app))") {
             let value: String = GulfNavUITests.statusField(app, "bundledPacks") ?? "-1"
             return value != "-1"
         }
-        let bundled: String = GulfNavUITests.statusField(app, "bundledPacks") ?? "?"
+        print("GULFNAV-NOTE bundled routing packs ready after \(Int(Date().timeIntervalSince(started))) s")
+        XCTAssertEqual(GulfNavUITests.statusField(app, "bundledPacks"), "5", "ncds_10…14 linked")
         XCTAssertEqual(GulfNavUITests.statusField(app, "bundledProblems"), "0", "every bundled pack passed its check")
-        waitForStatus(app, "routingPacks", bundled)
-        print("GULFNAV-NOTE bundled routing packs registered: \(bundled)")
+        waitForStatus(app, "routingPacks", "5")
         XCTAssertFalse(app.buttons["map.noChartsBanner"].exists, "online charts are a chart source")
 
         app.buttons["map.chartsButton"].tap()

@@ -50,6 +50,8 @@ final class AutoRouteModel {
     var pendingCaution: PendingCaution?
     private(set) var lastSavedName: String = "none"
     var message: String?
+    /// The routing packs shipped in the app are still being checked and linked (first launch, or after an update).
+    var bundledPacksPreparing: Bool = false
 
     let planner: AutoRoutePlanner
     let library: RoutingPackLibrary
@@ -159,6 +161,11 @@ final class AutoRouteModel {
     /// Which pack the plan will use (shown before Plan).
     func refreshPacks() async {
         catalog = await library.catalog()
+        defer {
+            if bundledPacksPreparing && packID == "none" {
+                packText = "Preparing the routing packs included with the app…"
+            }
+        }
         guard let start = endpoint(startChoice), let goal = endpoint(goalChoice) else {
             packID = "none"
             if catalog.entries.isEmpty {
@@ -191,6 +198,10 @@ final class AutoRouteModel {
     func plan() {
         guard let profile, let start = endpoint(startChoice), let goal = endpoint(goalChoice) else {
             message = "Choose a start, a destination and a boat first."
+            return
+        }
+        if bundledPacksPreparing && packID == "none" {
+            message = "The routing packs included with the app are still being prepared. Try again in a few seconds."
             return
         }
         planTask?.cancel()

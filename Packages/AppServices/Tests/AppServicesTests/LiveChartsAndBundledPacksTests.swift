@@ -323,3 +323,59 @@ final class BundledRoutingPacksTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent(".bundled-routing.json").path))
     }
 }
+
+final class BundledPackQuickCheckTests: XCTestCase {
+    var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("quick-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func manifest(_ packs: [(id: String, size: Int64, sha: String)]) -> String {
+        let regions: [String] = packs.map { p in
+            "{\"id\":\"\(p.id)\",\"title\":\"x\",\"routingPack\":{\"url\":\"https://example.invalid/\(p.id).pack\",\"byteSize\":\(p.size),\"sha256\":\"\(p.sha)\",\"version\":\"v\"}}"
+        }
+        return "{\"schemaVersion\":1,\"regions\":[" + regions.joined(separator: ",") + "]}"
+    }
+
+    func testManifestIsReadPerPackFile() throws {
+        let zeros = String(repeating: "0", count: 64)
+        try Data(manifest([("ncds_10", 10, "AB" + String(repeating: "c", count: 62)), ("ncds_11", 20, zeros)]).utf8)
+            .write(to: directory.appendingPathComponent("manifest.json"))
+        let packs = BundledRoutingPacks.manifestPacks(in: directory)
+        XCTAssertEqual(packs["ncds_10.pack"]?.byteSize, 10)
+        XCTAssertEqual(packs["ncds_10.pack"]?.sha256, "ab" + String(repeating: "c", count: 62))
+        XCTAssertNil(packs["ncds_11.pack"]?.sha256, "an all-zero placeholder checksum is ignored")
+        XCTAssertEqual(BundledRoutingPacks.manifestPacks(in: directory.appendingPathComponent("none")), [:])
+    }
+
+    func testSizeAndChecksumAreCheckedBeforeTheHeader() throws {
+        let file = directory.appendingPathComponent("ncds_10.pack")
+        try Data("not a pack".utf8).write(to: file)
+        XCTAssertThrowsError(try BundledRoutingPacks.quickCheck(file, expected: .init(byteSize: 99, sha256: nil))) { error in
+            XCTAssertEqual((error as? RoutingPackRejection)?.reason, "size 10 bytes, the manifest says 99")
+        }
+        XCTAssertThrowsError(try BundledRoutingPacks.quickCheck(file, expected: .init(byteSize: 10, sha256: String(repeating: "1", count: 64)))) { error in
+            XCTAssertEqual((error as? RoutingPackRejection)?.reason, "checksum does not match the manifest")
+        }
+        // Right size and checksum, but not a routing pack: the header check refuses it.
+        let sha: String = StreamingSHA256.hash(Data("not a pack".utf8))
+        XCTAssertThrowsError(try BundledRoutingPacks.quickCheck(file, expected: .init(byteSize: 10, sha256: sha)))
+    }
+
+    func testARealPackPassesWithoutBeingDecoded() throws {
+        // testdata/routing/synthetic.pack from the repository (read only).
+        let pack = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("testdata/routing/synthetic.pack")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pack.path), "testdata/routing/synthetic.pack at \(pack.path)")
+        let sha: String = try StreamingSHA256.hash(fileAt: pack)
+        try BundledRoutingPacks.quickCheck(pack, expected: .init(byteSize: RoutingPackLibrary.fileSize(pack), sha256: sha))
+        try BundledRoutingPacks.quickCheck(pack, expected: nil)
+    }
+}

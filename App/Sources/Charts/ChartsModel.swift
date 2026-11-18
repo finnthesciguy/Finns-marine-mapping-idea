@@ -24,6 +24,8 @@ final class ChartsModel {
 
     /// Online NOAA charts (shown in the Charts screen; toggled through `onLiveChartsToggle`).
     var liveCharts: Bool = false
+    /// The routing packs shipped in the app are still being checked and linked.
+    var bundledPacksPreparing: Bool = false
     var liveStatus: LiveChartStatus = LiveChartStatus()
     var liveCacheBytes: Int64 = 0
     @ObservationIgnored var onLiveChartsToggle: (@MainActor (Bool) -> Void)?
