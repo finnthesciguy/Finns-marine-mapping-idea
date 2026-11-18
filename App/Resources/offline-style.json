@@ -1,0 +1,17 @@
+{
+  "version": 8,
+  "name": "Gulf Nav offline base",
+  "metadata": {
+    "comment": "No network sources. Chart regions are added at run time as raster sources over this background."
+  },
+  "sources": {},
+  "layers": [
+    {
+      "id": "water-background",
+      "type": "background",
+      "paint": {
+        "background-color": "#b7d3e6"
+      }
+    }
+  ]
+}

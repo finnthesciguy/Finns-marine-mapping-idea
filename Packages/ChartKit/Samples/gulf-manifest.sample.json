@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-12T06:00:00Z",
+  "publisher": "Gulf chart build service (sample)",
+  "regions": [
+    {
+      "id": "ncds_10",
+      "title": "Region 10: Southwest Florida and the Keys",
+      "summary": "Tampa Bay, Sarasota, Charlotte Harbor, Fort Myers and the Caloosahatchee, Naples, the Everglades coast, Florida Bay, and the Keys from Islamorada to Key West and the Dry Tortugas.",
+      "bounds": {
+        "west": -89.07,
+        "south": 17.6,
+        "east": -80.6,
+        "north": 28.1
+      },
+      "minZoom": 0,
+      "maxZoom": 16,
+      "tileFormat": "png",
+      "package": {
+        "url": "https://distribution.charts.noaa.gov/ncds/mbtiles/ncds_10.mbtiles",
+        "byteSize": 621428736,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "2024-05-28",
+        "dataDate": "2024-05-28"
+      },
+      "source": "NOAA NCDS baseline 2024-05-28"
+    },
+    {
+      "id": "ncds_11",
+      "title": "Region 11: Florida Big Bend to Mississippi Sound",
+      "summary": "The Gulf coast from Tarpon Springs and the Big Bend to Apalachicola, Panama City, Destin, Pensacola, Mobile Bay and Mississippi Sound to Biloxi.",
+      "bounds": {
+        "west": -89.07,
+        "south": 28.1,
+        "east": -82.2,
+        "north": 33.93
+      },
+      "minZoom": 0,
+      "maxZoom": 16,
+      "tileFormat": "png",
+      "package": {
+        "url": "https://distribution.charts.noaa.gov/ncds/mbtiles/ncds_11.mbtiles",
+        "byteSize": 589307904,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "2024-05-28",
+        "dataDate": "2024-05-28"
+      },
+      "source": "NOAA NCDS baseline 2024-05-28"
+    },
+    {
+      "id": "ncds_12",
+      "title": "Region 12: New Orleans, Lake Pontchartrain and Mississippi Sound",
+      "summary": "The Mississippi River from Baton Rouge past New Orleans, Lake Pontchartrain and Lake Borgne, western Mississippi Sound (Gulfport), Morgan City and the Intracoastal Waterway across Louisiana.",
+      "bounds": {
+        "west": -92.46,
+        "south": 29.33,
+        "east": -89.07,
+        "north": 33.93
+      },
+      "minZoom": 0,
+      "maxZoom": 16,
+      "tileFormat": "png",
+      "package": {
+        "url": "https://distribution.charts.noaa.gov/ncds/mbtiles/ncds_12.mbtiles",
+        "byteSize": 439631872,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "2024-05-28",
+        "dataDate": "2024-05-28"
+      },
+      "source": "NOAA NCDS baseline 2024-05-28"
+    },
+    {
+      "id": "ncds_13",
+      "title": "Region 13: The Mississippi Delta and Louisiana bayous",
+      "summary": "Louisiana's coast south of 29.33 N: the Mississippi River below Venice and its passes, Barataria Bay and Grand Isle, Terrebonne and Timbalier Bays, and Atchafalaya Bay.",
+      "bounds": {
+        "west": -92.457141,
+        "south": 17.6,
+        "east": -89.069253,
+        "north": 29.333333
+      },
+      "minZoom": 0,
+      "maxZoom": 16,
+      "tileFormat": "png",
+      "package": {
+        "url": "https://distribution.charts.noaa.gov/ncds/mbtiles/ncds_13.mbtiles",
+        "byteSize": 380833792,
+        "sha256": "6d9b0701e3acd6a8e38855d3388138c0407e4778b4da460b6777705423b80439",
+        "version": "2024-05-28",
+        "dataDate": "2024-05-28"
+      },
+      "source": "NOAA NCDS baseline 2024-05-28"
+    },
+    {
+      "id": "ncds_14",
+      "title": "Region 14: Texas and western Louisiana",
+      "summary": "Lake Charles and the Calcasieu, Sabine Pass, Galveston Bay and the Houston Ship Channel, Freeport, Matagorda Bay, Corpus Christi, and the Laguna Madre to Brownsville.",
+      "bounds": {
+        "west": -98.29,
+        "south": 17.6,
+        "east": -92.46,
+        "north": 33.93
+      },
+      "minZoom": 0,
+      "maxZoom": 16,
+      "tileFormat": "png",
+      "package": {
+        "url": "https://distribution.charts.noaa.gov/ncds/mbtiles/ncds_14.mbtiles",
+        "byteSize": 635699200,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "2024-05-28",
+        "dataDate": "2024-05-28"
+      },
+      "source": "NOAA NCDS baseline 2024-05-28"
+    }
+  ]
+}

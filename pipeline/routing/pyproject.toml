@@ -1,0 +1,27 @@
+[project]
+name = "enc-routing"
+version = "0.3.0"
+description = "NOAA ENC (S-57) + USACE NCF to routing packs (navigation mesh), and the reference router"
+requires-python = ">=3.11"
+dependencies = [
+  "gulf-enc-catalog",  # pipeline/catalog: catalog parsing, Gulf cell selection, snapshots, polite downloads
+  "shapely>=2.1",     # GEOS >= 3.12: constrained_delaunay_triangles, OverlayNG snap-rounding
+  "geopandas>=1.0",
+  "pyogrio>=0.9",     # bundles GDAL with the S57 driver
+  "pyproj>=3.6",
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scipy>=1.11",      # Delaunay of soundings (refinement rule C.4), open-Gulf mask morphology
+  "rasterio>=1.3",    # open-Gulf mask raster (rasterize / vectorise)
+  "matplotlib>=3.8",
+  "pillow>=10",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+enc-routing = "enc_routing.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

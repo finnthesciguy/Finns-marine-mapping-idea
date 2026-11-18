@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<gpx
+ version="1.0"
+ creator="GPSBabel - http://www.gpsbabel.org"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xmlns="http://www.topografix.com/GPX/1/0"
+ xsi:schemaLocation="http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd">
+<name>Galveston Bay trip</name>
+<desc>Downloaded from handheld</desc>
+<author>J. Skipper</author>
+<time>2023-10-01T13:45:00-05:00</time>
+<bounds minlat="29.300000000" minlon="-94.800000000" maxlat="29.350000000" maxlon="-94.700000000"/>
+<wpt lat="29.330500000" lon="-94.765833333">
+  <ele>0.000000</ele>
+  <time>2023-10-01T13:45:00-05:00</time>
+  <name>BOLIVR</name>
+  <cmt>Bolivar Roads</cmt>
+  <desc>Bolivar Roads anchorage</desc>
+  <sym>Anchor</sym>
+  <fix>3d</fix>
+  <sat>7</sat>
+  <hdop>1.2</hdop>
+</wpt>
+<trk>
+  <name>ACTIVE LOG</name>
+  <number>1</number>
+<trkseg>
+<trkpt lat="29.310000000" lon="-94.780000000">
+  <ele>2.0</ele>
+  <time>2023-10-01T19:00:00Z</time>
+  <course>45.0</course>
+  <speed>2.5</speed>
+</trkpt>
+<trkpt lat="29.310300000" lon="-94.779650000">
+  <ele>2.0</ele>
+  <time>2023-10-01T19:00:20Z</time>
+  <course>44.2</course>
+  <speed>2.6</speed>
+</trkpt>
+</trkseg>
+</trk>
+</gpx>

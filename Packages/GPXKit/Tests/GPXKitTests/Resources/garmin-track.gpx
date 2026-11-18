@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2" creator="GPSMAP 86sci" version="1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v2 http://www8.garmin.com/xmlschemas/TrackPointExtensionv2.xsd">
+  <metadata>
+    <link href="http://www.garmin.com">
+      <text>Garmin International</text>
+    </link>
+    <time>2024-05-18T12:00:00Z</time>
+    <bounds maxlat="30.4100000" maxlon="-87.2000000" minlat="30.3900000" minlon="-87.2300000"/>
+  </metadata>
+  <trk>
+    <name>Pensacola Pass 18-MAY-24</name>
+    <desc><![CDATA[Outbound <fast> run & return]]></desc>
+    <extensions>
+      <gpxx:TrackExtension>
+        <gpxx:DisplayColor>Cyan</gpxx:DisplayColor>
+      </gpxx:TrackExtension>
+    </extensions>
+    <trkseg>
+      <trkpt lat="30.4085340" lon="-87.2121880">
+        <ele>1.24</ele>
+        <time>2024-05-18T12:00:01.000Z</time>
+        <extensions>
+          <gpxtpx:TrackPointExtension>
+            <gpxtpx:speed>3.09</gpxtpx:speed>
+            <gpxtpx:course>201.5</gpxtpx:course>
+          </gpxtpx:TrackPointExtension>
+        </extensions>
+      </trkpt>
+      <trkpt lat="30.4082760" lon="-87.2123300">
+        <ele>1.18</ele>
+        <time>2024-05-18T12:00:11.500Z</time>
+      </trkpt>
+      <trkpt lat="30.4080170" lon="-87.2124720">
+        <ele>0.97</ele>
+        <time>2024-05-18T12:00:21.250Z</time>
+      </trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="30.3950000" lon="-87.2290000">
+        <ele>-0.5</ele>
+        <time>2024-05-18T12:30:00Z</time>
+      </trkpt>
+      <trkpt lat="30.3948000" lon="-87.2292500">
+        <time>not-a-time</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

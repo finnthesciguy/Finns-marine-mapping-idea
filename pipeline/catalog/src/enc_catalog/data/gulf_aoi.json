@@ -1,0 +1,29 @@
+{
+  "name": "US Gulf Coast, Brownsville TX to the Florida Keys and Dry Tortugas",
+  "note": "Approximate hand-drawn polygon (lon, lat, WGS84). The eastern edge follows the Florida peninsula inland of the Gulf shore and west of the Atlantic shore, then cuts south of Biscayne Bay so the Keys and their reef tract are in and Miami/the Atlantic coast is out. The northern edge reaches Baton Rouge on the lower Mississippi, the top of Mobile Bay and the GIWW. Small-scale (band 1-2) cells intersect it from far away; that is intended.",
+  "polygon": [
+    [-98.00, 24.00],
+    [-98.00, 30.20],
+    [-94.50, 30.40],
+    [-92.00, 30.60],
+    [-91.30, 30.80],
+    [-90.00, 30.70],
+    [-88.40, 31.10],
+    [-86.50, 31.00],
+    [-84.50, 30.60],
+    [-83.20, 30.40],
+    [-82.40, 29.80],
+    [-81.60, 28.40],
+    [-81.20, 27.10],
+    [-80.70, 26.95],
+    [-80.95, 26.00],
+    [-80.55, 25.35],
+    [-80.00, 25.20],
+    [-80.00, 24.30],
+    [-81.50, 24.00],
+    [-83.60, 24.00],
+    [-83.60, 23.50],
+    [-98.00, 23.50],
+    [-98.00, 24.00]
+  ]
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Mac build only (GulfNavMac target, CODE_SIGN_ENTITLEMENTS). Required for the Mac App Store; also used for
+	     a Developer ID (notarised) build. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Chart downloads (NOAA, our chart host). -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- GPX import (open panel, drag and drop, Finder "Open With") and export (save panel); the debug routing
+	     pack side-load (open panel). -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Core Location (Wi-Fi positioning on a Mac). -->
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,39 @@
+{
+  "_note": "Chart package regions. ncds_10..14 keep NOAA's package ids and boxes (from each ncds_<n>.mbtiles 'bounds'), so our packages replace NOAA's May 2024 files in the app as an ordinary update. Exception: ncds_10's east edge is moved from -80.6 to -80.05 so the upper Keys (Key Largo, Card Sound), which fall outside all five NOAA boxes, have an owner. 'zoom_boxes' optionally narrow the box from a zoom upwards (used by the small demonstration regions). Which tiles are rendered inside a box is decided by ENC coverage and scale (policy.py), not by the box alone.",
+  "regions": {
+    "ncds_10": {
+      "title": "Region 10: Southwest Florida and the Keys",
+      "summary": "Tampa Bay, Sarasota, Charlotte Harbor, Fort Myers and the Caloosahatchee, Naples, the Everglades coast, Florida Bay, and the Keys from Key Largo to Key West and the Dry Tortugas.",
+      "bbox": [-89.069253, 17.6, -80.05, 28.1]
+    },
+    "ncds_11": {
+      "title": "Region 11: Florida Big Bend to Mississippi Sound",
+      "summary": "The Gulf coast from Tarpon Springs and the Big Bend to Apalachicola, Panama City, Destin, Pensacola, Mobile Bay and Mississippi Sound to Biloxi.",
+      "bbox": [-89.069253, 28.1, -82.202316, 33.930626]
+    },
+    "ncds_12": {
+      "title": "Region 12: New Orleans, Lake Pontchartrain and Mississippi Sound",
+      "summary": "The Mississippi River from Baton Rouge past New Orleans, Lake Pontchartrain and Lake Borgne, western Mississippi Sound (Gulfport), Morgan City and the Intracoastal Waterway across Louisiana.",
+      "bbox": [-92.457141, 29.333333, -89.069253, 33.930626]
+    },
+    "ncds_13": {
+      "title": "Region 13: The Mississippi Delta and Louisiana bayous",
+      "summary": "Louisiana's coast south of 29.33 N: the Mississippi River below Venice and its passes, Barataria Bay and Grand Isle, Terrebonne and Timbalier Bays, and Atchafalaya Bay.",
+      "bbox": [-92.457141, 17.6, -89.069253, 29.333333]
+    },
+    "ncds_14": {
+      "title": "Region 14: Texas and western Louisiana",
+      "summary": "Lake Charles and the Calcasieu, Sabine Pass, Galveston Bay and the Houston Ship Channel, Freeport, Matagorda Bay, Corpus Christi, and the Laguna Madre to Brownsville.",
+      "bbox": [-98.291526, 17.6, -92.457141, 33.930626]
+    },
+    "demo_swpass": {
+      "title": "Demo: Mississippi River passes",
+      "summary": "Demonstration package: Southwest Pass to Head of Passes at full detail, the Birdfoot delta at mid zooms, the Louisiana coast at low zooms.",
+      "bbox": [-90.6, 28.6, -88.8, 29.6],
+      "zoom_boxes": [
+        {"min_zoom": 13, "bbox": [-89.75, 28.8, -88.95, 29.33]},
+        {"min_zoom": 15, "bbox": [-89.5, 28.85, -89.15, 29.18]}
+      ]
+    }
+  }
+}

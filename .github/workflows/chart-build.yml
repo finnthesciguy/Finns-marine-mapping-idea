@@ -1,0 +1,150 @@
+# Chart build: render NOAA chart tiles into MBTiles region packages and publish them
+# with manifest.json as a GitHub release. See docs/chart-build.md.
+#
+# Manual only for now. Enable the weekly schedule after NOAA has been contacted
+# (docs/chart-build.md, "Courtesy message"). Saturday 09:17 UTC is after NOAA's
+# Friday-afternoon ENC reload and outside US business hours.
+name: chart-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: Region package
+        type: choice
+        default: demo_swpass
+        options: [demo_swpass, ncds_10, ncds_11, ncds_12, ncds_13, ncds_14]
+      mode:
+        description: plan = dry run, no requests to NOAA
+        type: choice
+        default: plan
+        options: [plan, baseline, update]
+      budget:
+        description: Max requests to NOAA in this run
+        type: number
+        default: 2500
+      scale:
+        description: 1 = 256 px tiles, 2 = 512 px retina tiles
+        type: choice
+        default: "1"
+        options: ["1", "2"]
+      allow_over_budget:
+        description: Start even if the run needs more than the budget (stops at the budget; rerun to resume)
+        type: boolean
+        default: false
+      publish:
+        description: Publish the result as a GitHub release
+        type: boolean
+        default: false
+  # schedule:
+  #   - cron: "17 9 * * 6"
+
+permissions:
+  contents: write   # create releases and upload assets with the built-in GITHUB_TOKEN
+
+concurrency:
+  group: chart-build   # one build at a time: they share the state release and NOAA's goodwill
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROOT: ${{ github.workspace }}/chart-root
+      REGION: ${{ inputs.region || 'demo_swpass' }}
+      MODE: ${{ inputs.mode || 'update' }}
+      BUDGET: ${{ inputs.budget || 2500 }}
+      SCALE: ${{ inputs.scale || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install ./pipeline/catalog ./pipeline/charts
+
+      - name: Restore state from the latest release
+        run: |
+          mkdir -p "$ROOT"
+          if gh release download --pattern chart-build-state.tar.gz --dir "$ROOT"; then
+            tar -xzf "$ROOT/chart-build-state.tar.gz" -C "$ROOT"
+            gh release download --pattern manifest.json --dir "$ROOT" || true
+          else
+            echo "No previous release state: only a baseline is possible."
+          fi
+
+      - name: Restore unfinished run (resume)
+        uses: actions/cache/restore@v4
+        with:
+          path: chart-root/work
+          key: chart-work-${{ env.REGION }}-${{ env.SCALE }}-${{ github.run_id }}
+          restore-keys: chart-work-${{ env.REGION }}-${{ env.SCALE }}-
+
+      - name: Download the previous package (update)
+        if: env.MODE == 'update'
+        run: |
+          python - <<'EOF'
+          import json, os, pathlib, urllib.request
+          root = pathlib.Path(os.environ["ROOT"])
+          pkg = os.environ["REGION"] + ("" if os.environ["SCALE"] == "1" else "_2x")
+          vs = json.loads((root / "state" / pkg / "versions.json").read_text())["versions"]
+          rec = vs[-1]
+          dest = root / "packages" / pkg / rec["file"]
+          dest.parent.mkdir(parents=True, exist_ok=True)
+          urllib.request.urlretrieve(rec["published_url"], dest)
+          print(dest, dest.stat().st_size)
+          EOF
+
+      - name: Catalog snapshot
+        run: |
+          enc-catalog fetch --out "$ROOT/ENCProdCat.xml"
+          enc-catalog snapshot --catalog "$ROOT/ENCProdCat.xml" --out "$ROOT/snapshot-new.json"
+
+      - name: Plan
+        run: |
+          PLAN_MODE=$([ "$MODE" = update ] && echo update || echo baseline)
+          chart-build plan --root "$ROOT" --region "$REGION" --scale "$SCALE" --mode "$PLAN_MODE" \
+            --snapshot "$ROOT/snapshot-new.json" --budget "$BUDGET" | tee plan.json
+
+      - name: Render
+        if: env.MODE != 'plan'
+        run: |
+          mkdir -p "$ROOT/work"
+          CMD=$([ "$MODE" = update ] && echo update || echo build)
+          OVER=$([ "${{ inputs.allow_over_budget }}" = true ] && echo --allow-over-budget || true)
+          chart-build "$CMD" --root "$ROOT" --region "$REGION" --scale "$SCALE" \
+            --snapshot "$ROOT/snapshot-new.json" --budget "$BUDGET" $OVER | tee result.json
+
+      - name: Save unfinished run
+        if: always() && env.MODE != 'plan'
+        uses: actions/cache/save@v4
+        with:
+          path: chart-root/work
+          key: chart-work-${{ env.REGION }}-${{ env.SCALE }}-${{ github.run_id }}
+
+      - name: Verify
+        if: env.MODE != 'plan'
+        run: chart-build verify --root "$ROOT" --region "$REGION" --scale "$SCALE" --deep | tee verify.json
+
+      - name: Publish release
+        if: env.MODE != 'plan' && inputs.publish
+        run: |
+          PKG="$REGION$([ "$SCALE" = 2 ] && echo @2x || true)"
+          BASE=$([ -f "$ROOT/manifest.json" ] && echo "--base-manifest $ROOT/manifest.json" || true)
+          chart-build publish --root "$ROOT" "$PKG" --target github --repo "$GITHUB_REPOSITORY" \
+            --tag "charts-$(date -u +%Y%m%d)-${{ github.run_number }}" --include-state $BASE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chart-build-logs
+          path: |
+            plan.json
+            result.json
+            verify.json
+            chart-root/logs/
+          if-no-files-found: ignore

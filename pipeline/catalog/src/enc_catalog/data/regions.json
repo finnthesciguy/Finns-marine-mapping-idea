@@ -1,0 +1,10 @@
+{
+  "note": "Bounding boxes [west, south, east, north] read from the 'bounds' metadata row of each NOAA ncds_<n>.mbtiles file (28 May 2024 build) via a 64 KB range request on 2026-11-12. The boxes are NOAA's tile-package extents, not tidy coastal regions: ncds_10's east edge is -80.6, so the upper Keys (Key Largo) fall outside every Gulf box.",
+  "regions": {
+    "ncds_10": {"label": "Tampa Bay to the Keys and Dry Tortugas", "bbox": [-89.069253, 17.6, -80.6, 28.1]},
+    "ncds_11": {"label": "Tarpon Springs to Biloxi", "bbox": [-89.069253, 28.1, -82.202316, 33.930626]},
+    "ncds_12": {"label": "Mississippi River, Lake Pontchartrain, Louisiana waterways", "bbox": [-92.457141, 29.333333, -89.069253, 33.930626]},
+    "ncds_13": {"label": "Louisiana coast south of 29.33N", "bbox": [-92.457141, 17.6, -89.069253, 29.333333]},
+    "ncds_14": {"label": "Sabine to Brownsville", "bbox": [-98.291526, 17.6, -92.457141, 33.930626]}
+  }
+}
